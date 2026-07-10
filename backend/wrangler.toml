@@ -1,0 +1,75 @@
+# pigeon-api — PigeonSMS backend worker
+# Deploy: npx wrangler deploy
+name = "pigeon-api"
+main = "src/index.ts"
+account_id = "YOUR_CLOUDFLARE_ACCOUNT_ID"
+compatibility_date = "2026-07-01"
+workers_dev = true
+
+# Exact-host route beats imperial-embed-worker's *.aldi.best/* wildcard by
+# specificity (imperial keeps every other hostname — owner's rule respected).
+# The custom-domain binding stays for DNS record + TLS cert issuance.
+routes = [
+  { pattern = "api.pigeonsms.aldi.best", custom_domain = true },
+  { pattern = "api.pigeonsms.aldi.best/*", zone_name = "aldi.best" }
+]
+
+[observability]
+enabled = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "pigeon-db"
+database_id = "574b9029-e1f7-414e-90b8-3ff895c74c5d"
+migrations_dir = "migrations"
+
+[[r2_buckets]]
+binding = "MEDIA"
+bucket_name = "pigeon-media"
+
+[[queues.producers]]
+binding = "PUSH_QUEUE"
+queue = "pigeon-push"
+
+[[queues.consumers]]
+queue = "pigeon-push"
+max_batch_size = 20
+max_batch_timeout = 5
+
+[[durable_objects.bindings]]
+name = "USER_GATEWAY"
+class_name = "UserGateway"
+
+[[durable_objects.bindings]]
+name = "SPACE"
+class_name = "Space"
+
+[[durable_objects.bindings]]
+name = "DM_CHANNEL"
+class_name = "DmChannel"
+
+[[durable_objects.bindings]]
+name = "CALL_ROOM"
+class_name = "CallRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["UserGateway", "Space", "DmChannel"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["CallRoom"]
+
+# Per-IP limiter for auth endpoints (login/signup brute force)
+[[unsafe.bindings]]
+name = "RL_AUTH"
+type = "ratelimit"
+namespace_id = "3001"
+simple = { limit = 15, period = 60 }
+
+# General per-key limiter for authenticated API traffic
+[[unsafe.bindings]]
+name = "RL_GENERAL"
+type = "ratelimit"
+namespace_id = "3002"
+simple = { limit = 300, period = 60 }
