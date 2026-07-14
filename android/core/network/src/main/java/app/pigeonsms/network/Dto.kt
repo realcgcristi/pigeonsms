@@ -1,0 +1,333 @@
+package app.pigeonsms.network
+
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
+
+@Serializable
+data class ApiUser(
+    val id: String,
+    val username: String,
+    val email: String = "",
+    val display_name: String? = null,
+    val avatar_key: String? = null,
+    val accent: String? = null,
+    val is_admin: Boolean = false,
+)
+
+@Serializable
+data class AuthResponse(val token: String, val user: ApiUser)
+
+@Serializable
+data class MeResponse(val user: ApiUser)
+
+@Serializable
+data class SessionDto(
+    val id: String,
+    val device_name: String? = null,
+    val user_agent: String? = null,
+    val ip: String? = null,
+    val created_at: Long,
+    val last_seen: Long,
+    val current: Boolean = false,
+)
+
+@Serializable data class SessionsResponse(val sessions: List<SessionDto>)
+
+@Serializable
+data class HistoryEntry(
+    val ip: String? = null,
+    val user_agent: String? = null,
+    val device_name: String? = null,
+    val success: Int,
+    val created_at: Long,
+)
+
+@Serializable data class HistoryResponse(val history: List<HistoryEntry>)
+
+@Serializable
+data class BlockedUserDto(
+    val id: String,
+    val username: String,
+    val display_name: String? = null,
+    val avatar_key: String? = null,
+)
+
+@Serializable data class BlocksResponse(val blocks: List<BlockedUserDto>)
+@Serializable data class InviteCheckResponse(val valid: Boolean)
+@Serializable data class OkResponse(val ok: Boolean = true)
+
+@Serializable
+data class NotificationPreferenceDto(
+    val scope_type: String = "global",
+    val scope_id: String = "",
+    val mode: String = "all",
+    val sound: Boolean = true,
+    val vibration: Boolean = true,
+    val badge: Boolean = true,
+    val quiet_start: String? = null,
+    val quiet_end: String? = null,
+    val updated_at: Long? = null,
+)
+
+@Serializable
+data class NotificationPreferencesResponse(
+    val defaults: NotificationPreferenceDto = NotificationPreferenceDto(),
+    val preferences: List<NotificationPreferenceDto> = emptyList(),
+)
+
+@Serializable
+data class ReactionDto(val emoji: String, val count: Int, val me: Boolean)
+
+@Serializable
+data class ReactionMutationResponse(
+    val ok: Boolean,
+    val changed: Boolean,
+    val reaction: ReactionDto,
+)
+
+@Serializable
+data class RevisionDto(val content: String, val edited_at: Long)
+
+@Serializable
+data class AttachmentDto(val key: String, val name: String? = null, val type: String? = null, val size: Long? = null)
+
+@Serializable
+data class PollOptionDto(
+    val id: String,
+    val position: Int = 0,
+    val text: String,
+    val votes: Int = 0,
+    val me: Boolean = false,
+)
+
+@Serializable
+data class PollDto(
+    val question: String,
+    val anonymous: Boolean = false,
+    val multiple_choice: Boolean = false,
+    val total_votes: Int = 0,
+    val options: List<PollOptionDto> = emptyList(),
+)
+
+@Serializable
+data class PollVoteResponse(val ok: Boolean = true, val changed: Boolean = false, val poll: PollDto? = null)
+
+@Serializable
+data class EventMetadataDto(
+    val title: String,
+    val starts_at: Long,
+    val ends_at: Long? = null,
+    val location: String? = null,
+    val description: String? = null,
+)
+
+@Serializable data class PollOptionCountDto(val id: String, val votes: Int)
+
+@Serializable
+data class PollUpdateEventDto(
+    val message_id: String,
+    val channel_id: String,
+    val options: List<PollOptionCountDto> = emptyList(),
+)
+
+@Serializable
+data class MessageDto(
+    val id: String,
+    val channel_id: String,
+    val seq: Long,
+    val author: ApiUser,
+    val content: String,
+    val reply_to: String? = null,
+    val nonce: String? = null,
+    val attachment: AttachmentDto? = null,
+    val created_at: Long,
+    val edited_at: Long? = null,
+    val deleted: Boolean = false,
+    val reactions: List<ReactionDto> = emptyList(),
+    val revisions: List<RevisionDto>? = null,
+    val kind: String? = null,
+    val metadata: JsonElement? = null,
+    val poll: PollDto? = null,
+    val thread_id: String? = null,
+)
+
+@Serializable
+data class MessagesCursorDto(
+    val first_seq: Long? = null,
+    val last_seq: Long? = null,
+    val channel_last_seq: Long = 0,
+    val has_more_after: Boolean = false,
+)
+
+@Serializable data class MessagesResponse(val messages: List<MessageDto>, val read: Map<String, Long>? = null, val cursor: MessagesCursorDto? = null)
+@Serializable data class MessageResponse(val message: MessageDto)
+@Serializable data class SuperPinDto(val message: MessageDto, val pinned_by: String, val created_at: Long = 0, val dismissed: Boolean = false)
+@Serializable data class SuperPinResponse(val super_pin: SuperPinDto? = null)
+
+@Serializable data class PinEventDto(val channel_id: String, val message_id: String, val pinned_by: String? = null)
+
+@Serializable data class SuperPinSetEventDto(val channel_id: String, val message: MessageDto, val replaced_message_id: String? = null)
+
+@Serializable data class SuperPinRemoveEventDto(val channel_id: String, val message_id: String? = null)
+
+@Serializable
+data class LastMessageDto(val content: String, val created_at: Long, val deleted: Boolean = false)
+
+@Serializable
+data class PeerDto(
+    val id: String,
+    val username: String,
+    val display_name: String? = null,
+    val avatar_key: String? = null,
+    val accent: String? = null,
+    val status_text: String? = null,
+    val last_online: Long? = null,
+)
+
+@Serializable
+data class DmDto(
+    val channel_id: String,
+    val last_seq: Long,
+    val unread: Int,
+    val peer: PeerDto,
+    val last_message: LastMessageDto? = null,
+)
+
+@Serializable data class DmsResponse(val dms: List<DmDto>)
+@Serializable data class OpenDmResponse(val channel_id: String)
+
+@Serializable
+data class FriendDto(
+    val id: String,
+    val username: String,
+    val display_name: String? = null,
+    val avatar_key: String? = null,
+    val accent: String? = null,
+    val status_text: String? = null,
+    val last_online: Long? = null,
+    val note: String? = null,
+    val close_friend: Int = 0,
+)
+
+@Serializable
+data class FriendsResponse(
+    val friends: List<FriendDto> = emptyList(),
+    val incoming: List<FriendDto> = emptyList(),
+    val outgoing: List<FriendDto> = emptyList(),
+)
+
+@Serializable data class UsersSearchResponse(val users: List<ApiUser> = emptyList())
+
+@Serializable
+data class ChannelDto(
+    val id: String,
+    val name: String? = null,
+    val topic: String? = null,
+    val last_seq: Long = 0,
+    val unread: Int = 0,
+    val kind: String = "text",
+)
+
+@Serializable
+data class SpaceDto(
+    val id: String,
+    val name: String,
+    val owner_id: String,
+    val icon_key: String? = null,
+    val icon_original_key: String? = null,
+    val icon_square_key: String? = null,
+    val description: String? = null,
+    val role: String = "member",
+    val member_count: Int = 0,
+    val channels: List<ChannelDto> = emptyList(),
+)
+
+@Serializable data class SpacesResponse(val spaces: List<SpaceDto> = emptyList())
+@Serializable data class CreateSpaceResponse(val space: SpaceDto)
+@Serializable data class SpaceResponse(val space: SpaceDto)
+@Serializable data class CreateChannelResponse(val channel: ChannelDto)
+@Serializable data class SpaceInviteResponse(val code: String, val expires_at: Long? = null)
+@Serializable data class JoinSpaceResponse(val space_id: String)
+
+@Serializable
+data class SpaceMemberDto(
+    val id: String,
+    val username: String,
+    val display_name: String? = null,
+    val avatar_key: String? = null,
+    val accent: String? = null,
+    val last_online: Long? = null,
+    val role: String,
+)
+@Serializable data class MembersResponse(val members: List<SpaceMemberDto> = emptyList())
+
+@Serializable
+data class ProfileDto(
+    val id: String,
+    val username: String,
+    val display_name: String? = null,
+    val about: String? = null,
+    val accent: String? = null,
+    val avatar_key: String? = null,
+    val banner_key: String? = null,
+    val banner_color: String? = null,
+    val pronouns: String? = null,
+    val status_text: String? = null,
+    val badges: List<String> = emptyList(),
+    val last_online: Long? = null,
+    val created_at: Long = 0,
+)
+@Serializable
+data class MutualSpaceDto(
+    val id: String,
+    val name: String,
+    val description: String? = null,
+    val icon_key: String? = null,
+    val icon_square_key: String? = null,
+    val member_count: Int = 0,
+)
+@Serializable data class ProfileResponse(val profile: ProfileDto, val mutual_spaces: List<MutualSpaceDto> = emptyList())
+
+@Serializable
+data class ForumPostDto(
+    val id: String,
+    val channel_id: String,
+    val seq: Long,
+    val author: ApiUser,
+    val content: String,
+    val attachment: AttachmentDto? = null,
+    val created_at: Long,
+    val edited_at: Long? = null,
+    val deleted: Boolean = false,
+    val kind: String? = null,
+    val metadata: JsonElement? = null,
+    val reactions: List<ReactionDto> = emptyList(),
+    val reply_count: Int = 0,
+    val last_activity_at: Long = 0,
+)
+
+@Serializable data class ForumPostsResponse(val posts: List<ForumPostDto> = emptyList())
+@Serializable data class ForumCursorDto(val last_seq: Long? = null)
+
+@Serializable
+data class ForumThreadResponse(
+    val post: MessageDto,
+    val replies: List<MessageDto> = emptyList(),
+    val cursor: ForumCursorDto? = null,
+)
+
+@Serializable data class UploadResponse(val attachment: AttachmentDto)
+@Serializable data class AvatarResponse(val avatar_key: String)
+@Serializable data class BannerResponse(val key: String)
+
+@Serializable data class TotpSetupResponse(val secret: String, val otpauth: String)
+@Serializable data class RecoveryResponse(val recovery_codes: List<String>)
+
+@Serializable
+data class ReleaseDto(val version_code: Int, val version_name: String, val url: String, val notes: String? = null)
+@Serializable data class LatestReleaseResponse(val release: ReleaseDto? = null)
+
+@Serializable data class GatewayEvent(val t: String, val d: JsonElement)
+
+@Serializable internal data class ErrorEnvelope(val error: ErrorDetail)
+@Serializable internal data class ErrorDetail(val code: String, val message: String)
