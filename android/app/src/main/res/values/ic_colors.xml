@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ic_bg_icon">#17161B</color>
+    <color name="ic_bg_white">#17161B</color>
+    <color name="ic_bg_blackoutline">#FFFFFF</color>
+    <color name="ic_bg_black">#FFFFFF</color>
+    <color name="ic_bg_cleanalt">#1B181F</color>
+    <color name="ic_bg_appicon">#1B181F</color>
+    <color name="ic_bg_appiconcopy">#000000</color>
+    <color name="ic_bg_alternative">#1B181F</color>
+    <color name="ic_bg_minwhite">#FFFFFF</color>
+    <color name="ic_bg_minblackalt">#000000</color>
+    <color name="ic_bg_clean">#1B181F</color>
+</resources>

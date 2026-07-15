@@ -1,0 +1,13 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- paper-plane pigeon glyph -->
+    <path
+        android:fillColor="#2A150C"
+        android:pathData="M26,56 L84,30 L60,80 L51,62 Z" />
+    <path
+        android:fillColor="#4A2818"
+        android:pathData="M51,62 L84,30 L56,58 Z" />
+</vector>
