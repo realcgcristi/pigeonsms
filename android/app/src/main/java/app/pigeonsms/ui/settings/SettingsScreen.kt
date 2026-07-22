@@ -1,6 +1,5 @@
 package app.pigeonsms.ui.settings
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -63,7 +62,6 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -307,7 +305,7 @@ internal fun SettingsSubHeader(title: String, onBack: () -> Unit) {
 }
 
 @Composable
-fun AppearanceScreen(onBack: () -> Unit) {
+fun AppearanceScreen(onBack: () -> Unit, onAppIcon: () -> Unit = {}) {
     val vm: SettingsViewModel = pigeonVm { c, _ -> SettingsViewModel(c.authRepository, c.themeStore) }
     val prefs by vm.prefs.collectAsState(initial = ThemePrefs())
     val context = LocalContext.current
@@ -392,20 +390,8 @@ fun AppearanceScreen(onBack: () -> Unit) {
         }
 
         Spacer(Modifier.height(Spacing.l))
-        Text("app icon", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = Spacing.s))
-        var currentIcon by remember { mutableStateOf(currentAppIcon(context)) }
-        Row(
-            Modifier.fillMaxWidth().clip(Corners.group).background(MaterialTheme.colorScheme.surfaceContainer).padding(Spacing.m).horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(Spacing.s),
-        ) {
-            AppIconVariants.forEach { v ->
-                val on = currentIcon == v.key
-                Box(
-                    Modifier.size(52.dp).clip(Corners.card).background(v.bg)
-                        .then(if (on) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, Corners.card) else Modifier)
-                        .clickable { setAppIcon(context, v.key); currentIcon = v.key },
-                ) { Image(painterResource(v.fg), null, Modifier.size(52.dp)) }
-            }
+        GroupCard {
+            MenuRow(Icons.Outlined.Image, "app icon", "change the launcher icon", onAppIcon)
         }
 
         Spacer(Modifier.height(Spacing.l))
@@ -466,41 +452,6 @@ private fun ToggleRow(label: String, checked: Boolean, onChange: (Boolean) -> Un
             )
         }
     }
-}
-
-private data class AppIconVariant(val key: String, val fg: Int, val bg: Color)
-private val AppIconVariants = listOf(
-    AppIconVariant("icon", app.pigeonsms.R.mipmap.ic_fg_icon, Color(0xFF17161B)),
-    AppIconVariant("white", app.pigeonsms.R.mipmap.ic_fg_white, Color(0xFF17161B)),
-    AppIconVariant("blackoutline", app.pigeonsms.R.mipmap.ic_fg_blackoutline, Color.White),
-    AppIconVariant("black", app.pigeonsms.R.mipmap.ic_fg_black, Color.White),
-    AppIconVariant("cleanalt", app.pigeonsms.R.mipmap.ic_fg_cleanalt, Color(0xFF1B181F)),
-    AppIconVariant("appicon", app.pigeonsms.R.mipmap.ic_fg_appicon, Color(0xFF1B181F)),
-    AppIconVariant("appiconcopy", app.pigeonsms.R.mipmap.ic_fg_appiconcopy, Color.Black),
-    AppIconVariant("alternative", app.pigeonsms.R.mipmap.ic_fg_alternative, Color(0xFF1B181F)),
-    AppIconVariant("minwhite", app.pigeonsms.R.mipmap.ic_fg_minwhite, Color.White),
-    AppIconVariant("minblackalt", app.pigeonsms.R.mipmap.ic_fg_minblackalt, Color.Black),
-    AppIconVariant("clean", app.pigeonsms.R.mipmap.ic_fg_clean, Color(0xFF1B181F)),
-)
-
-private fun setAppIcon(context: android.content.Context, key: String) {
-    val pm = context.packageManager
-    AppIconVariants.forEach { v ->
-        pm.setComponentEnabledSetting(
-            android.content.ComponentName(context, "app.pigeonsms.Icon_${v.key}"),
-            if (v.key == key) android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED
-            else android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
-            android.content.pm.PackageManager.DONT_KILL_APP,
-        )
-    }
-}
-
-private fun currentAppIcon(context: android.content.Context): String {
-    val pm = context.packageManager
-    return AppIconVariants.firstOrNull { v ->
-        pm.getComponentEnabledSetting(android.content.ComponentName(context, "app.pigeonsms.Icon_${v.key}")) ==
-            android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED
-    }?.key ?: "icon"
 }
 
 @Composable
