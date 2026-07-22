@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { ApiError } from '../middleware/errors';
-import { timingSafeEqualStrings } from '../lib/crypto';
+import { timingSafeEqualStrings, hashPassword } from '../lib/crypto';
 import type { AppEnv } from '../types';
 
 const admin = new Hono<AppEnv>();
@@ -56,6 +56,27 @@ admin.post('/invites', async (c) => {
   }
   await c.env.DB.batch(batch);
   return c.json({ invites }, 201);
+});
+
+admin.post('/users/:username/password', async (c) => {
+  const username = c.req.param('username');
+  const body = await c.req
+    .json<Record<string, unknown>>()
+    .catch(() => ({}) as Record<string, unknown>);
+  const password = String(body['password'] ?? '');
+  if (password.length < 6) throw new ApiError(400, 'weak_password', 'password must be at least 6 characters');
+  const user = await c.env.DB.prepare(
+    'SELECT id FROM users WHERE username = ? COLLATE NOCASE AND deleted_at IS NULL',
+  )
+    .bind(username)
+    .first<{ id: string }>();
+  if (!user) throw new ApiError(404, 'not_found', 'no such user');
+  const passwordHash = await hashPassword(password, c.env.PASSWORD_PEPPER);
+  await c.env.DB.batch([
+    c.env.DB.prepare('UPDATE users SET password_hash = ? WHERE id = ?').bind(passwordHash, user.id),
+    c.env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(user.id),
+  ]);
+  return c.json({ ok: true, username });
 });
 
 admin.get('/invites', async (c) => {
