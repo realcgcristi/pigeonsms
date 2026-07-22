@@ -60,6 +60,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
@@ -79,6 +80,7 @@ import app.pigeonsms.ui.friends.FriendsScreen
 import app.pigeonsms.ui.profile.EditProfileScreen
 import app.pigeonsms.ui.profile.ProfileScreen
 import app.pigeonsms.ui.profile.ProfileViewModel
+import app.pigeonsms.ui.settings.AppIconScreen
 import app.pigeonsms.ui.settings.AppearanceScreen
 import app.pigeonsms.ui.settings.BlockedScreen
 import app.pigeonsms.ui.settings.DevicesScreen
@@ -91,11 +93,11 @@ import app.pigeonsms.ui.forum.ForumScreen
 import app.pigeonsms.ui.spaces.SpacesScreen
 import app.pigeonsms.ui.util.Avatar
 
-private data class Tab(val route: String, val label: String, val icon: ImageVector)
+private data class Tab(val route: String, val label: String, val icon: ImageVector, val iconRes: Int? = null)
 private val tabs = listOf(
     Tab("messages", "messages", Icons.Rounded.Forum),
     Tab("friends", "friends", Icons.Rounded.Mood),
-    Tab("spaces", "bird nests", Icons.Rounded.Groups),
+    Tab("spaces", "bird nests", Icons.Rounded.Groups, iconRes = app.pigeonsms.R.drawable.ic_nest),
     Tab("you", "you", Icons.Rounded.Person),
 )
 
@@ -284,7 +286,10 @@ fun AppShell(session: LocalSession) {
             composable("history") { HistoryScreen(onBack = { nav.popBackStack() }) }
             composable("security") { SecurityScreen(onBack = { nav.popBackStack() }) }
             composable("blocked") { BlockedScreen(onBack = { nav.popBackStack() }) }
-            composable("appearance") { AppearanceScreen(onBack = { nav.popBackStack() }) }
+            composable("appearance") { AppearanceScreen(onBack = { nav.popBackStack() }, onAppIcon = { nav.navigate("appicon") }) }
+            composable("appicon") {
+                AppIconScreen(onBack = { nav.popBackStack() }, onOpenUser = { id -> nav.navigate("profile/$id") })
+            }
             composable("privacy") { PrivacyScreen(onBack = { nav.popBackStack() }, onBlocked = { nav.navigate("blocked") }) }
             composable("notifications") { NotificationSettingsScreen(onBack = { nav.popBackStack() }) }
         }
@@ -494,7 +499,11 @@ private fun NavPill(tab: Tab, selected: Boolean, profileName: String, profileAva
             )
         } else {
             Box {
-                Icon(tab.icon, tab.label, tint = tint, modifier = Modifier.size(24.dp))
+                if (tab.iconRes != null) {
+                    Icon(painterResource(tab.iconRes), tab.label, tint = tint, modifier = Modifier.size(24.dp))
+                } else {
+                    Icon(tab.icon, tab.label, tint = tint, modifier = Modifier.size(24.dp))
+                }
                 if (badgeCount > 0) {
                     Badge(modifier = Modifier.align(Alignment.TopEnd)) { Text(if (badgeCount > 99) "99+" else badgeCount.toString()) }
                 }
