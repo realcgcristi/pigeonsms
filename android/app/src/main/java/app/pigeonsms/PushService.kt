@@ -83,7 +83,7 @@ class PushService : FirebaseMessagingService() {
         val target = metadata.target()
         val open = PendingIntent.getActivity(this, notificationId, openIntent(target, metadata), pendingIntentFlags(mutable = false))
         val notif = NotificationCompat.Builder(this, NOTIF_CHANNEL_MESSAGES)
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.drawable.ic_stat_notify)
             .setContentTitle(
                 formatNotificationTitle(
                     spaceName = metadata.spaceName,
