@@ -1,37 +1,44 @@
 package app.pigeonsms.ui.chat
 
 import android.Manifest
-import android.annotation.SuppressLint
 import android.content.pm.PackageManager
 import android.os.Handler
 import android.os.Looper
-import android.webkit.JavascriptInterface
-import android.webkit.PermissionRequest
-import android.webkit.WebChromeClient
-import android.webkit.WebResourceRequest
-import android.webkit.WebResourceResponse
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -40,9 +47,13 @@ import app.pigeonsms.ui.call.CallAudioController
 import app.pigeonsms.ui.call.CallControlBar
 import app.pigeonsms.ui.call.CallStatus
 import app.pigeonsms.ui.call.CallTopOverlay
-import app.pigeonsms.ui.call.buildCallHtml
+import app.pigeonsms.ui.call.WebRtcCallClient
+import app.pigeonsms.ui.call.WebRtcEvent
 import kotlinx.coroutines.delay
-import org.json.JSONObject
+import org.webrtc.EglBase
+import org.webrtc.RendererCommon
+import org.webrtc.SurfaceViewRenderer
+import org.webrtc.VideoTrack
 
 fun callPermissionsGranted(video: Boolean, context: android.content.Context): Boolean {
     val audio = androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
@@ -50,10 +61,8 @@ fun callPermissionsGranted(video: Boolean, context: android.content.Context): Bo
     return audio && camera
 }
 
-private const val CALL_ORIGIN = "https://appassets.androidplatform.net"
-private const val CALL_PATH = "/call.html"
+private class RemoteTile(val peerId: String, val track: VideoTrack)
 
-@SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun CallScreenDialog(
     websocketUrl: String,
@@ -62,11 +71,21 @@ fun CallScreenDialog(
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
-    val html = remember(websocketUrl, video) { buildCallHtml(websocketUrl, video) }
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
 
+    val eglBase = remember { EglBase.create() }
+
     var status by remember { mutableStateOf(CallStatus.Connecting) }
+    var mediaReady by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    // lines visible for the user to screenshot (we debug calls blind).
+    val diagLog = remember { mutableStateListOf<String>() }
+    fun logLine(line: String) {
+        diagLog.add(line)
+        while (diagLog.size > 8) diagLog.removeAt(0)
+    }
+
     var muted by remember { mutableStateOf(false) }
     var cameraOff by remember { mutableStateOf(false) }
     var speakerOn by remember { mutableStateOf(video) } // video → speaker, voice → earpiece
@@ -74,42 +93,71 @@ fun CallScreenDialog(
     var controlsVisible by remember { mutableStateOf(true) }
     var controlsShownAt by remember { mutableLongStateOf(0L) }
 
+    val remoteTiles = remember { mutableStateMapOf<String, RemoteTile>() }
+
     val audio = remember { CallAudioController(context) }
-    val webViewRef = remember { arrayOfNulls<WebView>(1) }
-    fun js(script: String) = webViewRef[0]?.evaluateJavascript(script, null)
+
+    val client = remember {
+        WebRtcCallClient(
+            appContext = context.applicationContext,
+            websocketUrl = websocketUrl,
+            video = video,
+            eglBase = eglBase,
+            onEvent = { event ->
+                mainHandler.post {
+                    when (event) {
+                        is WebRtcEvent.Phase -> logLine(event.text)
+                        is WebRtcEvent.Status -> {
+                            status = event.status
+                            when (event.status) {
+                                CallStatus.Connecting -> logLine("• connecting")
+                                CallStatus.Connected -> { errorMessage = null; logLine("• connected (peer up)") }
+                                CallStatus.Reconnecting -> logLine("• reconnecting")
+                                CallStatus.Ended -> logLine("• ended")
+                            }
+                        }
+                        is WebRtcEvent.Error -> {
+                            errorMessage = event.message
+                            logLine("‼ ${event.message}")
+                            controlsVisible = true
+                        }
+                        WebRtcEvent.MediaReady -> {
+                            logLine("• media ok")
+                            mediaReady = true
+                        }
+                    }
+                }
+            },
+            onRemoteTrack = { peerId, track ->
+                mainHandler.post { remoteTiles[peerId] = RemoteTile(peerId, track) }
+            },
+            onRemoteRemoved = { peerId ->
+                mainHandler.post { remoteTiles.remove(peerId) }
+            },
+        )
+    }
 
     val endCall = {
-        js("window.pigeonCall && window.pigeonCall.end()")
+        client.release()
         onDismiss()
     }
 
-    val bridge = remember {
-        object {
-            @JavascriptInterface
-            fun post(json: String) {
-                mainHandler.post {
-                    val m = runCatching { JSONObject(json) }.getOrNull() ?: return@post
-                    when (m.optString("type")) {
-                        "status" -> when (m.optString("state")) {
-                            "connecting" -> status = CallStatus.Connecting
-                            "connected" -> { status = CallStatus.Connected; errorMessage = null }
-                            "reconnecting" -> status = CallStatus.Reconnecting
-                            "ended" -> status = CallStatus.Ended
-                        }
-                        "error" -> { errorMessage = m.optString("message").ifBlank { "call error" }; controlsVisible = true }
-                    }
-                }
-            }
+    LaunchedEffect(Unit) { client.start() }
+
+    // wait for mic capture before routing, matching the phone-call behavior).
+    LaunchedEffect(mediaReady) {
+        if (mediaReady) {
+            audio.start(defaultSpeaker = video)
+            audio.lastError?.let { logLine("‼ audio: $it") }
         }
     }
 
-    // previous mode + abandons focus when the dialog leaves composition.
     DisposableEffect(Unit) {
-        audio.start(defaultSpeaker = video)
         onDispose {
             audio.stop()
-            webViewRef[0]?.apply { loadUrl("about:blank"); destroy() }
-            webViewRef[0] = null
+            client.release()
+
+            eglBase.release()
         }
     }
 
@@ -130,49 +178,82 @@ fun CallScreenDialog(
         onDismissRequest = endCall,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
-        Box(Modifier.fillMaxSize().background(Color(0xFF0B0E16))) {
-            AndroidView(
-                factory = {
-                    WebView(context).apply {
-                        settings.javaScriptEnabled = true
-                        settings.domStorageEnabled = true
-                        settings.mediaPlaybackRequiresUserGesture = false
-                        settings.allowContentAccess = false
-                        settings.allowFileAccess = false
-                        webViewClient = object : WebViewClient() {
-                            override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
-                                val url = request.url
-                                if (url.host == "appassets.androidplatform.net") {
-                                    return if (url.path == CALL_PATH) {
-                                        WebResourceResponse("text/html", "utf-8", html.byteInputStream())
-                                    } else {
-                                        WebResourceResponse("text/plain", "utf-8", "".byteInputStream())
-                                    }
-                                }
-                                return null
-                            }
-                        }
-                        webChromeClient = object : WebChromeClient() {
-                            override fun onPermissionRequest(request: PermissionRequest) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(Color(0xFF0B0E16), Color(0xFF131827), Color(0xFF0B0E16)),
+                    ),
+                ),
+        ) {
+            if (video) {
 
-                                mainHandler.post {
-                                    val allowed = request.resources.filter { resource ->
-                                        resource == PermissionRequest.RESOURCE_AUDIO_CAPTURE ||
-                                            (video && resource == PermissionRequest.RESOURCE_VIDEO_CAPTURE)
-                                    }.toTypedArray()
-                                    if (allowed.isNotEmpty()) request.grant(allowed) else request.deny()
-                                }
-                            }
-                        }
-                        addJavascriptInterface(bridge, "PigeonNative")
-                        webViewRef[0] = this
-                        loadUrl(CALL_ORIGIN + CALL_PATH)
+                val tiles = remoteTiles.values.toList()
+                if (tiles.isEmpty()) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(
+                            "waiting for video…",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color.White.copy(alpha = 0.5f),
+                        )
                     }
-                },
-                modifier = Modifier.fillMaxSize(),
-            )
+                } else {
+                    val columns = if (tiles.size <= 1) 1 else 2
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(columns),
+                        modifier = Modifier.fillMaxSize().padding(4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        items(tiles, key = { it.peerId }) { tile ->
+                            VideoRenderer(
+                                track = tile.track,
+                                eglBase = eglBase,
+                                mirror = false,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .aspectRatio(9f / 16f)
+                                    .clip(RoundedCornerShape(20.dp)),
+                            )
+                        }
+                    }
+                }
 
-            // eat taps here to toggle the controls on video calls
+                val localTrack = client.localVideoTrack
+                if (localTrack != null && !cameraOff) {
+                    VideoRenderer(
+                        track = localTrack,
+                        eglBase = eglBase,
+                        mirror = client.isFrontCamera,
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .statusBarsPadding()
+                            .padding(top = 96.dp, end = 14.dp)
+                            .width(104.dp)
+                            .aspectRatio(104f / 150f)
+                            .clip(RoundedCornerShape(18.dp)),
+                    )
+                }
+            } else {
+
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Box(
+                        Modifier
+                            .size(120.dp)
+                            .clip(RoundedCornerShape(60.dp))
+                            .background(Color.White.copy(alpha = 0.08f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            title.take(1).uppercase(),
+                            style = MaterialTheme.typography.displaySmall,
+                            color = Color.White.copy(alpha = 0.75f),
+                        )
+                    }
+                }
+            }
+
             if (video) {
                 Box(
                     Modifier
@@ -191,6 +272,7 @@ fun CallScreenDialog(
                 status = status,
                 durationSeconds = durationSeconds,
                 errorMessage = errorMessage,
+                diagLog = diagLog,
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .statusBarsPadding()
@@ -205,7 +287,7 @@ fun CallScreenDialog(
                 cameraOff = cameraOff,
                 onToggleMute = {
                     muted = !muted
-                    js("window.pigeonCall && window.pigeonCall.setMuted(${muted})")
+                    client.setMuted(muted)
                     controlsShownAt = System.currentTimeMillis()
                 },
                 onToggleSpeaker = {
@@ -215,11 +297,11 @@ fun CallScreenDialog(
                 },
                 onToggleCamera = {
                     cameraOff = !cameraOff
-                    js("window.pigeonCall && window.pigeonCall.setCamera(${!cameraOff})")
+                    client.setCameraOff(cameraOff)
                     controlsShownAt = System.currentTimeMillis()
                 },
                 onSwitchCamera = {
-                    js("window.pigeonCall && window.pigeonCall.switchCamera()")
+                    client.switchCamera()
                     controlsShownAt = System.currentTimeMillis()
                 },
                 onEndCall = endCall,
@@ -230,4 +312,30 @@ fun CallScreenDialog(
             )
         }
     }
+}
+
+@Composable
+private fun VideoRenderer(
+    track: VideoTrack,
+    eglBase: EglBase,
+    mirror: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    AndroidView(
+        modifier = modifier,
+        factory = { ctx ->
+            SurfaceViewRenderer(ctx).apply {
+                init(eglBase.eglBaseContext, null)
+                setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FILL)
+                setEnableHardwareScaler(true)
+                setMirror(mirror)
+                runCatching { track.addSink(this) }
+            }
+        },
+        update = { view -> view.setMirror(mirror) },
+        onRelease = { view ->
+            runCatching { track.removeSink(view) }
+            view.release()
+        },
+    )
 }

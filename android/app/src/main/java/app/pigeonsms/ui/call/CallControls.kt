@@ -12,9 +12,13 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.VolumeOff
 import androidx.compose.material.icons.automirrored.outlined.VolumeUp
@@ -28,11 +32,13 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.style.TextOverflow
 import app.pigeonsms.design.theme.Spacing
@@ -47,6 +53,7 @@ fun CallTopOverlay(
     status: CallStatus,
     durationSeconds: Long,
     errorMessage: String?,
+    diagLog: List<String> = emptyList(),
     modifier: Modifier = Modifier,
 ) {
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
@@ -87,6 +94,29 @@ fun CallTopOverlay(
                         .background(color.copy(alpha = 0.30f), CircleShape)
                         .padding(horizontal = Spacing.m, vertical = Spacing.xs),
                 )
+            }
+        }
+
+        if (diagLog.isNotEmpty() && (status != CallStatus.Connected || errorMessage != null)) {
+            val scroll = rememberScrollState()
+            LaunchedEffect(diagLog.size) { scroll.scrollTo(scroll.maxValue) }
+            Column(
+                Modifier
+                    .padding(top = Spacing.s)
+                    .fillMaxWidth()
+                    .heightIn(max = 132.dp)
+                    .background(Color(0xCC0B0E16), MaterialTheme.shapes.medium)
+                    .verticalScroll(scroll)
+                    .padding(horizontal = Spacing.m, vertical = Spacing.s),
+            ) {
+                diagLog.forEach { line ->
+                    Text(
+                        line,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = if (line.startsWith("‼")) Color(0xFFFF9EA8) else Color.White.copy(alpha = 0.82f),
+                    )
+                }
             }
         }
     }
