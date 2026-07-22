@@ -11,4 +11,7 @@
     <color name="ic_bg_minwhite">#FFFFFF</color>
     <color name="ic_bg_minblackalt">#000000</color>
     <color name="ic_bg_clean">#1B181F</color>
+    <color name="ic_bg_default">#1B181F</color>
+    <color name="ic_bg_minblack">#000000</color>
+    <color name="ic_bg_retro">#1A181E</color>
 </resources>
