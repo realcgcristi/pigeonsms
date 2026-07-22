@@ -13,8 +13,10 @@ android {
         applicationId = "app.pigeonsms"
         minSdk = 26
         targetSdk = 36
-        versionCode = 23
-        versionName = "2.2.0"
+        versionCode = 30
+        versionName = "2.3.0"
+
+        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
 
     signingConfigs {
@@ -75,6 +77,12 @@ dependencies {
     implementation(libs.paging.compose)
     implementation(libs.work.runtime)
     implementation(libs.firebase.messaging)
+
+    implementation(libs.webrtc)
+
+    implementation(libs.ktor.client.core)
+    implementation(libs.ktor.client.okhttp)
+    implementation(libs.ktor.client.websockets)
     implementation(libs.compose.ui.tooling.preview)
     debugImplementation(libs.compose.ui.tooling)
 }
