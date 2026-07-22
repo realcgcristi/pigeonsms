@@ -50,6 +50,8 @@ data class ChatUiState(
 
     val peerReadSeq: Long = 0,
 
+    val peerLastOnline: Long? = null,
+
     val mentionCandidates: List<MentionCandidate> = emptyList(),
     /** @everyone is space-admin-only server side — only offer it when it would succeed. */
     val canMentionEveryone: Boolean = false,
@@ -86,6 +88,11 @@ class ChatViewModel(
         viewModelScope.launch { runCatching { repo.flushOutbox(channelId) } }
         refreshPins(showLoading = false)
         refreshSuperPin()
+        viewModelScope.launch {
+
+            runCatching { social?.dms()?.firstOrNull { it.channel_id == channelId }?.peer?.last_online }
+                .getOrNull()?.let { last -> _ui.update { it.copy(peerLastOnline = last) } }
+        }
         viewModelScope.launch {
             repo.reads.collect { all ->
                 val peerSeq = all[channelId]?.filterKeys { it != selfId }?.values?.maxOrNull() ?: 0L
@@ -434,6 +441,7 @@ class ChatViewModel(
                             mentionCandidates = listOf(
                                 MentionCandidate(peer.id, peer.username, peer.display_name, peer.avatar_key),
                             ),
+                            peerLastOnline = peer.last_online,
                         )
                     }
                 }

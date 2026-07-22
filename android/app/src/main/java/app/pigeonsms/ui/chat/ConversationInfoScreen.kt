@@ -69,6 +69,8 @@ import app.pigeonsms.db.MessageEntity
 import app.pigeonsms.design.theme.Corners
 import app.pigeonsms.design.theme.PigeonMotion
 import app.pigeonsms.design.theme.Spacing
+import app.pigeonsms.ui.util.Avatar
+import app.pigeonsms.ui.util.presence
 import app.pigeonsms.ui.util.smartTime
 import coil.compose.AsyncImage
 
@@ -76,6 +78,7 @@ import coil.compose.AsyncImage
 fun ConversationInfoScreen(
     vm: ChatViewModel,
     title: String,
+    avatarKey: String? = null,
     onDismiss: () -> Unit,
     onJumpToMessage: (String) -> Unit,
 ) {
@@ -129,6 +132,12 @@ fun ConversationInfoScreen(
                 }
             }
 
+            ConversationProfileHeader(
+                title = title,
+                model = avatarKey?.let(vm::mediaUrl),
+                lastOnline = ui.peerLastOnline,
+            )
+
             InfoTabSelector(selected = tab, onSelect = { tab = it })
 
             Crossfade(targetState = tab, animationSpec = tween(180), label = "infoTab") { current ->
@@ -150,6 +159,34 @@ fun ConversationInfoScreen(
 
     viewerIndex?.let { index ->
         ConversationMediaViewer(mediaItems, index) { viewerIndex = null }
+    }
+}
+
+@Composable
+private fun ConversationProfileHeader(title: String, model: Any?, lastOnline: Long?) {
+    Column(
+        Modifier.fillMaxWidth().padding(horizontal = Spacing.l, vertical = Spacing.m),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Avatar(name = title, model = model, size = 92.dp)
+        Spacer(Modifier.height(Spacing.s))
+        Text(
+            title,
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        lastOnline?.let { last ->
+            val online = presence(last)
+            Spacer(Modifier.height(Spacing.xxs))
+            Text(
+                if (online) "online" else "offline",
+                style = MaterialTheme.typography.labelMedium,
+                color = if (online) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
