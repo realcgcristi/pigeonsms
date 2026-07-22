@@ -75,10 +75,13 @@ import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Call
 import androidx.compose.material.icons.outlined.Videocam
+import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Send
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -588,7 +591,24 @@ fun ChatScreen(
             onDismiss = { showAppearance = false },
         )
     }
-    if (ui.searchOpen) SearchSheet(vm)
+    if (ui.searchOpen) {
+        SearchSheet(vm) { messageId ->
+            // jump only works for messages already in loaded history — same
+            // limitation as reply/pin navigation
+            val targetIndex = messages.indexOfFirst { it.id == messageId }
+            if (targetIndex < 0) {
+                vm.reportError("message isn't available in loaded history")
+            } else {
+                vm.closeSearch()
+                replyNavigationScope.launch {
+                    listState.animateScrollToItem(targetIndex + if (ui.loadingOlder) 1 else 0)
+                    highlightedMessageId = messageId
+                    delay(1_600)
+                    if (highlightedMessageId == messageId) highlightedMessageId = null
+                }
+            }
+        }
+    }
     if (ui.pinsOpen) {
         PinsSheet(vm) { messageId ->
             // jump only works for messages already in loaded history — same
@@ -611,6 +631,7 @@ fun ChatScreen(
         ConversationInfoScreen(
             vm = vm,
             title = title,
+            avatarKey = avatarKey,
             onDismiss = { infoOpen = false },
             onJumpToMessage = { messageId ->
                 infoOpen = false
@@ -675,34 +696,81 @@ private fun ChatTopBar(
             IconButton(onClick = onBack) {
                 Icon(Icons.AutoMirrored.Outlined.ArrowBack, "back", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(24.dp))
             }
-            Avatar(
-                name = title,
-                model = avatarKey?.let(mediaUrl),
-                size = 32.dp,
-                sharedKey = "chat-avatar-$channelId",
-            )
-            Text(
-                title,
-                modifier = Modifier.weight(1f).padding(horizontal = Spacing.s),
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            IconButton(onClick = { onCall(false) }) { Icon(Icons.Outlined.Call, "voice call", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(24.dp)) }
-            IconButton(onClick = { onCall(true) }) { Icon(Icons.Outlined.Videocam, "video call", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(24.dp)) }
-            IconButton(onClick = onAppearance) {
-                Icon(Icons.Outlined.Palette, "chat wallpaper & theme", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(24.dp))
+            // tap the avatar + title to open conversation info (subtle ripple)
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable(
+                        onClickLabel = "open conversation info",
+                        onClick = onInfo,
+                    )
+                    .padding(vertical = Spacing.xs, horizontal = Spacing.xs),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Avatar(
+                    name = title,
+                    model = avatarKey?.let(mediaUrl),
+                    size = 32.dp,
+                    sharedKey = "chat-avatar-$channelId",
+                )
+                Text(
+                    title,
+                    modifier = Modifier.weight(1f).padding(horizontal = Spacing.s),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
-            IconButton(onClick = onPins) {
-                Icon(Icons.Outlined.PushPin, "pinned messages", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(24.dp))
+            // call control: single icon opening a voice/video dropdown
+            Box {
+                var callMenuOpen by remember { mutableStateOf(false) }
+                IconButton(onClick = { callMenuOpen = true }) {
+                    Icon(Icons.Outlined.Call, "call", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(24.dp))
+                }
+                DropdownMenu(expanded = callMenuOpen, onDismissRequest = { callMenuOpen = false }) {
+                    DropdownMenuItem(
+                        text = { Text("Voice call") },
+                        leadingIcon = { Icon(Icons.Outlined.Call, null) },
+                        onClick = { callMenuOpen = false; onCall(false) },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Video call") },
+                        leadingIcon = { Icon(Icons.Outlined.Videocam, null) },
+                        onClick = { callMenuOpen = false; onCall(true) },
+                    )
+                }
             }
-            IconButton(onClick = onSearch) {
-                Icon(Icons.Outlined.Search, "search messages", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(24.dp))
-            }
-            IconButton(onClick = onInfo) {
-                Icon(Icons.Outlined.Info, "conversation info", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(24.dp))
+            // overflow: search, conversation info, theme, pins
+            Box {
+                var overflowOpen by remember { mutableStateOf(false) }
+                IconButton(onClick = { overflowOpen = true }) {
+                    Icon(Icons.Outlined.MoreVert, "more actions", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(24.dp))
+                }
+                DropdownMenu(expanded = overflowOpen, onDismissRequest = { overflowOpen = false }) {
+                    DropdownMenuItem(
+                        text = { Text("Search") },
+                        leadingIcon = { Icon(Icons.Outlined.Search, null) },
+                        onClick = { overflowOpen = false; onSearch() },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Conversation info") },
+                        leadingIcon = { Icon(Icons.Outlined.Info, null) },
+                        onClick = { overflowOpen = false; onInfo() },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Theme") },
+                        leadingIcon = { Icon(Icons.Outlined.Palette, null) },
+                        onClick = { overflowOpen = false; onAppearance() },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Pins") },
+                        leadingIcon = { Icon(Icons.Outlined.PushPin, null) },
+                        onClick = { overflowOpen = false; onPins() },
+                    )
+                }
             }
         }
     }
@@ -2268,7 +2336,7 @@ private fun ComposerContextRow(title: String, detail: String, onClose: () -> Uni
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SearchSheet(vm: ChatViewModel) {
+private fun SearchSheet(vm: ChatViewModel, onJumpToMessage: (String) -> Unit) {
     val ui by vm.ui.collectAsState()
     var query by rememberSaveable { mutableStateOf("") }
     ModalBottomSheet(
@@ -2308,7 +2376,11 @@ private fun SearchSheet(vm: ChatViewModel) {
                 verticalArrangement = Arrangement.spacedBy(Spacing.s),
             ) {
                 items(ui.searchResults, key = { it.id }) { result ->
-                    Surface(shape = Corners.chip, color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+                    Surface(
+                        onClick = { onJumpToMessage(result.id) },
+                        shape = Corners.chip,
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    ) {
                         Column(Modifier.fillMaxWidth().padding(Spacing.m)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
