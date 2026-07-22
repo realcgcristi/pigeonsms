@@ -270,6 +270,17 @@ class ChatRepository(private val api: PigeonApi, private val db: PigeonDatabase)
 
     private suspend fun mergeEvent(dto: MessageDto) {
         val incoming = dto.toEntity()
+
+        // inserted under a temporary id ("pending-<nonce>"), so a lookup by the
+        // server id misses it and we'd otherwise keep a second, stuck "sending" row.
+
+        // different id) before writing the authoritative copy.
+        dto.nonce?.let { nonce ->
+            db.messages().delete("pending-$nonce")
+            db.messages().byNonce(nonce)?.let { existing ->
+                if (existing.id != incoming.id) db.messages().delete(existing.id)
+            }
+        }
         val current = db.messages().byId(dto.id)
         val currentVersion = current?.let { it.editedAt ?: it.createdAt } ?: Long.MIN_VALUE
         val incomingVersion = incoming.editedAt ?: incoming.createdAt
