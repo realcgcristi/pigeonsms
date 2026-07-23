@@ -16,7 +16,7 @@
     <application
         android:name=".PigeonApp"
         android:label="@string/app_name"
-        android:icon="@mipmap/ic_default"
+        android:icon="@mipmap/ic_classic"
         android:theme="@style/Theme.Pigeon"
         android:supportsRtl="true">
 
@@ -27,34 +27,64 @@
             android:windowSoftInputMode="adjustResize" />
 
         <!-- switchable launcher icons: exactly one alias is enabled at a time -->
-        <activity-alias android:name=".Icon_default" android:targetActivity=".MainActivity" android:icon="@mipmap/ic_default" android:enabled="true" android:exported="true">
+                <activity-alias android:name=".Icon_photorealistic" android:targetActivity=".MainActivity" android:icon="@mipmap/ic_photorealistic" android:enabled="false" android:exported="true">
             <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
         </activity-alias>
-        <activity-alias android:name=".Icon_minwhite" android:targetActivity=".MainActivity" android:icon="@mipmap/ic_minwhite" android:enabled="false" android:exported="true">
+        <activity-alias android:name=".Icon_sunset" android:targetActivity=".MainActivity" android:icon="@mipmap/ic_sunset" android:enabled="false" android:exported="true">
             <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
         </activity-alias>
-        <activity-alias android:name=".Icon_minblackalt" android:targetActivity=".MainActivity" android:icon="@mipmap/ic_minblackalt" android:enabled="false" android:exported="true">
+        <activity-alias android:name=".Icon_starrymidnight" android:targetActivity=".MainActivity" android:icon="@mipmap/ic_starrymidnight" android:enabled="false" android:exported="true">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".Icon_noir" android:targetActivity=".MainActivity" android:icon="@mipmap/ic_noir" android:enabled="false" android:exported="true">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".Icon_neonvaporwave" android:targetActivity=".MainActivity" android:icon="@mipmap/ic_neonvaporwave" android:enabled="false" android:exported="true">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".Icon_minimalwhite" android:targetActivity=".MainActivity" android:icon="@mipmap/ic_minimalwhite" android:enabled="false" android:exported="true">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".Icon_minimalblackalt" android:targetActivity=".MainActivity" android:icon="@mipmap/ic_minimalblackalt" android:enabled="false" android:exported="true">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".Icon_vividclean" android:targetActivity=".MainActivity" android:icon="@mipmap/ic_vividclean" android:enabled="false" android:exported="true">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".Icon_vividclassic" android:targetActivity=".MainActivity" android:icon="@mipmap/ic_vividclassic" android:enabled="false" android:exported="true">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".Icon_pixelclassic" android:targetActivity=".MainActivity" android:icon="@mipmap/ic_pixelclassic" android:enabled="false" android:exported="true">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".Icon_minimalblack" android:targetActivity=".MainActivity" android:icon="@mipmap/ic_minimalblack" android:enabled="false" android:exported="true">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".Icon_minecraft" android:targetActivity=".MainActivity" android:icon="@mipmap/ic_minecraft" android:enabled="false" android:exported="true">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".Icon_kawaii" android:targetActivity=".MainActivity" android:icon="@mipmap/ic_kawaii" android:enabled="false" android:exported="true">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".Icon_hackercode" android:targetActivity=".MainActivity" android:icon="@mipmap/ic_hackercode" android:enabled="false" android:exported="true">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".Icon_hackersimple" android:targetActivity=".MainActivity" android:icon="@mipmap/ic_hackersimple" android:enabled="false" android:exported="true">
             <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
         </activity-alias>
         <activity-alias android:name=".Icon_clean" android:targetActivity=".MainActivity" android:icon="@mipmap/ic_clean" android:enabled="false" android:exported="true">
             <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
         </activity-alias>
-        <activity-alias android:name=".Icon_cleanalt" android:targetActivity=".MainActivity" android:icon="@mipmap/ic_cleanalt" android:enabled="false" android:exported="true">
+        <activity-alias android:name=".Icon_classic" android:targetActivity=".MainActivity" android:icon="@mipmap/ic_classic" android:enabled="true" android:exported="true">
             <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
         </activity-alias>
-        <activity-alias android:name=".Icon_minblack" android:targetActivity=".MainActivity" android:icon="@mipmap/ic_minblack" android:enabled="false" android:exported="true">
+        <activity-alias android:name=".Icon_paletteclassic" android:targetActivity=".MainActivity" android:icon="@mipmap/ic_paletteclassic" android:enabled="false" android:exported="true">
             <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
         </activity-alias>
-        <activity-alias android:name=".Icon_alternative" android:targetActivity=".MainActivity" android:icon="@mipmap/ic_alternative" android:enabled="false" android:exported="true">
-            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
-        </activity-alias>
-        <activity-alias android:name=".Icon_retro" android:targetActivity=".MainActivity" android:icon="@mipmap/ic_retro" android:enabled="false" android:exported="true">
+        <activity-alias android:name=".Icon_paletteclean" android:targetActivity=".MainActivity" android:icon="@mipmap/ic_paletteclean" android:enabled="false" android:exported="true">
             <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
         </activity-alias>
         <activity-alias android:name=".Icon_saucy" android:targetActivity=".MainActivity" android:icon="@mipmap/ic_saucy" android:enabled="false" android:exported="true">
-            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
-        </activity-alias>
-        <activity-alias android:name=".Icon_minecraft" android:targetActivity=".MainActivity" android:icon="@mipmap/ic_minecraft" android:enabled="false" android:exported="true">
             <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
         </activity-alias>
 

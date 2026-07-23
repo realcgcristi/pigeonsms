@@ -35,6 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.colorResource
@@ -62,44 +63,74 @@ internal data class AppIconVariant(val label: String, val key: String, val autho
 private val ICON_PREVIEW = 44.dp
 
 internal val AppIconVariants = listOf(
-    AppIconVariant("Minimal White", "minwhite"),
-    AppIconVariant("Minimal black alternative", "minblackalt"),
-    AppIconVariant("Clean", "clean"),
-    AppIconVariant("Clean alternative", "cleanalt"),
-    AppIconVariant("Default", "default"),
-    AppIconVariant("Minimal Black", "minblack"),
-    AppIconVariant("Alternative", "alternative"),
-    AppIconVariant("Retro/8-bit", "retro"),
-    AppIconVariant("Saucy Pigeon", "saucy", author = "a_arond"),
+    AppIconVariant("Hacker Code", "hackercode", author = "admin"),
+    AppIconVariant("Photorealistic", "photorealistic"),
+    AppIconVariant("Sunset", "sunset"),
+    AppIconVariant("Starry Midnight", "starrymidnight"),
+    AppIconVariant("Noir", "noir"),
+    AppIconVariant("Neon Vaporwave", "neonvaporwave"),
+    AppIconVariant("Minimal White", "minimalwhite"),
+    AppIconVariant("Minimal Black Alt", "minimalblackalt"),
+    AppIconVariant("Vivid Clean", "vividclean"),
+    AppIconVariant("Vivid Classic", "vividclassic"),
+    AppIconVariant("Pixel Classic", "pixelclassic"),
+    AppIconVariant("Minimal Black", "minimalblack"),
     AppIconVariant("Minecraft", "minecraft", author = "admin"),
+    AppIconVariant("Kawaii", "kawaii"),
+    AppIconVariant("Hacker Simple", "hackersimple"),
+    AppIconVariant("Clean", "clean"),
+    AppIconVariant("Classic", "classic"),
+    AppIconVariant("Pallete Switch Classic", "paletteclassic"),
+    AppIconVariant("Pallete Switch Clean", "paletteclean"),
+    AppIconVariant("Saucy Pigeon", "saucy", author = "a_arond"),
 )
 
 private fun fgRes(key: String): Int = when (key) {
-    "minwhite" -> R.mipmap.ic_fg_minwhite
-    "minblackalt" -> R.mipmap.ic_fg_minblackalt
-    "clean" -> R.mipmap.ic_fg_clean
-    "cleanalt" -> R.mipmap.ic_fg_cleanalt
-    "default" -> R.mipmap.ic_fg_default
-    "minblack" -> R.mipmap.ic_fg_minblack
-    "alternative" -> R.mipmap.ic_fg_alternative
-    "retro" -> R.mipmap.ic_fg_retro
-    "saucy" -> R.mipmap.ic_fg_saucy
+    "photorealistic" -> R.mipmap.ic_fg_photorealistic
+    "sunset" -> R.mipmap.ic_fg_sunset
+    "starrymidnight" -> R.mipmap.ic_fg_starrymidnight
+    "noir" -> R.mipmap.ic_fg_noir
+    "neonvaporwave" -> R.mipmap.ic_fg_neonvaporwave
+    "minimalwhite" -> R.mipmap.ic_fg_minimalwhite
+    "minimalblackalt" -> R.mipmap.ic_fg_minimalblackalt
+    "vividclean" -> R.mipmap.ic_fg_vividclean
+    "vividclassic" -> R.mipmap.ic_fg_vividclassic
+    "pixelclassic" -> R.mipmap.ic_fg_pixelclassic
+    "minimalblack" -> R.mipmap.ic_fg_minimalblack
     "minecraft" -> R.mipmap.ic_fg_minecraft
-    else -> R.mipmap.ic_fg_default
+    "kawaii" -> R.mipmap.ic_fg_kawaii
+    "hackercode" -> R.mipmap.ic_fg_hackercode
+    "hackersimple" -> R.mipmap.ic_fg_hackersimple
+    "clean" -> R.mipmap.ic_fg_clean
+    "classic" -> R.mipmap.ic_fg_classic
+    "paletteclassic" -> R.mipmap.ic_fg_paletteclassic
+    "paletteclean" -> R.mipmap.ic_fg_paletteclean
+    "saucy" -> R.mipmap.ic_fg_saucy
+    else -> R.mipmap.ic_fg_classic
 }
 
 private fun bgRes(key: String): Int = when (key) {
-    "minwhite" -> R.color.ic_bg_minwhite
-    "minblackalt" -> R.color.ic_bg_minblackalt
-    "clean" -> R.color.ic_bg_clean
-    "cleanalt" -> R.color.ic_bg_cleanalt
-    "default" -> R.color.ic_bg_default
-    "minblack" -> R.color.ic_bg_minblack
-    "alternative" -> R.color.ic_bg_alternative
-    "retro" -> R.color.ic_bg_retro
-    "saucy" -> R.color.ic_bg_saucy
+    "photorealistic" -> R.color.ic_bg_photorealistic
+    "sunset" -> R.color.ic_bg_sunset
+    "starrymidnight" -> R.color.ic_bg_starrymidnight
+    "noir" -> R.color.ic_bg_noir
+    "neonvaporwave" -> R.color.ic_bg_neonvaporwave
+    "minimalwhite" -> R.color.ic_bg_minimalwhite
+    "minimalblackalt" -> R.color.ic_bg_minimalblackalt
+    "vividclean" -> R.color.ic_bg_vividclean
+    "vividclassic" -> R.color.ic_bg_vividclassic
+    "pixelclassic" -> R.color.ic_bg_pixelclassic
+    "minimalblack" -> R.color.ic_bg_minimalblack
     "minecraft" -> R.color.ic_bg_minecraft
-    else -> R.color.ic_bg_default
+    "kawaii" -> R.color.ic_bg_kawaii
+    "hackercode" -> R.color.ic_bg_hackercode
+    "hackersimple" -> R.color.ic_bg_hackersimple
+    "clean" -> R.color.ic_bg_clean
+    "classic" -> R.color.ic_bg_classic
+    "paletteclassic" -> R.color.ic_bg_paletteclassic
+    "paletteclean" -> R.color.ic_bg_paletteclean
+    "saucy" -> R.color.ic_bg_saucy
+    else -> R.color.ic_bg_classic
 }
 
 internal fun setAppIcon(context: android.content.Context, key: String) {
@@ -173,10 +204,19 @@ fun AppIconScreen(onBack: () -> Unit, onOpenUser: (String) -> Unit) {
                             .then(if (nova) Modifier.border(1.dp, accent.copy(alpha = if (selected) NovaDepth.rimAccent else NovaDepth.rimBottom), NovaCorners.iconBadge) else Modifier),
                         contentAlignment = Alignment.Center,
                     ) {
+
+                        // foreground for the launcher mask; in this flat preview
+                        // that reads as a shrunk framed photo, so scale to fill and
+                        // let the clip crop the border — matching the launcher look.
+                        val fullBleedPreview = v.key in setOf(
+                            "kawaii", "noir", "neonvaporwave", "starrymidnight",
+                            "sunset", "photorealistic", "hackercode", "minecraft",
+                        )
                         Image(
                             painterResource(fgRes(v.key)),
                             contentDescription = null,
-                            modifier = Modifier.size(ICON_PREVIEW),
+                            modifier = Modifier.size(ICON_PREVIEW)
+                                .then(if (fullBleedPreview) Modifier.graphicsLayer { scaleX = 1.5f; scaleY = 1.5f } else Modifier),
                             contentScale = ContentScale.Fit,
                         )
                     }

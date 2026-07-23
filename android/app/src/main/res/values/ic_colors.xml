@@ -15,5 +15,23 @@
     <color name="ic_bg_minblack">#000000</color>
     <color name="ic_bg_retro">#1A181E</color>
     <color name="ic_bg_saucy">#030303</color>
-    <color name="ic_bg_minecraft">#030402</color>
+    <color name="ic_bg_minecraft">#B2AFD1</color>
+    <color name="ic_bg_photorealistic">#21292A</color>
+    <color name="ic_bg_sunset">#A7440C</color>
+    <color name="ic_bg_starrymidnight">#16003F</color>
+    <color name="ic_bg_noir">#141213</color>
+    <color name="ic_bg_neonvaporwave">#060C2D</color>
+    <color name="ic_bg_minimalwhite">#FFFFFF</color>
+    <color name="ic_bg_minimaldarkalt">#1B181F</color>
+    <color name="ic_bg_vividclean">#1B181F</color>
+    <color name="ic_bg_vividclassic">#1B181F</color>
+    <color name="ic_bg_pixelclassic">#1A181E</color>
+    <color name="ic_bg_minimalblack">#000000</color>
+    <color name="ic_bg_kawaii">#776AB9</color>
+    <color name="ic_bg_hackercode">#000000</color>
+    <color name="ic_bg_hackersimple">#000000</color>
+    <color name="ic_bg_classic">#1B181F</color>
+    <color name="ic_bg_paletteclassic">#1B181F</color>
+    <color name="ic_bg_paletteclean">#1B181F</color>
+    <color name="ic_bg_minimalblackalt">#000000</color>
 </resources>
