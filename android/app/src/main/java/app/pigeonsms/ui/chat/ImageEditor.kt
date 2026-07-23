@@ -25,11 +25,13 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.BlurOn
-import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Crop
 import androidx.compose.material.icons.rounded.Draw
@@ -37,6 +39,7 @@ import androidx.compose.material.icons.rounded.EmojiEmotions
 import androidx.compose.material.icons.rounded.HighQuality
 import androidx.compose.material.icons.rounded.OpenWith
 import androidx.compose.material.icons.rounded.RotateRight
+import androidx.compose.material.icons.rounded.Send
 import androidx.compose.material.icons.rounded.TextFields
 import androidx.compose.material.icons.rounded.Undo
 import androidx.compose.material3.AlertDialog
@@ -50,6 +53,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -72,6 +76,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import app.pigeonsms.design.theme.Corners
+import app.pigeonsms.design.theme.Dimens
 import app.pigeonsms.design.theme.Spacing
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
@@ -110,7 +115,7 @@ fun ImageEditorDialog(
     type: String,
     initialSendOriginal: Boolean = false,
     onDismiss: () -> Unit,
-    onSend: (EditedImage) -> Unit,
+    onSend: (EditedImage, caption: String) -> Unit,
 ) {
     val decoded = remember(originalBytes) { decodeBitmap(originalBytes, 3_072) }
     if (decoded == null) {
@@ -132,27 +137,60 @@ fun ImageEditorDialog(
     val overlays = remember { mutableStateListOf<EditOverlay>() }
     var overlayDialog by remember { mutableStateOf<Boolean?>(null) } // false=text, true=emoji
     var overlayValue by remember { mutableStateOf("") }
+    var caption by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var processingError by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     val preview = remember(decoded, rotation, crop) { transformBitmap(decoded, rotation, crop.ratio) }
     val pixelatedPreview = remember(preview) { pixelate(preview) }
 
+    fun sendEdited() {
+        busy = true
+        scope.launch {
+            val result = runCatching {
+                withContext(Dispatchers.Default) {
+                    renderEditedImage(
+                        originalBytes = originalBytes,
+                        originalType = type,
+                        originalName = filename,
+                        rotation = rotation,
+                        cropRatio = crop.ratio,
+                        strokes = strokes.toList(),
+                        overlays = overlays.toList(),
+                        sendOriginal = sendOriginal,
+                    )
+                }
+            }
+            busy = false
+            result
+                .onSuccess { edited -> onSend(edited, caption.trim()) }
+                .onFailure { processingError = "Couldn't process this image" }
+        }
+    }
+
     Dialog(
         onDismissRequest = { if (!busy) onDismiss() },
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
         Surface(color = Color.Black, modifier = Modifier.fillMaxSize()) {
-            Column(Modifier.fillMaxSize()) {
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+                    .navigationBarsPadding()
+                    .imePadding(),
+            ) {
                 Row(
-                    Modifier.fillMaxWidth().padding(horizontal = Spacing.s, vertical = Spacing.s),
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = Spacing.s, vertical = Spacing.xs),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
                 ) {
                     IconButton(onClick = onDismiss, enabled = !busy) {
-                        Icon(Icons.Rounded.Close, "Close image editor", tint = Color.White)
+                        Icon(Icons.Rounded.Close, "Close image editor", tint = Color.White, modifier = Modifier.size(24.dp))
                     }
-                    Text(filename, color = Color.White, style = MaterialTheme.typography.titleSmall, maxLines = 1, modifier = Modifier.weight(1f))
+                    Text(filename, color = Color.White, style = MaterialTheme.typography.titleSmall, maxLines = 1, modifier = Modifier.weight(1f).padding(horizontal = Spacing.xs))
                     IconButton(
                         onClick = {
                             when {
@@ -162,34 +200,7 @@ fun ImageEditorDialog(
                             }
                         },
                         enabled = !busy && (currentStroke.isNotEmpty() || strokes.isNotEmpty() || overlays.isNotEmpty()),
-                    ) { Icon(Icons.Rounded.Undo, "Undo last edit", tint = Color.White) }
-                    FilledIconButton(
-                        onClick = {
-                            busy = true
-                            scope.launch {
-                                val result = runCatching {
-                                    withContext(Dispatchers.Default) {
-                                        renderEditedImage(
-                                            originalBytes = originalBytes,
-                                            originalType = type,
-                                            originalName = filename,
-                                            rotation = rotation,
-                                            cropRatio = crop.ratio,
-                                            strokes = strokes.toList(),
-                                            overlays = overlays.toList(),
-                                            sendOriginal = sendOriginal,
-                                        )
-                                    }
-                                }
-                                busy = false
-                                result.onSuccess(onSend).onFailure { processingError = "Couldn't process this image" }
-                            }
-                        },
-                        enabled = !busy,
-                    ) {
-                        if (busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                        else Icon(Icons.Rounded.Check, "Send edited image")
-                    }
+                    ) { Icon(Icons.Rounded.Undo, "Undo last edit", tint = Color.White, modifier = Modifier.size(24.dp)) }
                 }
 
                 BoxWithConstraints(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
@@ -272,7 +283,9 @@ fun ImageEditorDialog(
                 }
 
                 Row(
-                    Modifier.fillMaxWidth().padding(horizontal = Spacing.s, vertical = Spacing.s),
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = Spacing.xs, vertical = Spacing.xs),
                     horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -294,12 +307,51 @@ fun ImageEditorDialog(
                     EditorButton(Icons.Rounded.EmojiEmotions, "Add emoji") { overlayValue = ""; overlayDialog = true }
                 }
                 Row(
-                    Modifier.fillMaxWidth().padding(horizontal = Spacing.l, vertical = Spacing.s),
+                    Modifier.fillMaxWidth().padding(horizontal = Spacing.l, vertical = Spacing.xs),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(Icons.Rounded.HighQuality, null, tint = Color.White.copy(alpha = 0.84f))
+                    Icon(Icons.Rounded.HighQuality, null, tint = Color.White.copy(alpha = 0.84f), modifier = Modifier.size(24.dp))
                     Text("Send original quality", color = Color.White, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(start = Spacing.s).weight(1f))
                     Switch(checked = sendOriginal, onCheckedChange = { sendOriginal = it }, enabled = !busy)
+                }
+
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = Spacing.s, vertical = Spacing.s),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.s),
+                ) {
+                    TextField(
+                        value = caption,
+                        onValueChange = { caption = it },
+                        modifier = Modifier.weight(1f),
+                        placeholder = { Text("Add a caption…") },
+                        maxLines = 4,
+                        shape = Corners.input,
+                        enabled = !busy,
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = Color.White.copy(alpha = 0.10f),
+                            unfocusedContainerColor = Color.White.copy(alpha = 0.10f),
+                            disabledContainerColor = Color.White.copy(alpha = 0.06f),
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            cursorColor = Color.White,
+                            focusedPlaceholderColor = Color.White.copy(alpha = 0.55f),
+                            unfocusedPlaceholderColor = Color.White.copy(alpha = 0.55f),
+                            focusedIndicatorColor = Color.Transparent,
+                            unfocusedIndicatorColor = Color.Transparent,
+                            disabledIndicatorColor = Color.Transparent,
+                        ),
+                    )
+                    FilledIconButton(
+                        onClick = { sendEdited() },
+                        enabled = !busy,
+                        modifier = Modifier.size(Dimens.touchTarget),
+                    ) {
+                        if (busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                        else Icon(Icons.Rounded.Send, "Send image", modifier = Modifier.size(24.dp))
+                    }
                 }
             }
         }
@@ -354,8 +406,10 @@ private fun EditorButton(
     )
     IconButton(
         onClick = onClick,
-        modifier = Modifier.background(selectionColor, Corners.chip),
-    ) { Icon(icon, description, tint = Color.White) }
+        modifier = Modifier
+            .size(Dimens.touchTarget)
+            .background(selectionColor, Corners.chip),
+    ) { Icon(icon, description, tint = Color.White, modifier = Modifier.size(24.dp)) }
 }
 
 private fun Offset.normalized(width: Int, height: Int) = Offset(
