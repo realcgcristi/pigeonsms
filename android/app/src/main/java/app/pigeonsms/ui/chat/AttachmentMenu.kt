@@ -1,12 +1,19 @@
 package app.pigeonsms.ui.chat
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.PhotoCamera
@@ -15,9 +22,11 @@ import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.HowToVote
 import androidx.compose.material.icons.rounded.PhotoLibrary
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -26,13 +35,65 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import app.pigeonsms.design.theme.Corners
 import app.pigeonsms.design.theme.Spacing
 import app.pigeonsms.ui.util.glassCard
+import coil.compose.AsyncImage
 
 enum class AttachmentAction { PhotosVideos, Camera, Documents, Poll, Audio, Event }
+
+data class RecentMediaItem(val uri: android.net.Uri, val isVideo: Boolean)
+
+@Composable
+fun RecentMediaStrip(
+    items: List<RecentMediaItem>,
+    onPick: (android.net.Uri) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val thumbShape = RoundedCornerShape(16.dp)
+    Row(
+        modifier = modifier.horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(Spacing.s),
+    ) {
+        items.forEach { item ->
+            Box(
+                modifier = Modifier
+                    .size(72.dp)
+                    .clip(thumbShape)
+                    .clickable { onPick(item.uri) },
+            ) {
+                AsyncImage(
+                    model = item.uri,
+                    contentDescription = if (item.isVideo) "Recent video" else "Recent photo",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+                if (item.isVideo) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(Spacing.xs)
+                            .size(20.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(Color.Black.copy(alpha = 0.55f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Rounded.PlayArrow,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(14.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -40,6 +101,8 @@ fun AttachmentOptionsSheet(
     isSpace: Boolean,
     onAction: (AttachmentAction) -> Unit,
     onDismiss: () -> Unit,
+    recent: List<RecentMediaItem> = emptyList(),
+    onPickRecent: (android.net.Uri) -> Unit = {},
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -81,6 +144,18 @@ fun AttachmentOptionsSheet(
                     }
                     repeat(3 - row.size) { SpacerCell() }
                 }
+            }
+            if (recent.isNotEmpty()) {
+                Text(
+                    "recent",
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.padding(top = Spacing.s, bottom = Spacing.xs),
+                )
+                RecentMediaStrip(
+                    items = recent,
+                    onPick = onPickRecent,
+                    modifier = Modifier.fillMaxWidth().padding(bottom = Spacing.s),
+                )
             }
             TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth().padding(vertical = Spacing.s)) { Text("cancel") }
         }
