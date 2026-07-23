@@ -51,6 +51,12 @@
         <activity-alias android:name=".Icon_retro" android:targetActivity=".MainActivity" android:icon="@mipmap/ic_retro" android:enabled="false" android:exported="true">
             <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
         </activity-alias>
+        <activity-alias android:name=".Icon_saucy" android:targetActivity=".MainActivity" android:icon="@mipmap/ic_saucy" android:enabled="false" android:exported="true">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+        </activity-alias>
+        <activity-alias android:name=".Icon_minecraft" android:targetActivity=".MainActivity" android:icon="@mipmap/ic_minecraft" android:enabled="false" android:exported="true">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+        </activity-alias>
 
         <service
             android:name=".PushService"
