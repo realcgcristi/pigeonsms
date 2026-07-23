@@ -39,19 +39,29 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.border
 import app.pigeonsms.design.theme.Corners
 import app.pigeonsms.design.theme.Dimens
+import app.pigeonsms.design.theme.LocalExperimentalRedesign
+import app.pigeonsms.design.theme.NovaColors
+import app.pigeonsms.design.theme.NovaCorners
 import app.pigeonsms.design.theme.PigeonColors
 import app.pigeonsms.design.theme.Spacing
+import app.pigeonsms.design.theme.novaSurface
 import app.pigeonsms.ui.pigeonVm
 
 private fun rel(ms: Long) = DateUtils.getRelativeTimeSpanString(ms, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS).toString().lowercase()
 
 @Composable
-private fun SubHeader(title: String, onBack: () -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(top = Spacing.xxl, bottom = Spacing.s).heightIn(min = Dimens.topBarHeight), verticalAlignment = Alignment.CenterVertically) {
-        IconButton(onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "back", tint = MaterialTheme.colorScheme.onSurface) }
-        Text(title.lowercase(), style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurface)
+private fun SubHeader(title: String, onBack: () -> Unit) = SettingsSubHeader(title, onBack)
+
+@Composable
+private fun Modifier.rowCard(): Modifier {
+    return if (LocalExperimentalRedesign.current) {
+
+        this.fillMaxWidth().novaSurface(NovaCorners.card, MaterialTheme.colorScheme.surfaceContainer, MaterialTheme.colorScheme.primary)
+    } else {
+        this.fillMaxWidth().clip(Corners.group).background(MaterialTheme.colorScheme.surfaceContainer)
     }
 }
 
@@ -64,7 +74,7 @@ fun DevicesScreen(onBack: () -> Unit) {
         SubHeader("devices", onBack)
         LazyColumn(verticalArrangement = Arrangement.spacedBy(Spacing.s)) {
             items(ui.sessions, key = { it.id }) { s ->
-                Box(Modifier.fillMaxWidth().clip(Corners.group).background(MaterialTheme.colorScheme.surfaceContainer)) {
+                Box(Modifier.rowCard()) {
                     Row(Modifier.padding(Spacing.l), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -91,9 +101,11 @@ fun HistoryScreen(onBack: () -> Unit) {
         LazyColumn(verticalArrangement = Arrangement.spacedBy(Spacing.s)) {
 
             itemsIndexed(ui.history, key = { i, h -> "${h.created_at}-$i" }) { _, h ->
-                Box(Modifier.fillMaxWidth().clip(Corners.group).background(MaterialTheme.colorScheme.surfaceContainer)) {
+                Box(Modifier.rowCard()) {
                     Row(Modifier.padding(Spacing.l), verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(10.dp).background(if (h.success == 1) PigeonColors.Mint else PigeonColors.Danger, CircleShape))
+
+                        val okColor = if (LocalExperimentalRedesign.current) NovaColors.Cyan else PigeonColors.Mint
+                        Box(Modifier.size(10.dp).background(if (h.success == 1) okColor else PigeonColors.Danger, CircleShape))
                         Column(Modifier.padding(start = Spacing.m)) {
                             Text("${(h.device_name ?: "unknown").lowercase()} · ${if (h.success == 1) "signed in" else "failed"}", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface)
                             Text("${rel(h.created_at)}${h.ip?.let { " · $it" } ?: ""}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -153,7 +165,7 @@ fun BlockedScreen(onBack: () -> Unit) {
             blocked!!.isEmpty() -> Text("no blocked users", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(Spacing.l))
             else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(Spacing.s)) {
                 items(blocked!!, key = { it.id }) { u ->
-                    Box(Modifier.fillMaxWidth().clip(Corners.group).background(MaterialTheme.colorScheme.surfaceContainer)) {
+                    Box(Modifier.rowCard()) {
                         Row(Modifier.padding(Spacing.l), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 Text((u.display_name ?: u.username).lowercase(), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface)

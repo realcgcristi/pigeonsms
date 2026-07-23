@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
@@ -71,11 +72,25 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import app.pigeonsms.data.ThemeMode
 import app.pigeonsms.data.ThemePrefs
+import app.pigeonsms.design.components.NovaHero
+import app.pigeonsms.design.components.NovaIconBadgeButton
+import app.pigeonsms.design.components.NovaSectionLabel
+import app.pigeonsms.design.components.NovaTag
 import app.pigeonsms.design.theme.Corners
 import app.pigeonsms.design.theme.Dimens
+import app.pigeonsms.design.theme.LocalExperimentalRedesign
+import app.pigeonsms.design.theme.LocalUiSkin
+import app.pigeonsms.design.theme.UiSkin
+import app.pigeonsms.design.theme.NovaColors
+import app.pigeonsms.design.theme.NovaCorners
+import app.pigeonsms.design.theme.NovaDepth
+import app.pigeonsms.design.theme.NovaGradients
 import app.pigeonsms.design.theme.PigeonAccents
 import app.pigeonsms.design.theme.PigeonWallpapers
 import app.pigeonsms.design.theme.Spacing
+import app.pigeonsms.design.theme.heroAppear
+import app.pigeonsms.design.theme.novaElevation
+import app.pigeonsms.design.theme.novaHalo
 import app.pigeonsms.ui.pigeonVm
 import app.pigeonsms.ui.util.Avatar
 import app.pigeonsms.design.theme.LocalLiquidGlass
@@ -83,6 +98,7 @@ import app.pigeonsms.ui.util.LiquidSegmented
 import app.pigeonsms.ui.util.LiquidSlider
 import app.pigeonsms.ui.util.LiquidSwitch
 import app.pigeonsms.ui.util.ScreenHeader
+import app.pigeonsms.ui.util.clickableScale
 import app.pigeonsms.ui.util.glassCard
 import kotlinx.coroutines.launch
 
@@ -102,9 +118,29 @@ fun SettingsScreen(
     onNotifications: () -> Unit,
     onSignOut: () -> Unit,
 ) {
+    val skin = LocalUiSkin.current
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        ScreenHeader("you")
+
+        if (skin == UiSkin.Galaxy) NovaHero(title = "you") else ScreenHeader("you")
         Column(Modifier.padding(horizontal = Spacing.l)) {
+            if (skin == UiSkin.Galaxy) {
+                NovaIdentityHero(
+                    username = username,
+                    displayName = displayName,
+                    avatarModel = avatarModel,
+                    statusText = statusText,
+                    onEditProfile = onEditProfile,
+                )
+            } else if (skin == UiSkin.Nova) {
+
+                Exp2IdentityHero(
+                    username = username,
+                    displayName = displayName,
+                    avatarModel = avatarModel,
+                    statusText = statusText,
+                    onEditProfile = onEditProfile,
+                )
+            } else {
             Row(
                 Modifier.fillMaxWidth().padding(bottom = Spacing.m)
                     .clip(Corners.group)
@@ -125,12 +161,13 @@ fun SettingsScreen(
                     Text("edit", Modifier.padding(start = Spacing.xs))
                 }
             }
+            }
 
             Group("preferences")
             GroupCard {
-                MenuRow(Icons.Outlined.Palette, "appearance", "theme, accent, wallpaper", onAppearance)
+                MenuRow(Icons.Outlined.Palette, "appearance", "theme, accent, wallpaper", onAppearance, cyanBadge = true)
                 RowDivider()
-                MenuRow(Icons.Outlined.Notifications, "notifications", "background alerts, badges, sound and custom scopes", onNotifications)
+                MenuRow(Icons.Outlined.Notifications, "notifications", "background alerts, badges, sound and custom scopes", onNotifications, cyanBadge = true)
                 RowDivider()
                 MenuRow(Icons.Outlined.Shield, "privacy & safety", "receipts, visibility, blocking", onPrivacy)
             }
@@ -156,17 +193,128 @@ fun SettingsScreen(
 }
 
 @Composable
-internal fun GroupCard(content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
+private fun NovaIdentityHero(
+    username: String,
+    displayName: String,
+    avatarModel: Any?,
+    statusText: String?,
+    onEditProfile: () -> Unit,
+) {
+    val accent = MaterialTheme.colorScheme.primary
     Column(
-        Modifier.fillMaxWidth().clip(Corners.group).background(MaterialTheme.colorScheme.surfaceContainer),
-        content = content,
-    )
+        Modifier.fillMaxWidth().padding(bottom = Spacing.m)
+            .heroAppear()
+            .novaElevation(NovaCorners.card, MaterialTheme.colorScheme.surfaceContainer, accent, glow = true)
+            // soft accent→cyan cover wash bathes the top of the card
+            .background(Brush.linearGradient(NovaGradients.heroWash(accent)))
+            .padding(Spacing.l),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier.novaHalo(accent, alpha = NovaDepth.haloAlpha)
+                    .size(76.dp)
+                    .background(MaterialTheme.colorScheme.surface, CircleShape)
+                    // dual-accent presence ring: iris → cyan
+                    .border(3.dp, Brush.linearGradient(listOf(accent, NovaColors.Cyan)), CircleShape)
+                    .padding(4.dp),
+                contentAlignment = Alignment.Center,
+            ) { Avatar(displayName, avatarModel, 62.dp) }
+            Column(Modifier.weight(1f).padding(start = Spacing.l)) {
+                Text(displayName, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+
+                Text("@$username", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.secondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                statusText?.takeIf { it.isNotBlank() }?.let {
+                    Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = Spacing.xxs))
+                }
+            }
+        }
+
+        Row(
+            Modifier.fillMaxWidth().padding(top = Spacing.l)
+                .clickableScale(onClick = onEditProfile)
+                .novaElevation(NovaCorners.button, MaterialTheme.colorScheme.surfaceContainerHigh, accent, glow = true)
+                .background(Brush.linearGradient(NovaGradients.cta(accent)))
+                .heightIn(min = 52.dp)
+                .padding(horizontal = Spacing.l),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Outlined.Edit, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onPrimary)
+            Text("edit profile", Modifier.padding(start = Spacing.s), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onPrimary)
+        }
+    }
+}
+
+@Composable
+private fun Exp2IdentityHero(
+    username: String,
+    displayName: String,
+    avatarModel: Any?,
+    statusText: String?,
+    onEditProfile: () -> Unit,
+) {
+    Column(
+        Modifier.fillMaxWidth().padding(bottom = Spacing.m)
+            .clip(NovaCorners.card)
+            .background(
+                Brush.linearGradient(
+                    listOf(
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.22f),
+                        MaterialTheme.colorScheme.surfaceContainerHigh,
+                    ),
+                ),
+            )
+            .padding(Spacing.l),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier.size(72.dp).background(MaterialTheme.colorScheme.surface, CircleShape)
+                    .border(3.dp, MaterialTheme.colorScheme.primary, CircleShape).padding(4.dp),
+            ) { Avatar(displayName, avatarModel, 60.dp) }
+            Column(Modifier.weight(1f).padding(start = Spacing.l)) {
+                Text(displayName, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("@$username", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                statusText?.takeIf { it.isNotBlank() }?.let {
+                    Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+        Button(onClick = onEditProfile, shape = NovaCorners.button, modifier = Modifier.fillMaxWidth().padding(top = Spacing.l)) {
+            Icon(Icons.Outlined.Edit, null, Modifier.size(18.dp))
+            Text("edit profile", Modifier.padding(start = Spacing.s))
+        }
+    }
+}
+
+@Composable
+internal fun GroupCard(content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
+    when (LocalUiSkin.current) {
+        UiSkin.Galaxy ->
+
+            Column(
+                Modifier.fillMaxWidth().novaElevation(NovaCorners.card, MaterialTheme.colorScheme.surfaceContainer, MaterialTheme.colorScheme.primary),
+                content = content,
+            )
+        UiSkin.Nova ->
+
+            Column(
+                Modifier.fillMaxWidth().clip(NovaCorners.card).background(MaterialTheme.colorScheme.surfaceContainer)
+                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f), NovaCorners.card),
+                content = content,
+            )
+        UiSkin.Classic ->
+            Column(
+                Modifier.fillMaxWidth().clip(Corners.group).background(MaterialTheme.colorScheme.surfaceContainer),
+                content = content,
+            )
+    }
 }
 
 @Composable
 internal fun RowDivider() {
+    val inset = if (LocalExperimentalRedesign.current) Spacing.l + 44.dp + Spacing.m else Spacing.l + Dimens.iconBadge + Spacing.m
     androidx.compose.material3.HorizontalDivider(
-        modifier = Modifier.padding(start = Spacing.l + Dimens.iconBadge + Spacing.m),
+        modifier = Modifier.padding(start = inset),
         thickness = 0.5.dp,
         color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
     )
@@ -237,18 +385,36 @@ fun NotificationSettingsScreen(onBack: () -> Unit) {
 
 @Composable
 private fun ScopeModeRow(icon: ImageVector, title: String, detail: String, scopeId: String, onScopeId: (String) -> Unit, mode: String, onMode: (String) -> Unit) {
-    Box(Modifier.fillMaxWidth().padding(vertical = Spacing.xxs).clip(Corners.group).background(MaterialTheme.colorScheme.surfaceContainer)) {
+    val skin = LocalUiSkin.current
+    val galaxy = skin == UiSkin.Galaxy
+    val nova = skin == UiSkin.Nova
+    val accent = MaterialTheme.colorScheme.primary
+    val container = when (skin) {
+
+        UiSkin.Galaxy -> Modifier.fillMaxWidth().padding(vertical = Spacing.xxs)
+            .novaElevation(NovaCorners.card, MaterialTheme.colorScheme.surfaceContainer, accent)
+
+        UiSkin.Nova -> Modifier.fillMaxWidth().padding(vertical = Spacing.xxs).clip(NovaCorners.card).background(MaterialTheme.colorScheme.surfaceContainer)
+        UiSkin.Classic -> Modifier.fillMaxWidth().padding(vertical = Spacing.xxs).clip(Corners.group).background(MaterialTheme.colorScheme.surfaceContainer)
+    }
+    Box(container) {
         Column(Modifier.padding(horizontal = Spacing.m, vertical = Spacing.s)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                Icon(icon, null, tint = accent, modifier = Modifier.size(20.dp))
                 Text(title, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f).padding(start = Spacing.m))
-                Text(modeLabel(mode), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+
+                Text(modeLabel(mode), style = MaterialTheme.typography.labelMedium, color = if (galaxy) MaterialTheme.colorScheme.secondary else accent)
             }
             Text(detail, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = Spacing.xxl, top = Spacing.xxs))
-            OutlinedTextField(value = scopeId, onValueChange = onScopeId, label = { Text("${title.dropLastWhile { it == 's' }} id") }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(top = Spacing.xs), shape = Corners.input)
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = Spacing.xs), horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+            OutlinedTextField(value = scopeId, onValueChange = onScopeId, label = { Text("${title.dropLastWhile { it == 's' }} id") }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(top = Spacing.xs), shape = if (galaxy || nova) NovaCorners.input else Corners.input)
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = Spacing.s), horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
                 listOf("all" to "all", "mentions" to "mentions", "mute" to "mute").forEach { (value, label) ->
-                    androidx.compose.material3.FilterChip(selected = mode == value, onClick = { onMode(value) }, label = { Text(label) })
+
+                    if (galaxy) {
+                        NovaTag(selected = mode == value, onClick = { onMode(value) }) { Text(label) }
+                    } else {
+                        androidx.compose.material3.FilterChip(selected = mode == value, onClick = { onMode(value) }, label = { Text(label) })
+                    }
                 }
             }
         }
@@ -263,34 +429,72 @@ private fun modeLabel(mode: String) = when (mode) {
 
 @Composable
 internal fun Group(label: String) {
-    if (label.isNotBlank()) Text(label.lowercase(), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = Spacing.xl, bottom = Spacing.s, start = Spacing.xs))
-    else Spacer(Modifier.height(Spacing.l))
+    when (LocalUiSkin.current) {
+        UiSkin.Galaxy ->
+            if (label.isNotBlank()) NovaSectionLabel(label, modifier = Modifier.padding(top = Spacing.xl, bottom = Spacing.m, start = Spacing.m))
+            else Spacer(Modifier.height(Spacing.l))
+        UiSkin.Nova ->
+
+            if (label.isNotBlank()) Text(label.lowercase(), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(top = Spacing.xl, bottom = Spacing.m, start = Spacing.s))
+            else Spacer(Modifier.height(Spacing.l))
+        UiSkin.Classic ->
+            if (label.isNotBlank()) Text(label.lowercase(), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = Spacing.xl, bottom = Spacing.s, start = Spacing.xs))
+            else Spacer(Modifier.height(Spacing.l))
+    }
 }
 
 @Composable
-private fun MenuRow(icon: ImageVector, label: String, detail: String?, onClick: () -> Unit, danger: Boolean = false) {
+private fun MenuRow(icon: ImageVector, label: String, detail: String?, onClick: () -> Unit, danger: Boolean = false, cyanBadge: Boolean = false) {
     val accent = if (danger) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+    val skin = LocalUiSkin.current
+    val galaxy = skin == UiSkin.Galaxy
+    val nova = skin == UiSkin.Nova
+    val experimental = galaxy || nova
+
+    val badgeTint = if (galaxy && cyanBadge && !danger) MaterialTheme.colorScheme.secondary else accent
+    val badgeSize = if (experimental) 44.dp else Dimens.iconBadge
     Row(
         Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .heightIn(min = Dimens.settingsRowHeight)
+            .heightIn(min = if (experimental) 68.dp else Dimens.settingsRowHeight)
             .padding(horizontal = Spacing.l, vertical = Spacing.s),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(Dimens.iconBadge).clip(Corners.iconBadge).background(accent.copy(alpha = 0.12f)), contentAlignment = Alignment.Center) {
-            Icon(icon, null, tint = accent, modifier = Modifier.size(Dimens.iconSmall))
+        if (galaxy) {
+            // tactile rounded-square: soft vertical gradient + hairline rim
+            Box(
+                Modifier.size(badgeSize).clip(NovaCorners.iconBadge)
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(badgeTint.copy(alpha = 0.26f), badgeTint.copy(alpha = 0.12f)),
+                        ),
+                    )
+                    .border(1.dp, badgeTint.copy(alpha = NovaDepth.rimAccent), NovaCorners.iconBadge),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(icon, null, tint = badgeTint, modifier = Modifier.size(22.dp))
+            }
+        } else {
+
+        Box(
+            Modifier.size(badgeSize).clip(if (nova) NovaCorners.iconBadge else Corners.iconBadge)
+                .background(accent.copy(alpha = if (nova) 0.18f else 0.12f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, null, tint = accent, modifier = Modifier.size(if (nova) 22.dp else Dimens.iconSmall))
+        }
         }
         Column(Modifier.weight(1f).padding(horizontal = Spacing.m)) {
-            Text(label, style = MaterialTheme.typography.bodyLarge, color = if (danger) accent else MaterialTheme.colorScheme.onSurface)
-            detail?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+            Text(label, style = if (experimental) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyLarge, color = if (danger) accent else MaterialTheme.colorScheme.onSurface)
+            detail?.let { Text(it, style = if (experimental) MaterialTheme.typography.bodySmall else MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) }
         }
         if (!danger) {
             Icon(
                 Icons.Outlined.ChevronRight,
                 null,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
-                modifier = Modifier.size(18.dp),
+                modifier = Modifier.size(if (experimental) 22.dp else 18.dp),
             )
         }
     }
@@ -298,9 +502,32 @@ private fun MenuRow(icon: ImageVector, label: String, detail: String?, onClick: 
 
 @Composable
 internal fun SettingsSubHeader(title: String, onBack: () -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(top = Spacing.xxl, bottom = Spacing.s).heightIn(min = Dimens.topBarHeight), verticalAlignment = Alignment.CenterVertically) {
-        IconButton(onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "back", tint = MaterialTheme.colorScheme.onSurface) }
-        Text(title.lowercase(), style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurface)
+    when (LocalUiSkin.current) {
+        UiSkin.Galaxy ->
+            Column(Modifier.fillMaxWidth().statusBarsPadding().padding(top = Spacing.l, bottom = Spacing.m)) {
+                NovaIconBadgeButton(onClick = onBack, size = 44.dp) {
+                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, "back", Modifier.size(20.dp))
+                }
+                Text(
+                    title.lowercase(),
+                    style = MaterialTheme.typography.displaySmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(top = Spacing.m, start = Spacing.xs).heroAppear(),
+                )
+            }
+        UiSkin.Nova ->
+
+            Column(Modifier.fillMaxWidth().padding(top = Spacing.xxl, bottom = Spacing.m)) {
+                IconButton(onBack, Modifier.background(MaterialTheme.colorScheme.surfaceContainer, CircleShape)) {
+                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, "back", tint = MaterialTheme.colorScheme.onSurface)
+                }
+                Text(title.lowercase(), style = MaterialTheme.typography.displaySmall, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(top = Spacing.s, start = Spacing.xs))
+            }
+        UiSkin.Classic ->
+            Row(Modifier.fillMaxWidth().padding(top = Spacing.xxl, bottom = Spacing.s).heightIn(min = Dimens.topBarHeight), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "back", tint = MaterialTheme.colorScheme.onSurface) }
+                Text(title.lowercase(), style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurface)
+            }
     }
 }
 
@@ -342,10 +569,14 @@ fun AppearanceScreen(onBack: () -> Unit, onAppIcon: () -> Unit = {}) {
         Spacer(Modifier.height(Spacing.l))
         Text("accent", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = Spacing.s))
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(Spacing.m)) {
+            val novaSel = LocalExperimentalRedesign.current
             PigeonAccents.forEach { a ->
                 val on = prefs.accent == a.key
                 Box(
-                    Modifier.size(44.dp).background(a.bright, CircleShape).clickable { vm.setAccent(a.key) }
+                    Modifier
+
+                        .then(if (on && novaSel) Modifier.novaHalo(a.bright, alpha = NovaDepth.glowStrong) else Modifier)
+                        .size(44.dp).background(a.bright, CircleShape).clickable { vm.setAccent(a.key) }
                         .then(if (on) Modifier.border(3.dp, MaterialTheme.colorScheme.onSurface, CircleShape) else Modifier),
                 )
             }
@@ -404,7 +635,75 @@ fun AppearanceScreen(onBack: () -> Unit, onAppIcon: () -> Unit = {}) {
                 ToggleRow("material you colors", prefs.dynamicColor, vm::setDynamicColor)
             }
         }
+
+        Spacer(Modifier.height(Spacing.l))
+        Text("ui skin", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = Spacing.s))
+        SkinPicker(current = prefs.uiSkin, onSelect = vm::setUiSkin)
         Spacer(Modifier.height(Spacing.huge))
+    }
+}
+
+@Composable
+private fun SkinPicker(current: String, onSelect: (String) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(Spacing.s)) {
+        SkinOption(
+            key = "classic",
+            title = "classic",
+            desc = "the original look — untouched",
+            selected = current == "classic",
+            onSelect = onSelect,
+        )
+        SkinOption(
+            key = "nova",
+            title = "nova",
+            desc = "cleaner & flatter — calm nav, subtle depth",
+            selected = current == "nova",
+            onSelect = onSelect,
+        )
+        SkinOption(
+            key = "galaxy",
+            title = "galaxy",
+            desc = "deep & glowy — aurora, glow, big soft shadows",
+            selected = current == "galaxy",
+            onSelect = onSelect,
+        )
+    }
+}
+
+@Composable
+private fun SkinOption(
+    key: String,
+    title: String,
+    desc: String,
+    selected: Boolean,
+    onSelect: (String) -> Unit,
+) {
+    val accent = MaterialTheme.colorScheme.primary
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(Corners.card)
+            .background(MaterialTheme.colorScheme.surfaceContainer)
+            .then(
+                if (selected) Modifier.border(2.dp, accent, Corners.card)
+                else Modifier.border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f), Corners.card),
+            )
+            .clickable { onSelect(key) }
+            .padding(horizontal = Spacing.l, vertical = Spacing.m),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
+            Text(desc, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        if (selected) {
+            Box(
+                Modifier.size(24.dp).clip(CircleShape).background(accent),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Filled.Check, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(16.dp))
+            }
+        }
     }
 }
 
@@ -434,6 +733,28 @@ private fun ToggleDivider() {
         thickness = 0.5.dp,
         color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
     )
+}
+
+@Composable
+private fun ToggleRow(label: String, subtitle: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    val nova = LocalExperimentalRedesign.current
+    Row(Modifier.fillMaxWidth().heightIn(min = if (nova) 68.dp else Dimens.settingsRowHeight).padding(horizontal = Spacing.l, vertical = Spacing.s), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f).padding(end = Spacing.m)) {
+            Text(label, style = if (nova) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
+            Text(subtitle, style = if (nova) MaterialTheme.typography.bodySmall else MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        if (LocalLiquidGlass.current) {
+            LiquidSwitch(checked = checked, onCheckedChange = onChange)
+        } else {
+            Switch(
+                checked = checked,
+                onCheckedChange = onChange,
+                thumbContent = if (checked) {
+                    { Icon(Icons.Filled.Check, contentDescription = null, modifier = Modifier.size(SwitchDefaults.IconSize)) }
+                } else null,
+            )
+        }
+    }
 }
 
 @Composable
