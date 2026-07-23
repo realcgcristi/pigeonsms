@@ -5,12 +5,21 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.EaseInOutSine
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -28,6 +37,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
@@ -63,20 +73,38 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.toColorInt
+import app.pigeonsms.design.components.NovaPanel
+import app.pigeonsms.design.components.NovaSectionLabel
 import app.pigeonsms.design.theme.Corners
 import app.pigeonsms.design.theme.Dimens
+import app.pigeonsms.design.theme.LocalExperimentalRedesign
 import app.pigeonsms.design.theme.LocalLiquidGlass
+import app.pigeonsms.design.theme.LocalReducedMotion
+import app.pigeonsms.design.theme.LocalUiSkin
+import app.pigeonsms.design.theme.NovaCorners
+import app.pigeonsms.design.theme.NovaDepth
+import app.pigeonsms.design.theme.NovaGradients
+import app.pigeonsms.design.theme.NovaMotion
 import app.pigeonsms.design.theme.PigeonAccents
 import app.pigeonsms.design.theme.PigeonColors
 import app.pigeonsms.design.theme.PigeonMotion
 import app.pigeonsms.design.theme.Spacing
+import app.pigeonsms.design.theme.UiSkin
+import app.pigeonsms.design.theme.heroAppear
+import app.pigeonsms.design.theme.novaAuroraBackground
+import app.pigeonsms.design.theme.novaElevation
+import app.pigeonsms.design.theme.novaHalo
+import app.pigeonsms.design.theme.rememberNovaPulse
 import app.pigeonsms.network.MutualSpaceDto
 import app.pigeonsms.network.ProfileDto
 import app.pigeonsms.ui.pigeonVm
@@ -116,6 +144,21 @@ fun ProfileScreen(userId: String, onBack: () -> Unit, isSelf: Boolean = false) {
 
 @Composable
 private fun ProfileContent(
+    profile: ProfileDto,
+    mediaUrl: (String?) -> String?,
+    onBack: () -> Unit,
+    onBlock: (() -> Unit)? = null,
+    mutualSpaces: List<MutualSpaceDto> = emptyList(),
+) {
+    when (LocalUiSkin.current) {
+        UiSkin.Nova -> ProfileContentPorted(profile, mediaUrl, onBack, onBlock, mutualSpaces)
+        UiSkin.Galaxy -> ProfileContentNova(profile, mediaUrl, onBack, onBlock, mutualSpaces)
+        UiSkin.Classic -> ProfileContentClassic(profile, mediaUrl, onBack, onBlock, mutualSpaces)
+    }
+}
+
+@Composable
+private fun ProfileContentClassic(
     profile: ProfileDto,
     mediaUrl: (String?) -> String?,
     onBack: () -> Unit,
@@ -344,6 +387,689 @@ private fun ProfileContent(
 }
 
 @Composable
+private fun ProfileContentNova(
+    profile: ProfileDto,
+    mediaUrl: (String?) -> String?,
+    onBack: () -> Unit,
+    onBlock: (() -> Unit)? = null,
+    mutualSpaces: List<MutualSpaceDto> = emptyList(),
+) {
+    val accent = profileColor(profile.accent, MaterialTheme.colorScheme.primary)
+    val cyan = MaterialTheme.colorScheme.secondary
+    val bannerColor = profileColor(profile.banner_color, MaterialTheme.colorScheme.surfaceContainerHigh)
+    val name = profile.display_name?.takeIf { it.isNotBlank() } ?: profile.username
+    val online = presence(profile.last_online)
+    var shown by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { shown = true }
+
+    // aurora canvas behind the whole scroll so the space-indigo ground has depth
+    Box(Modifier.fillMaxSize().novaAuroraBackground(accent, cyan, animate = true)) {
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+
+            BoxWithConstraints(Modifier.fillMaxWidth()) {
+                val coverHeight = (maxWidth * 0.62f).coerceIn(200.dp, 300.dp)
+                val avatarSize = 132.dp
+                Box(Modifier.fillMaxWidth().height(coverHeight + avatarSize / 2 + Spacing.s)) {
+                    // gradient cover — a dual-accent iris→cyan wash bleeding into the void
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(coverHeight)
+                            .clip(RoundedCornerShape(bottomStart = 44.dp, bottomEnd = 44.dp))
+                            .background(
+                                Brush.linearGradient(
+                                    listOf(
+                                        accent.copy(alpha = 0.95f),
+                                        lerp(accent, cyan, 0.35f).copy(alpha = 0.85f),
+                                        bannerColor,
+                                        MaterialTheme.colorScheme.surface,
+                                    ),
+                                ),
+                            ),
+                    ) {
+                        val bannerModel = mediaUrl(profile.banner_key)
+                        if (bannerModel != null) {
+                            AsyncImage(
+                                model = bannerModel,
+                                contentDescription = "$name banner",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
+                        // scrim down to the void so the overlapping avatar reads
+                        Box(
+                            Modifier.fillMaxSize().background(
+                                Brush.verticalGradient(
+                                    0.35f to Color.Transparent,
+                                    1f to MaterialTheme.colorScheme.surface.copy(alpha = 0.78f),
+                                ),
+                            ),
+                        )
+                    }
+                    NovaBackButton(onBack, Modifier.statusBarsPadding().padding(Spacing.s))
+                    // big overlapping avatar, centered on the fold, lifted by a soft
+                    // accent halo and ringed in an iris→cyan gradient
+                    val pulse = rememberNovaPulse()
+                    Box(
+                        Modifier
+                            .align(Alignment.BottomCenter)
+                            .novaHalo(accent, alpha = 0.22f + 0.10f * pulse)
+                            .size(avatarSize + 14.dp)
+                            .background(MaterialTheme.colorScheme.surface, CircleShape)
+                            .border(
+                                4.dp,
+                                Brush.linearGradient(listOf(accent, cyan)),
+                                CircleShape,
+                            )
+                            .padding(6.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Avatar(name, mediaUrl(profile.avatar_key), avatarSize, sharedKey = "avatar-${profile.id}")
+                        if (online) {
+
+                            Box(
+                                Modifier.align(Alignment.BottomEnd)
+                                    .novaHalo(cyan, alpha = 0.30f + 0.35f * pulse)
+                                    .size(30.dp)
+                                    .background(MaterialTheme.colorScheme.surface, CircleShape)
+                                    .padding(4.dp)
+                                    .background(cyan, CircleShape),
+                            )
+                        }
+                    }
+                }
+            }
+
+            AnimatedVisibility(
+                visible = shown,
+                enter = fadeIn(PigeonMotion.smooth()) + slideInVertically(PigeonMotion.bouncy()) { it / 8 },
+            ) {
+                Column(
+                    Modifier.fillMaxWidth().padding(horizontal = Spacing.l, vertical = Spacing.m),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    // large display name — louder hero end of the ramp
+                    Text(
+                        name,
+                        style = MaterialTheme.typography.displayMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        textAlign = TextAlign.Center,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.heroAppear(),
+                    )
+                    Row(
+                        Modifier.padding(top = Spacing.xs),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center,
+                    ) {
+                        Text("@${profile.username}", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        profile.pronouns?.takeIf { it.isNotBlank() }?.let {
+                            Text(
+                                it,
+                                style = MaterialTheme.typography.labelLarge,
+                                color = accent,
+                                modifier = Modifier
+                                    .padding(start = Spacing.s)
+                                    .clip(NovaCorners.chip)
+                                    .novaElevation(NovaCorners.chip, MaterialTheme.colorScheme.surfaceContainerHigh, accent, accented = true, elevation = 0.dp)
+                                    .padding(horizontal = Spacing.m, vertical = Spacing.xxs),
+                            )
+                        }
+                    }
+                    // live presence line in cyan when online — reuse the accent pair
+                    if (online) {
+                        Row(
+                            Modifier.padding(top = Spacing.s),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center,
+                        ) {
+                            val pulse = rememberNovaPulse()
+                            Box(
+                                Modifier.novaHalo(cyan, alpha = 0.25f + 0.4f * pulse)
+                                    .size(8.dp).background(cyan, CircleShape),
+                            )
+                            Text(
+                                "online now",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = cyan,
+                                modifier = Modifier.padding(start = Spacing.s),
+                            )
+                        }
+                    }
+
+                    // status: elevated accent pill with a lit rim
+                    profile.status_text?.takeIf { it.isNotBlank() }?.let {
+                        Row(
+                            Modifier
+                                .padding(top = Spacing.l)
+                                .novaElevation(NovaCorners.bubble, MaterialTheme.colorScheme.surfaceContainer, accent, accented = true, glow = true, elevation = NovaDepth.cardElevation)
+                                .padding(horizontal = Spacing.l, vertical = Spacing.m),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Box(Modifier.size(9.dp).background(accent, CircleShape))
+                            Text(it, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(start = Spacing.s), textAlign = TextAlign.Center)
+                        }
+                    }
+
+                    Spacer(Modifier.height(Spacing.l))
+
+                    // body feels as designed as the hero.
+                    var step = 0
+
+                    // about — expressive elevated card
+                    profile.about?.takeIf { it.isNotBlank() }?.let {
+                        NovaSection(accent, "about me", delayMillis = 40 * step++) {
+                            Text(it, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(top = Spacing.s))
+                        }
+                        Spacer(Modifier.height(Spacing.m))
+                    }
+
+                    // details card
+                    NovaSection(accent, "details", delayMillis = 40 * step++) {
+                        NovaDetailRow(Icons.Outlined.CalendarToday, "joined", profile.created_at.takeIf { it > 0 }?.let(::profileDate) ?: "recently", accent)
+                        NovaDetailRow(
+                            Icons.Outlined.Schedule,
+                            "last seen",
+                            if (online) "online now" else profile.last_online?.let(::profileDate) ?: "a while ago",
+                            accent,
+                            valueColor = if (online) cyan else null,
+                        )
+                        NovaDetailRow(Icons.Outlined.AlternateEmail, "handle", "@${profile.username}", accent)
+                    }
+
+                    // mutual nests — overlapping avatar stack that fans in + names
+                    if (mutualSpaces.isNotEmpty()) {
+                        Spacer(Modifier.height(Spacing.m))
+                        NovaSection(accent, "mutual nests — ${mutualSpaces.size}", delayMillis = 40 * step++) {
+                            Row(
+                                Modifier.padding(top = Spacing.m),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                // overlapping stack of up to 5 icons, each fanning out
+                                Box(Modifier.height(46.dp)) {
+                                    mutualSpaces.take(5).forEachIndexed { i, space ->
+                                        val iconUrl = mediaUrl(space.icon_square_key ?: space.icon_key)
+                                        val reduced = LocalReducedMotion.current
+                                        var placed by remember(space.id) { mutableStateOf(false) }
+                                        LaunchedEffect(space.id) { placed = true }
+                                        val offset by animateFloatAsState(
+                                            targetValue = if (placed || reduced) 1f else 0f,
+                                            animationSpec = NovaMotion.emphasized(),
+                                            label = "nestFan",
+                                        )
+                                        Box(
+                                            Modifier
+                                                .padding(start = (i * 30 * offset).dp)
+                                                .graphicsLayer { alpha = offset }
+                                                .size(46.dp)
+                                                .background(MaterialTheme.colorScheme.surfaceContainerHigh, CircleShape)
+                                                .border(2.dp, MaterialTheme.colorScheme.surface, CircleShape)
+                                                .padding(2.dp),
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            if (iconUrl != null) {
+                                                AsyncImage(iconUrl, null, Modifier.fillMaxSize().clip(CircleShape), contentScale = ContentScale.Crop)
+                                            } else {
+                                                Box(Modifier.fillMaxSize().background(Brush.linearGradient(NovaGradients.coverMesh(accent)), CircleShape), contentAlignment = Alignment.Center) {
+                                                    Text(space.name.take(1).uppercase(), style = MaterialTheme.typography.titleSmall, color = accent)
+                                                }
+                                            }
+                                        }
+                                    }
+                                    if (mutualSpaces.size > 5) {
+                                        Box(
+                                            Modifier.padding(start = (5 * 30).dp).size(46.dp)
+                                                .background(lerp(accent, cyan, 0.4f).copy(alpha = 0.24f), CircleShape)
+                                                .border(2.dp, MaterialTheme.colorScheme.surface, CircleShape),
+                                            contentAlignment = Alignment.Center,
+                                        ) { Text("+${mutualSpaces.size - 5}", style = MaterialTheme.typography.labelMedium, color = cyan) }
+                                    }
+                                }
+                            }
+                            Text(
+                                mutualSpaces.joinToString("  ·  ") { it.name },
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = Spacing.m),
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+
+                    // badges — expressive elevated chips
+                    if (profile.badges.isNotEmpty()) {
+                        Spacer(Modifier.height(Spacing.m))
+                        NovaSection(accent, "badges", delayMillis = 40 * step++) {
+                            Row(
+                                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = Spacing.m),
+                                horizontalArrangement = Arrangement.spacedBy(Spacing.s),
+                            ) {
+                                profile.badges.forEach { badge ->
+                                    Text(
+                                        badge,
+                                        modifier = Modifier
+                                            .novaElevation(NovaCorners.chip, MaterialTheme.colorScheme.surfaceContainerHigh, accent, accented = true, elevation = 0.dp)
+                                            .padding(horizontal = Spacing.l, vertical = Spacing.s),
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = accent,
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    if (onBlock != null) {
+                        var confirmBlock by remember { mutableStateOf(false) }
+                        Spacer(Modifier.height(Spacing.l))
+                        val source = remember { MutableInteractionSource() }
+                        val pressed by source.collectIsPressedAsState()
+                        val reduced = LocalReducedMotion.current
+                        val scale by animateFloatAsState(
+                            if (pressed && !reduced) 0.97f else 1f, NovaMotion.press(), label = "blockPress",
+                        )
+                        Row(
+                            Modifier
+                                .graphicsLayer { scaleX = scale; scaleY = scale }
+                                .fillMaxWidth()
+                                .clip(NovaCorners.button)
+                                .background(MaterialTheme.colorScheme.error.copy(alpha = 0.10f))
+                                .border(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.40f), NovaCorners.button)
+                                .clickable(interactionSource = source, indication = null) { confirmBlock = true }
+                                .padding(vertical = Spacing.m),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text("block @${profile.username}", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.error)
+                        }
+                        if (confirmBlock) {
+                            AlertDialog(
+                                onDismissRequest = { confirmBlock = false },
+                                title = { Text("block @${profile.username}?") },
+                                text = { Text("they'll be removed from your friends and won't be able to message you. you can unblock them from settings.") },
+                                confirmButton = {
+                                    TextButton(onClick = { confirmBlock = false; onBlock() }) {
+                                        Text("block", color = MaterialTheme.colorScheme.error)
+                                    }
+                                },
+                                dismissButton = { TextButton(onClick = { confirmBlock = false }) { Text("cancel") } },
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(Spacing.xl))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProfileContentPorted(
+    profile: ProfileDto,
+    mediaUrl: (String?) -> String?,
+    onBack: () -> Unit,
+    onBlock: (() -> Unit)? = null,
+    mutualSpaces: List<MutualSpaceDto> = emptyList(),
+) {
+    val accent = profileColor(profile.accent, MaterialTheme.colorScheme.primary)
+    val bannerColor = profileColor(profile.banner_color, MaterialTheme.colorScheme.surfaceContainerHigh)
+    val name = profile.display_name?.takeIf { it.isNotBlank() } ?: profile.username
+    val online = presence(profile.last_online)
+    var shown by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { shown = true }
+
+    Box(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+
+            BoxWithConstraints(Modifier.fillMaxWidth()) {
+                val coverHeight = (maxWidth * 0.62f).coerceIn(200.dp, 300.dp)
+                val avatarSize = 132.dp
+                Box(Modifier.fillMaxWidth().height(coverHeight + avatarSize / 2 + Spacing.s)) {
+                    // gradient cover — accent bleeds into banner color into surface
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(coverHeight)
+                            .clip(RoundedCornerShape(bottomStart = 44.dp, bottomEnd = 44.dp))
+                            .background(
+                                Brush.linearGradient(
+                                    listOf(
+                                        accent.copy(alpha = 0.95f),
+                                        bannerColor,
+                                        MaterialTheme.colorScheme.surface,
+                                    ),
+                                ),
+                            ),
+                    ) {
+                        val bannerModel = mediaUrl(profile.banner_key)
+                        if (bannerModel != null) {
+                            AsyncImage(
+                                model = bannerModel,
+                                contentDescription = "$name banner",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
+                        Box(
+                            Modifier.fillMaxSize().background(
+                                Brush.verticalGradient(
+                                    0.4f to Color.Transparent,
+                                    1f to MaterialTheme.colorScheme.surface.copy(alpha = 0.55f),
+                                ),
+                            ),
+                        )
+                    }
+                    IconButton(
+                        onClick = onBack,
+                        modifier = Modifier.statusBarsPadding().padding(Spacing.s)
+                            .background(Color.Black.copy(alpha = 0.32f), CircleShape),
+                    ) {
+                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, "back", tint = Color.White)
+                    }
+                    // big overlapping avatar, centered on the fold
+                    Box(
+                        Modifier
+                            .align(Alignment.BottomCenter)
+                            .size(avatarSize + 12.dp)
+                            .background(MaterialTheme.colorScheme.surface, CircleShape)
+                            .border(4.dp, accent, CircleShape)
+                            .padding(6.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Avatar(name, mediaUrl(profile.avatar_key), avatarSize, sharedKey = "avatar-${profile.id}")
+                        if (online) {
+                            Box(
+                                Modifier.align(Alignment.BottomEnd).size(30.dp)
+                                    .background(MaterialTheme.colorScheme.surface, CircleShape)
+                                    .padding(4.dp).background(PigeonColors.Mint, CircleShape),
+                            )
+                        }
+                    }
+                }
+            }
+
+            AnimatedVisibility(
+                visible = shown,
+                enter = fadeIn(PigeonMotion.smooth()) + slideInVertically(PigeonMotion.bouncy()) { it / 8 },
+            ) {
+                Column(
+                    Modifier.fillMaxWidth().padding(horizontal = Spacing.l, vertical = Spacing.m),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    // large display name
+                    Text(
+                        name,
+                        style = MaterialTheme.typography.displaySmall,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        textAlign = TextAlign.Center,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Row(
+                        Modifier.padding(top = Spacing.xs),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center,
+                    ) {
+                        Text("@${profile.username}", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        profile.pronouns?.takeIf { it.isNotBlank() }?.let {
+                            Text(
+                                it,
+                                style = MaterialTheme.typography.labelLarge,
+                                color = accent,
+                                modifier = Modifier
+                                    .padding(start = Spacing.s)
+                                    .background(accent.copy(alpha = 0.16f), NovaCorners.chip)
+                                    .padding(horizontal = Spacing.m, vertical = Spacing.xxs),
+                            )
+                        }
+                    }
+
+                    // status: bold accent pill
+                    profile.status_text?.takeIf { it.isNotBlank() }?.let {
+                        Row(
+                            Modifier
+                                .padding(top = Spacing.l)
+                                .clip(NovaCorners.bubble)
+                                .background(accent.copy(alpha = 0.14f))
+                                .border(1.dp, accent.copy(alpha = 0.30f), NovaCorners.bubble)
+                                .padding(horizontal = Spacing.l, vertical = Spacing.m),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Box(Modifier.size(9.dp).background(accent, CircleShape))
+                            Text(it, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(start = Spacing.s), textAlign = TextAlign.Center)
+                        }
+                    }
+
+                    Spacer(Modifier.height(Spacing.l))
+
+                    // about — expressive card
+                    profile.about?.takeIf { it.isNotBlank() }?.let {
+                        PortedNovaCard(accent, "about me") {
+                            Text(it, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(top = Spacing.s))
+                        }
+                        Spacer(Modifier.height(Spacing.m))
+                    }
+
+                    // details card
+                    PortedNovaCard(accent, "details") {
+                        PortedNovaDetailRow(Icons.Outlined.CalendarToday, "joined", profile.created_at.takeIf { it > 0 }?.let(::profileDate) ?: "recently", accent)
+                        PortedNovaDetailRow(
+                            Icons.Outlined.Schedule,
+                            "last seen",
+                            if (online) "online now" else profile.last_online?.let(::profileDate) ?: "a while ago",
+                            accent,
+                            valueColor = if (online) PigeonColors.Mint else null,
+                        )
+                        PortedNovaDetailRow(Icons.Outlined.AlternateEmail, "handle", "@${profile.username}", accent)
+                    }
+
+                    // mutual nests — overlapping avatar stack + names
+                    if (mutualSpaces.isNotEmpty()) {
+                        Spacer(Modifier.height(Spacing.m))
+                        PortedNovaCard(accent, "mutual nests — ${mutualSpaces.size}") {
+                            Row(
+                                Modifier.padding(top = Spacing.m),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                // overlapping stack of up to 5 icons
+                                Box(Modifier.height(44.dp)) {
+                                    mutualSpaces.take(5).forEachIndexed { i, space ->
+                                        val iconUrl = mediaUrl(space.icon_square_key ?: space.icon_key)
+                                        Box(
+                                            Modifier
+                                                .padding(start = (i * 30).dp)
+                                                .size(44.dp)
+                                                .background(MaterialTheme.colorScheme.surfaceContainer, CircleShape)
+                                                .border(2.dp, MaterialTheme.colorScheme.surface, CircleShape)
+                                                .padding(2.dp),
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            if (iconUrl != null) {
+                                                AsyncImage(iconUrl, null, Modifier.fillMaxSize().clip(CircleShape), contentScale = ContentScale.Crop)
+                                            } else {
+                                                Box(Modifier.fillMaxSize().background(accent.copy(alpha = 0.16f), CircleShape), contentAlignment = Alignment.Center) {
+                                                    Text(space.name.take(1).uppercase(), style = MaterialTheme.typography.titleSmall, color = accent)
+                                                }
+                                            }
+                                        }
+                                    }
+                                    if (mutualSpaces.size > 5) {
+                                        Box(
+                                            Modifier.padding(start = (5 * 30).dp).size(44.dp)
+                                                .background(accent.copy(alpha = 0.20f), CircleShape)
+                                                .border(2.dp, MaterialTheme.colorScheme.surface, CircleShape),
+                                            contentAlignment = Alignment.Center,
+                                        ) { Text("+${mutualSpaces.size - 5}", style = MaterialTheme.typography.labelMedium, color = accent) }
+                                    }
+                                }
+                            }
+                            Text(
+                                mutualSpaces.joinToString("  ·  ") { it.name },
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = Spacing.m),
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+
+                    // badges — expressive chips
+                    if (profile.badges.isNotEmpty()) {
+                        Spacer(Modifier.height(Spacing.m))
+                        PortedNovaCard(accent, "badges") {
+                            Row(
+                                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = Spacing.m),
+                                horizontalArrangement = Arrangement.spacedBy(Spacing.s),
+                            ) {
+                                profile.badges.forEach { badge ->
+                                    Text(
+                                        badge,
+                                        modifier = Modifier
+                                            .background(accent.copy(alpha = 0.14f), NovaCorners.chip)
+                                            .border(1.dp, accent.copy(alpha = 0.35f), NovaCorners.chip)
+                                            .padding(horizontal = Spacing.l, vertical = Spacing.s),
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = accent,
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    if (onBlock != null) {
+                        var confirmBlock by remember { mutableStateOf(false) }
+                        Spacer(Modifier.height(Spacing.l))
+                        OutlinedButton(
+                            onClick = { confirmBlock = true },
+                            shape = NovaCorners.button,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text("block @${profile.username}", color = MaterialTheme.colorScheme.error)
+                        }
+                        if (confirmBlock) {
+                            AlertDialog(
+                                onDismissRequest = { confirmBlock = false },
+                                title = { Text("block @${profile.username}?") },
+                                text = { Text("they'll be removed from your friends and won't be able to message you. you can unblock them from settings.") },
+                                confirmButton = {
+                                    TextButton(onClick = { confirmBlock = false; onBlock() }) {
+                                        Text("block", color = MaterialTheme.colorScheme.error)
+                                    }
+                                },
+                                dismissButton = { TextButton(onClick = { confirmBlock = false }) { Text("cancel") } },
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(Spacing.xl))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PortedNovaCard(accent: Color, title: String, content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(NovaCorners.card)
+            .background(MaterialTheme.colorScheme.surfaceContainer)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f), NovaCorners.card)
+            .padding(Spacing.l),
+    ) {
+        Text(title, style = MaterialTheme.typography.titleSmall, color = accent)
+        content()
+    }
+}
+
+@Composable
+private fun PortedNovaDetailRow(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, value: String, accent: Color, valueColor: Color? = null) {
+    Row(Modifier.fillMaxWidth().padding(top = Spacing.m), verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier.size(38.dp).clip(NovaCorners.iconBadge).background(accent.copy(alpha = 0.14f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, null, tint = accent, modifier = Modifier.size(20.dp))
+        }
+        Text(
+            label,
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = Spacing.m).width(88.dp),
+        )
+        Text(value, style = MaterialTheme.typography.bodyLarge, color = valueColor ?: MaterialTheme.colorScheme.onSurface)
+    }
+}
+
+@Composable
+private fun NovaBackButton(onBack: () -> Unit, modifier: Modifier = Modifier) {
+    val source = remember { MutableInteractionSource() }
+    val pressed by source.collectIsPressedAsState()
+    val reduced = LocalReducedMotion.current
+    val scale by animateFloatAsState(
+        if (pressed && !reduced) 0.88f else 1f, NovaMotion.press(), label = "backPress",
+    )
+    Box(
+        modifier
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .size(44.dp)
+            .background(Color.Black.copy(alpha = 0.36f), CircleShape)
+            .border(1.dp, Color.White.copy(alpha = 0.14f), CircleShape)
+            .clickable(
+                interactionSource = source,
+                indication = null,
+                onClickLabel = "back",
+                role = Role.Button,
+                onClick = onBack,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(Icons.AutoMirrored.Outlined.ArrowBack, "back", tint = Color.White)
+    }
+}
+
+@Composable
+private fun NovaSection(
+    accent: Color,
+    title: String,
+    delayMillis: Int = 0,
+    content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit,
+) {
+    NovaPanel(
+        modifier = Modifier.fillMaxWidth().heroAppear(delayMillis = delayMillis),
+        shape = NovaCorners.card,
+    ) {
+        NovaSectionLabel(title, accent = false)
+        content()
+    }
+}
+
+@Composable
+private fun NovaDetailRow(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, value: String, accent: Color, valueColor: Color? = null) {
+    Row(Modifier.fillMaxWidth().padding(top = Spacing.m), verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier
+                .size(38.dp)
+                .clip(NovaCorners.iconBadge)
+                .background(Brush.verticalGradient(listOf(accent.copy(alpha = 0.22f), accent.copy(alpha = 0.10f))))
+                .border(1.dp, Color.White.copy(alpha = NovaDepth.rimTop), NovaCorners.iconBadge),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, null, tint = accent, modifier = Modifier.size(20.dp))
+        }
+        Text(
+            label,
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = Spacing.m).width(88.dp),
+        )
+        Text(value, style = MaterialTheme.typography.bodyLarge, color = valueColor ?: MaterialTheme.colorScheme.onSurface)
+    }
+}
+
+@Composable
 private fun ProfileDetailRow(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, value: String, valueColor: Color? = null) {
     Row(Modifier.fillMaxWidth().padding(top = Spacing.m), verticalAlignment = Alignment.CenterVertically) {
         Box(
@@ -368,6 +1094,10 @@ private fun profileDate(epoch: Long): String = runCatching {
 
 @Composable
 private fun ProfileStatus(onBack: () -> Unit, message: String, action: String? = null, onAction: (() -> Unit)? = null) {
+    if (LocalExperimentalRedesign.current) {
+        ProfileStatusNova(onBack, message, action, onAction)
+        return
+    }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().statusBarsPadding().heightIn(min = Dimens.topBarHeight), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "back") }
@@ -377,6 +1107,114 @@ private fun ProfileStatus(onBack: () -> Unit, message: String, action: String? =
             Text(message, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (action != null && onAction != null) {
                 OutlinedButton(onClick = onAction, modifier = Modifier.padding(top = Spacing.m)) { Text(action) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProfileStatusNova(onBack: () -> Unit, message: String, action: String?, onAction: (() -> Unit)?) {
+    val accent = MaterialTheme.colorScheme.primary
+    val cyan = MaterialTheme.colorScheme.secondary
+    Box(Modifier.fillMaxSize().novaAuroraBackground(accent, cyan, animate = true)) {
+        NovaBackButton(onBack, Modifier.statusBarsPadding().padding(Spacing.s))
+        if (action != null && onAction != null) {
+            // error state — accent-washed disc + retry
+            Column(
+                Modifier.fillMaxSize().padding(Spacing.xl),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                val pulse = rememberNovaPulse()
+                Box(
+                    Modifier
+                        .novaHalo(accent, alpha = 0.14f + 0.10f * pulse)
+                        .size(84.dp)
+                        .clip(CircleShape)
+                        .background(Brush.verticalGradient(listOf(accent.copy(alpha = 0.24f), accent.copy(alpha = 0.10f))))
+                        .border(1.dp, Color.White.copy(alpha = NovaDepth.rimTop), CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Outlined.Schedule, null, tint = accent, modifier = Modifier.size(34.dp))
+                }
+                Text(
+                    message,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = Spacing.l),
+                )
+                val source = remember { MutableInteractionSource() }
+                val pressed by source.collectIsPressedAsState()
+                val reduced = LocalReducedMotion.current
+                val scale by animateFloatAsState(
+                    if (pressed && !reduced) 0.96f else 1f, NovaMotion.press(), label = "retryPress",
+                )
+                Row(
+                    Modifier
+                        .padding(top = Spacing.l)
+                        .graphicsLayer { scaleX = scale; scaleY = scale }
+                        .clip(NovaCorners.button)
+                        .background(Brush.linearGradient(NovaGradients.cta(accent)))
+                        .clickable(interactionSource = source, indication = null, onClick = onAction)
+                        .padding(horizontal = Spacing.xl, vertical = Spacing.m),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(action, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onPrimary)
+                }
+            }
+        } else {
+            // first-load skeleton — mirrors the real hero shape
+            ProfileSkeleton()
+        }
+    }
+}
+
+@Composable
+private fun ProfileSkeleton() {
+    val reduced = LocalReducedMotion.current
+    val shimmer = if (reduced) 0.5f else {
+        val t = rememberInfiniteTransition(label = "profileSkeleton")
+        val v by t.animateFloat(
+            0f, 1f,
+            infiniteRepeatable(tween(1200, easing = EaseInOutSine), RepeatMode.Reverse),
+            label = "shimmerV",
+        )
+        v
+    }
+    val base = MaterialTheme.colorScheme.surfaceContainer
+    val hi = MaterialTheme.colorScheme.surfaceContainerHigh
+    val block = lerp(base, hi, shimmer)
+
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val coverHeight = (maxWidth * 0.62f).coerceIn(200.dp, 300.dp)
+        Column(Modifier.fillMaxSize()) {
+            Box(Modifier.fillMaxWidth().height(coverHeight + 66.dp)) {
+                Box(
+                    Modifier.fillMaxWidth().height(coverHeight)
+                        .clip(RoundedCornerShape(bottomStart = 44.dp, bottomEnd = 44.dp))
+                        .background(block),
+                )
+                Box(
+                    Modifier.align(Alignment.BottomCenter).size(146.dp)
+                        .background(MaterialTheme.colorScheme.surface, CircleShape)
+                        .padding(6.dp)
+                        .background(hi, CircleShape),
+                )
+            }
+            Column(
+                Modifier.fillMaxWidth().padding(horizontal = Spacing.l, vertical = Spacing.m),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Box(Modifier.padding(top = Spacing.s).width(200.dp).height(34.dp).clip(NovaCorners.chip).background(block))
+                Box(Modifier.padding(top = Spacing.m).width(120.dp).height(18.dp).clip(NovaCorners.chip).background(block))
+                Spacer(Modifier.height(Spacing.l))
+                repeat(2) {
+                    Box(
+                        Modifier.fillMaxWidth().padding(top = Spacing.m).height(120.dp)
+                            .clip(NovaCorners.card).background(block),
+                    )
+                }
             }
         }
     }
