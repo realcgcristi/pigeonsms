@@ -1,20 +1,28 @@
 # pigeonsms
 
-so this is pigeonsms, a chat app i've been chipping away at for the past couple weeks. android app plus a backend that lives entirely on cloudflare. dms, group servers (i call them "nests"), calls, the whole thing
+so this is pigeonsms, a chat app i've been chipping away at for the past couple weeks. android app plus a backend that lives entirely on cloudflare. dms, group servers (i call them "nests"), the whole thing
+
+it's a passion project, built with privacy in mind — a way for friend groups to chat on a platform they actually control. you can self-host the whole thing (it's all here, gpl'd), or just use the instance i already run at pigeonsms.aldi.best. no ads, no tracking, no data mining, no premium tier gating features behind a paywall. it's yours.
 
 it started as a "i bet i can build a messenger in a weekend" kind of idea and uh, it was not a weekend. but it works now and i'm honestly kind of proud of it so here it is
 
 ## what works
 
 - dms and group nests. nests have channels like discord does, text + voice + forum
-- voice and video calls, webrtc with peer-to-peer media and the signaling running through a durable object
-- messages: replies, reactions, edits, pins, a big whatsapp style "super pin" banner up top, @mentions (and @everyone if you're allowed), markdown and tables
+- messages: replies, reactions, edits, pins, a big whatsapp style "super pin" banner up top, @mentions (and @everyone if you're allowed), markdown and tables, multi-select, copy, seen-by
 - media. images/video/files, a little image editor before you send so you can crop/draw/blur, quick camera capture, voice notes with waveforms, and a per-chat media grid + search
 - polls and events, made right inside a channel
 - push notifs that actually survive the app getting killed in the background (this took me embarrassingly long to get right), with per-nest and per-channel settings, plus quick-reply straight from the notification
 - read receipts, typing indicators, presence, all live over a websocket
 - totp 2fa
-- the ui itself: jetpack compose, a liquid-glass look i'm a bit obsessed with, custom app icons, chat wallpapers
+- the ui itself: jetpack compose, a liquid-glass look i'm a bit obsessed with, ~20 custom app icons, chat wallpapers
+- three whole UI skins you can flip between in settings: **classic** (the original), **nova** (a flatter, cleaner redesign), and **galaxy** (nova cranked up — deep space-indigo, aurora backgrounds, glow, spring physics everywhere). same app, three vibes
+
+## the one thing that doesn't work: calls
+
+voice/video calls are **broken** and i'm putting that right up top so nobody's surprised. it's webrtc — media capture on android has been a genuine nightmare. it went: webview + getUserMedia (died with NotReadableError on real devices) → native webrtc via org.webrtc (better, still fails to open the mic on some hardware). the signaling (durable-object call rooms) and the whole UI are done and wired; it's specifically the media/mic layer that won't cooperate, and there's no TURN server so anything cross-NAT won't connect anyway.
+
+**i'm very open to pull requests here.** if you know android webrtc / audio internals and want to make calls actually work, please, i'm begging. it's a terror to fix and i've burned a lot of hours on it. everything else around it is ready for you.
 
 ## how it's built
 
@@ -72,7 +80,7 @@ being honest since someone's gonna read the code anyway
 
 - `messages.ts` is like 1100 lines. it started clean i promise. it is no longer clean
 - tests are a joke. there's a handful in backend/test and that's it, i mostly test by using the app and seeing what explodes
-- the call screen was a webview loading inline html for the longest time and getting the secure-context + permission grant right was genuinely miserable. it's got native controls now but the video tiles are still html under the hood
+- calls (see the section above) — the big one. help wanted
 - error handling is inconsistent, some paths retry nicely and some just swallow the error and move on. sorry
 - the liquid glass eats a bit of gpu on cheap phones, there's a fallback but it's not perfect
 - migrations are just numbered sql files i run in order like an animal, no real migration tooling
