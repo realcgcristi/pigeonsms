@@ -6,6 +6,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -24,6 +26,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -36,6 +39,7 @@ import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.Tag
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.VolumeUp
+import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
@@ -62,15 +66,33 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import app.pigeonsms.design.components.NovaAnimatedCount
+import app.pigeonsms.design.components.NovaHero
+import app.pigeonsms.design.components.NovaIconBadgeButton
+import app.pigeonsms.design.components.NovaSectionLabel
+import app.pigeonsms.design.components.NovaTag
 import app.pigeonsms.design.theme.Corners
+import app.pigeonsms.design.theme.LocalUiSkin
+import app.pigeonsms.design.theme.UiSkin
+import app.pigeonsms.design.theme.NovaColors
+import app.pigeonsms.design.theme.NovaCorners
+import app.pigeonsms.design.theme.NovaDepth
+import app.pigeonsms.design.theme.NovaGradients
+import app.pigeonsms.design.theme.NovaMotion
 import app.pigeonsms.design.theme.PigeonMotion
 import app.pigeonsms.design.theme.Spacing
+import app.pigeonsms.design.theme.novaElevation
+import app.pigeonsms.design.theme.novaGlow
+import app.pigeonsms.design.theme.novaHalo
 import app.pigeonsms.network.SpaceDto
 import app.pigeonsms.ui.AppViewModel
 import app.pigeonsms.ui.UnreadPill
@@ -94,6 +116,10 @@ fun SpacesScreen(app: AppViewModel, onOpenChannel: (id: String, name: String, ki
     val vm: SpacesViewModel = pigeonVm { c, _ -> SpacesViewModel(c.socialRepository, c.api) }
     val home by app.home.collectAsState()
     val ui by vm.ui.collectAsState()
+    val skin = LocalUiSkin.current
+
+    val galaxy = skin == UiSkin.Galaxy
+    val novaSkin = skin == UiSkin.Nova
     var sheetOpen by rememberSaveable { mutableStateOf(false) }
     var createChannelTarget by remember { mutableStateOf<SpaceDto?>(null) }
     var deleteTarget by remember { mutableStateOf<SpaceDto?>(null) }
@@ -132,9 +158,29 @@ fun SpacesScreen(app: AppViewModel, onOpenChannel: (id: String, name: String, ki
     }
 
     Column(Modifier.fillMaxSize()) {
-        ScreenHeader("bird nests") {
-            IconButton(onClick = { vm.clearFeedback(); sheetOpen = true }) {
-                Icon(Icons.Outlined.Add, "create or join a bird nest", tint = MaterialTheme.colorScheme.primary)
+        if (galaxy) {
+            val nestCount = home.spaces.size
+            val unreadTotal = home.spaces.sumOf { s -> s.channels.sumOf { it.unread } }
+            val subtitle = when {
+                nestCount == 0 -> null
+                unreadTotal > 0 -> "$nestCount ${if (nestCount == 1) "nest" else "nests"} · $unreadTotal unread"
+                else -> "$nestCount ${if (nestCount == 1) "nest" else "nests"} · all caught up"
+            }
+            NovaHero(
+                title = "bird nests",
+                subtitle = subtitle,
+                accentSubtitle = unreadTotal > 0,
+                action = {
+                    NovaIconBadgeButton(onClick = { vm.clearFeedback(); sheetOpen = true }) {
+                        Icon(Icons.Outlined.Add, "create or join a bird nest")
+                    }
+                },
+            )
+        } else {
+            ScreenHeader("bird nests") {
+                IconButton(onClick = { vm.clearFeedback(); sheetOpen = true }) {
+                    Icon(Icons.Outlined.Add, "create or join a bird nest", tint = MaterialTheme.colorScheme.primary)
+                }
             }
         }
         AnimatedVisibility(
@@ -152,7 +198,19 @@ fun SpacesScreen(app: AppViewModel, onOpenChannel: (id: String, name: String, ki
         when {
             home.spacesLoading && home.spaces.isEmpty() -> LoadingState("loading bird nests")
             home.spacesError != null && home.spaces.isEmpty() -> ErrorState(home.spacesError!!, app::refreshSpaces)
-            home.spaces.isEmpty() -> Empty("no bird nests yet", "create one or join with a code")
+            home.spaces.isEmpty() -> Empty(
+                "no bird nests yet",
+                "create one or join with a code",
+                icon = Icons.Outlined.Forum,
+                action = if (galaxy) {
+                    {
+                        NovaTag(selected = true, onClick = { vm.clearFeedback(); sheetOpen = true }) {
+                            Icon(Icons.Outlined.Add, null, Modifier.size(16.dp))
+                            Text("create a nest", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                } else null,
+            )
             else -> androidx.compose.material3.pulltorefresh.PullToRefreshBox(
                 isRefreshing = home.spacesLoading,
                 onRefresh = { app.refreshSpaces() },
@@ -164,30 +222,64 @@ fun SpacesScreen(app: AppViewModel, onOpenChannel: (id: String, name: String, ki
                 verticalArrangement = Arrangement.spacedBy(Spacing.m),
             ) {
                 itemsIndexed(home.spaces, key = { _, s -> s.id }) { index, space ->
-                    SpaceCard(
-                        space = space,
-                        modifier = Modifier.itemAppear(index),
-                        iconUrl = app.mediaUrl(space.icon_key),
-                        iconBusy = ui.action == SpaceAction.ChangeIcon && iconTarget?.id == space.id,
-                        onChangeIcon = if (space.role == "owner" || space.role == "admin") {
-                            {
-                                vm.clearFeedback()
-                                iconTarget = space
-                                iconPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                            }
-                        } else null,
-                        onInvite = { vm.invite(space.id) { code -> inviteCode = code } },
-                        onOpenChannel = onOpenChannel,
-                        onAddChannel = if (space.role == "owner") {
-                            { vm.clearFeedback(); createChannelTarget = space }
-                        } else null,
-                        onDelete = if (space.role == "owner") {
-                            { vm.clearFeedback(); deleteTarget = space }
-                        } else null,
-                        onLeave = if (space.role != "owner") {
-                            { vm.clearFeedback(); leaveTarget = space }
-                        } else null,
-                    )
+                    val onChangeIcon: (() -> Unit)? = if (space.role == "owner" || space.role == "admin") {
+                        {
+                            vm.clearFeedback()
+                            iconTarget = space
+                            iconPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                        }
+                    } else null
+                    val onInvite: () -> Unit = { vm.invite(space.id) { code -> inviteCode = code } }
+                    val onAddChannel: (() -> Unit)? = if (space.role == "owner") {
+                        { vm.clearFeedback(); createChannelTarget = space }
+                    } else null
+                    val onDelete: (() -> Unit)? = if (space.role == "owner") {
+                        { vm.clearFeedback(); deleteTarget = space }
+                    } else null
+                    val onLeave: (() -> Unit)? = if (space.role != "owner") {
+                        { vm.clearFeedback(); leaveTarget = space }
+                    } else null
+                    val iconBusy = ui.action == SpaceAction.ChangeIcon && iconTarget?.id == space.id
+                    if (galaxy) {
+                        NovaSpaceCard(
+                            space = space,
+                            modifier = Modifier.itemAppear(index),
+                            iconUrl = app.mediaUrl(space.icon_key),
+                            iconBusy = iconBusy,
+                            onChangeIcon = onChangeIcon,
+                            onInvite = onInvite,
+                            onOpenChannel = onOpenChannel,
+                            onAddChannel = onAddChannel,
+                            onDelete = onDelete,
+                            onLeave = onLeave,
+                        )
+                    } else if (novaSkin) {
+                        ExpSpaceCard(
+                            space = space,
+                            modifier = Modifier.itemAppear(index),
+                            iconUrl = app.mediaUrl(space.icon_key),
+                            iconBusy = iconBusy,
+                            onChangeIcon = onChangeIcon,
+                            onInvite = onInvite,
+                            onOpenChannel = onOpenChannel,
+                            onAddChannel = onAddChannel,
+                            onDelete = onDelete,
+                            onLeave = onLeave,
+                        )
+                    } else {
+                        SpaceCard(
+                            space = space,
+                            modifier = Modifier.itemAppear(index),
+                            iconUrl = app.mediaUrl(space.icon_key),
+                            iconBusy = iconBusy,
+                            onChangeIcon = onChangeIcon,
+                            onInvite = onInvite,
+                            onOpenChannel = onOpenChannel,
+                            onAddChannel = onAddChannel,
+                            onDelete = onDelete,
+                            onLeave = onLeave,
+                        )
+                    }
                 }
             }
             }
@@ -600,5 +692,456 @@ private fun MemberChip(count: Int) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(start = Spacing.xs),
         )
+    }
+}
+
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+
+@Composable
+private fun NovaSpaceCard(
+    space: SpaceDto,
+    modifier: Modifier = Modifier,
+    iconUrl: String?,
+    iconBusy: Boolean,
+    onChangeIcon: (() -> Unit)?,
+    onInvite: () -> Unit,
+    onOpenChannel: (id: String, name: String, kind: String) -> Unit,
+    onAddChannel: (() -> Unit)?,
+    onDelete: (() -> Unit)?,
+    onLeave: (() -> Unit)? = null,
+) {
+    val totalUnread = space.channels.sumOf { it.unread }
+    val accent = MaterialTheme.colorScheme.primary
+    val cardShape = NovaCorners.card
+    Column(
+        modifier
+            .fillMaxWidth()
+            .novaElevation(
+                shape = cardShape,
+                tint = MaterialTheme.colorScheme.surfaceContainer,
+                accent = accent,
+                accented = totalUnread > 0,
+                glow = totalUnread > 0,
+            ),
+    ) {
+
+        // + a glowing accent unread badge overlay.
+        Box(Modifier.fillMaxWidth()) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(2.6f)
+                    .background(Brush.linearGradient(NovaGradients.coverMesh(accent)))
+                    .then(if (onChangeIcon != null) Modifier.clickableScale(onClick = onChangeIcon) else Modifier),
+            ) {
+                if (iconUrl != null) {
+                    AsyncImage(
+                        model = iconUrl,
+                        contentDescription = "${space.name} icon",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+                // bottom scrim so the title area reads over any cover image / mesh
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(Color.Transparent, MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.75f)),
+                            ),
+                        ),
+                )
+                if (iconBusy) {
+                    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.45f)), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp, color = Color.White)
+                    }
+                }
+            }
+            if (totalUnread > 0) {
+                Box(
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(Spacing.m)
+                        .novaHalo(accent, alpha = NovaDepth.glowStrong)
+                        .clip(CircleShape)
+                        .background(Brush.linearGradient(NovaGradients.cta(accent)))
+                        .padding(horizontal = Spacing.m, vertical = Spacing.xs),
+                ) {
+                    NovaAnimatedCount(
+                        count = totalUnread.coerceAtMost(999),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                    )
+                }
+            }
+            if (onChangeIcon != null && !iconBusy) {
+                Box(
+                    Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(Spacing.s)
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = 0.4f))
+                        .padding(Spacing.xs),
+                ) {
+                    Icon(Icons.Outlined.PhotoCamera, "change ${space.name} icon", Modifier.size(16.dp), tint = Color.White)
+                }
+            }
+        }
+
+        Column(Modifier.padding(Spacing.l)) {
+            Text(
+                space.name,
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = (-0.5).sp,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            space.description?.takeIf { it.isNotBlank() }?.let { description ->
+                Text(
+                    description,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = Spacing.xs),
+                )
+            }
+
+            Row(
+                Modifier.fillMaxWidth().padding(top = Spacing.s),
+                horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                NovaTag {
+                    Icon(Icons.Outlined.PeopleOutline, null, Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("${space.member_count}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                if (space.role != "member") {
+                    // role is a deliberate cyan touchpoint (secondary accent).
+                    NovaTag {
+                        Text(
+                            space.role,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.secondary,
+                        )
+                    }
+                }
+                Spacer(Modifier.weight(1f))
+                IconButton(onClick = onInvite) { Icon(Icons.Outlined.PersonAdd, "invite to ${space.name}", tint = MaterialTheme.colorScheme.primary) }
+                if (onDelete != null) IconButton(onClick = onDelete) { Icon(Icons.Outlined.DeleteOutline, "delete space", tint = MaterialTheme.colorScheme.error) }
+                if (onLeave != null) IconButton(onClick = onLeave) { Icon(Icons.AutoMirrored.Outlined.Logout, "leave space", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+            }
+
+            Row(
+                Modifier.fillMaxWidth().padding(top = Spacing.m),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                NovaSectionLabel(
+                    "channels",
+                    accent = true,
+                    modifier = Modifier.weight(1f),
+                )
+                if (onAddChannel != null) {
+                    IconButton(onClick = onAddChannel) {
+                        Icon(Icons.Outlined.Add, "add channel to ${space.name}", tint = MaterialTheme.colorScheme.primary)
+                    }
+                }
+            }
+            if (space.channels.isEmpty()) {
+                Text("no channels yet", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = Spacing.xs, bottom = Spacing.xs))
+            } else {
+                Column(Modifier.padding(top = Spacing.xs), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                    space.channels.forEach { channel ->
+                        NovaChannelRow(
+                            channel = channel,
+                            onClick = { onOpenChannel(channel.id, channel.name ?: "channel", channel.kind) },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun NovaChannelRow(channel: app.pigeonsms.network.ChannelDto, onClick: () -> Unit) {
+    val unread = channel.unread > 0
+    val accent = MaterialTheme.colorScheme.primary
+    val shape = NovaCorners.button
+
+    // switch; read rows sit on a lifted-top surface, unread rows on an accent wash.
+    val fillTop by animateColorAsState(
+        targetValue = if (unread) accent else MaterialTheme.colorScheme.surfaceContainerHigh,
+        animationSpec = NovaMotion.emphasized(),
+        label = "channelFill",
+    )
+    val fillBottom by animateColorAsState(
+        targetValue = if (unread) NovaColors.IrisCyanDeep else MaterialTheme.colorScheme.surfaceContainerHigh,
+        animationSpec = NovaMotion.emphasized(),
+        label = "channelFillB",
+    )
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .clip(shape)
+            .background(Brush.verticalGradient(listOf(fillTop, fillBottom)))
+            .novaGlow(shape, accent, active = unread)
+            .clickableScale(onClick = onClick)
+            .padding(horizontal = Spacing.m),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        val onColor = if (unread) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+        val subColor = if (unread) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+        // read state: kind icon on a cyan-tinted disc (secondary touchpoint);
+        // unread: frosted-white disc over the accent wash.
+        Box(
+            Modifier.size(28.dp).clip(RoundedCornerShape(9.dp))
+                .background(if (unread) Color.White.copy(alpha = 0.20f) else MaterialTheme.colorScheme.secondary.copy(alpha = 0.14f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                when (channel.kind.lowercase()) {
+                    "forum" -> Icons.Outlined.Forum
+                    "voice" -> Icons.Outlined.VolumeUp
+                    else -> Icons.Outlined.Tag
+                },
+                null,
+                Modifier.size(16.dp),
+                tint = if (unread) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.secondary,
+            )
+        }
+        Text(
+            channel.name ?: "channel",
+            style = MaterialTheme.typography.bodyLarge,
+            fontWeight = if (unread) FontWeight.Bold else FontWeight.Medium,
+            color = onColor,
+            modifier = Modifier.weight(1f).padding(start = Spacing.m),
+            maxLines = 1, overflow = TextOverflow.Ellipsis,
+        )
+        if (unread) {
+            UnreadPill(channel.unread)
+        } else {
+            Icon(Icons.Outlined.ChevronRight, null, Modifier.size(18.dp), tint = subColor)
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+
+@Composable
+private fun ExpSpaceCard(
+    space: SpaceDto,
+    modifier: Modifier = Modifier,
+    iconUrl: String?,
+    iconBusy: Boolean,
+    onChangeIcon: (() -> Unit)?,
+    onInvite: () -> Unit,
+    onOpenChannel: (id: String, name: String, kind: String) -> Unit,
+    onAddChannel: (() -> Unit)?,
+    onDelete: (() -> Unit)?,
+    onLeave: (() -> Unit)? = null,
+) {
+    val totalUnread = space.channels.sumOf { it.unread }
+    Column(
+        modifier
+            .fillMaxWidth()
+            .clip(Corners.card)
+            .background(MaterialTheme.colorScheme.surfaceContainer),
+    ) {
+
+        Box(Modifier.fillMaxWidth()) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(2.6f)
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.14f))
+                    .then(if (onChangeIcon != null) Modifier.clickableScale(onClick = onChangeIcon) else Modifier),
+            ) {
+                if (iconUrl != null) {
+                    AsyncImage(
+                        model = iconUrl,
+                        contentDescription = "${space.name} icon",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+                if (iconBusy) {
+                    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.45f)), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp, color = Color.White)
+                    }
+                }
+            }
+            if (totalUnread > 0) {
+                Box(
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(Spacing.m)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary)
+                        .padding(horizontal = Spacing.m, vertical = Spacing.xs),
+                ) {
+                    Text(
+                        if (totalUnread > 99) "99+" else "$totalUnread",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                    )
+                }
+            }
+            if (onChangeIcon != null && !iconBusy) {
+                Box(
+                    Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(Spacing.s)
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = 0.4f))
+                        .padding(Spacing.xs),
+                ) {
+                    Icon(Icons.Outlined.PhotoCamera, "change ${space.name} icon", Modifier.size(16.dp), tint = Color.White)
+                }
+            }
+        }
+
+        Column(Modifier.padding(Spacing.l)) {
+            Text(
+                space.name,
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = (-0.5).sp,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            space.description?.takeIf { it.isNotBlank() }?.let { description ->
+                Text(
+                    description,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = Spacing.xs),
+                )
+            }
+
+            Row(
+                Modifier.fillMaxWidth().padding(top = Spacing.s),
+                horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                ExpChip {
+                    Icon(Icons.Outlined.PeopleOutline, null, Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("${space.member_count}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = Spacing.xs))
+                }
+                if (space.role != "member") {
+                    ExpChip(accent = true) {
+                        Text(space.role, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onPrimary)
+                    }
+                }
+                Spacer(Modifier.weight(1f))
+                IconButton(onClick = onInvite) { Icon(Icons.Outlined.PersonAdd, "invite to ${space.name}", tint = MaterialTheme.colorScheme.primary) }
+                if (onDelete != null) IconButton(onClick = onDelete) { Icon(Icons.Outlined.DeleteOutline, "delete space", tint = MaterialTheme.colorScheme.error) }
+                if (onLeave != null) IconButton(onClick = onLeave) { Icon(Icons.AutoMirrored.Outlined.Logout, "leave space", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+            }
+
+            Row(
+                Modifier.fillMaxWidth().padding(top = Spacing.m),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "CHANNELS",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.weight(1f),
+                )
+                if (onAddChannel != null) {
+                    IconButton(onClick = onAddChannel) {
+                        Icon(Icons.Outlined.Add, "add channel to ${space.name}", tint = MaterialTheme.colorScheme.primary)
+                    }
+                }
+            }
+            if (space.channels.isEmpty()) {
+                Text("no channels yet", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = Spacing.xs, bottom = Spacing.xs))
+            } else {
+                Column(Modifier.padding(top = Spacing.xs), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                    space.channels.forEach { channel ->
+                        ExpChannelRow(
+                            channel = channel,
+                            onClick = { onOpenChannel(channel.id, channel.name ?: "channel", channel.kind) },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ExpChannelRow(channel: app.pigeonsms.network.ChannelDto, onClick: () -> Unit) {
+    val unread = channel.unread > 0
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .clip(Corners.button)
+            .background(if (unread) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh)
+            .clickableScale(onClick = onClick)
+            .padding(horizontal = Spacing.m),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        val onColor = if (unread) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+        val subColor = if (unread) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+        Box(
+            Modifier.size(28.dp).clip(RoundedCornerShape(9.dp))
+                .background(if (unread) Color.White.copy(alpha = 0.20f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                when (channel.kind.lowercase()) {
+                    "forum" -> Icons.Outlined.Forum
+                    "voice" -> Icons.Outlined.VolumeUp
+                    else -> Icons.Outlined.Tag
+                },
+                null,
+                Modifier.size(16.dp),
+                tint = if (unread) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary,
+            )
+        }
+        Text(
+            channel.name ?: "channel",
+            style = MaterialTheme.typography.bodyLarge,
+            fontWeight = if (unread) FontWeight.Bold else FontWeight.Medium,
+            color = onColor,
+            modifier = Modifier.weight(1f).padding(start = Spacing.m),
+            maxLines = 1, overflow = TextOverflow.Ellipsis,
+        )
+        if (unread) {
+            UnreadPill(channel.unread)
+        } else {
+            Icon(Icons.Outlined.ChevronRight, null, Modifier.size(18.dp), tint = subColor)
+        }
+    }
+}
+
+@Composable
+private fun ExpChip(accent: Boolean = false, content: @Composable () -> Unit) {
+    Row(
+        Modifier
+            .clip(CircleShape)
+            .background(if (accent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh)
+            .padding(horizontal = Spacing.m, vertical = Spacing.xs),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        content()
     }
 }

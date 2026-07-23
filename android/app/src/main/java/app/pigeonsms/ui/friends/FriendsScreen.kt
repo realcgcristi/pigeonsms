@@ -1,5 +1,6 @@
 package app.pigeonsms.ui.friends
 
+import androidx.compose.ui.draw.shadow
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.fadeIn
@@ -23,6 +24,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -38,6 +40,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -59,15 +62,31 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.Dp
+import app.pigeonsms.design.components.NovaAnimatedCount
+import app.pigeonsms.design.components.NovaHero
+import app.pigeonsms.design.components.NovaIconBadgeButton
+import app.pigeonsms.design.components.NovaPillButton
+import app.pigeonsms.design.components.NovaSectionLabel
 import app.pigeonsms.design.theme.Corners
+import app.pigeonsms.design.theme.LocalUiSkin
+import app.pigeonsms.design.theme.NovaCorners
+import app.pigeonsms.design.theme.NovaDepth
+import app.pigeonsms.design.theme.NovaGradients
 import app.pigeonsms.design.theme.PigeonColors
 import app.pigeonsms.design.theme.PigeonMotion
 import app.pigeonsms.design.theme.Spacing
+import app.pigeonsms.design.theme.UiSkin
+import app.pigeonsms.design.theme.novaHalo
+import app.pigeonsms.design.theme.novaSurface
+import app.pigeonsms.design.theme.rememberNovaPulse
 import app.pigeonsms.network.FriendDto
 import app.pigeonsms.ui.AppViewModel
 import app.pigeonsms.ui.ListSectionHeader
@@ -94,25 +113,93 @@ fun FriendsScreen(app: AppViewModel, onOpenChat: (String, String) -> Unit, onOpe
     LaunchedEffect(Unit) { app.refreshFriends() }
 
     val nothingYet = home.friends.isEmpty() && home.incoming.isEmpty() && home.outgoing.isEmpty()
+    // 3-way skin dispatch. `nova` here means "not the classic skin" — it drives the
+
+    val skin = LocalUiSkin.current
+    val galaxy = skin == UiSkin.Galaxy
+    val nova = skin != UiSkin.Classic
 
     Column(Modifier.fillMaxSize()) {
-        ScreenHeader("friends") {
-            IconButton(onClick = { addOpen = true }) { Icon(Icons.Outlined.PersonAdd, "add", tint = MaterialTheme.colorScheme.primary) }
+        if (galaxy) {
+            val friendCount = home.friends.size
+            val onlineCount = home.friends.count { presence(it.last_online) }
+            val requestCount = home.incoming.size
+            val stat = buildString {
+                append("$friendCount friend").append(if (friendCount == 1) "" else "s")
+                if (onlineCount > 0) append(" · $onlineCount online")
+                if (requestCount > 0) append(" · $requestCount request").append(if (requestCount == 1) "" else "s")
+            }
+            NovaHero(
+                title = "friends",
+                subtitle = stat,
+                // cyan-accented when someone is waiting on you, cyan also flags "online"
+                accentSubtitle = requestCount > 0 || onlineCount > 0,
+                modifier = Modifier.novaHalo(MaterialTheme.colorScheme.primary, alpha = NovaDepth.haloAlpha * 0.6f),
+                action = {
+                    NovaIconBadgeButton(onClick = { addOpen = true }) {
+                        Icon(Icons.Outlined.PersonAdd, "add friend", Modifier.size(22.dp))
+                    }
+                },
+            )
+        } else if (nova) {
+            ExpFriendsHeader(
+                friendCount = home.friends.size,
+                onlineCount = home.friends.count { presence(it.last_online) },
+                requestCount = home.incoming.size,
+                onAdd = { addOpen = true },
+            )
+        } else {
+            ScreenHeader("friends") {
+                IconButton(onClick = { addOpen = true }) { Icon(Icons.Outlined.PersonAdd, "add", tint = MaterialTheme.colorScheme.primary) }
+            }
         }
         if (home.friendsLoading && nothingYet) {
             SkeletonList()
         } else if (home.friendsError != null && nothingYet) {
             ErrorState(home.friendsError!!, app::refreshFriends)
         } else if (nothingYet) {
-            Empty("no friends yet", "add someone by their username", Icons.Outlined.PersonAdd)
+            if (galaxy) {
+                Empty("no friends yet", "add someone by their username", Icons.Outlined.PersonAdd) {
+                    NovaPillButton(
+                        text = "add someone",
+                        onClick = { addOpen = true },
+                        modifier = Modifier.padding(horizontal = Spacing.xl),
+                        leading = { Icon(Icons.Outlined.PersonAdd, null, Modifier.size(18.dp)) },
+                    )
+                }
+            } else {
+                Empty("no friends yet", "add someone by their username", Icons.Outlined.PersonAdd)
+            }
         } else {
-            PillTabs(
-                options = listOf("friends", "requests"),
-                selected = tab,
-                onSelect = { tab = it },
-                badgeCount = home.incoming.size,
-                modifier = Modifier.padding(horizontal = Spacing.l, vertical = Spacing.s),
-            )
+            if (galaxy) {
+                NovaSegmentedTabs(
+                    friendsLabel = "friends",
+                    friendsCount = home.friends.size,
+                    requestsLabel = "requests",
+                    requestsCount = home.incoming.size,
+                    selected = tab,
+                    onSelect = { tab = it },
+                    modifier = Modifier.padding(horizontal = Spacing.l, vertical = Spacing.s),
+                )
+            } else if (nova) {
+                ExpSegmentedTabs(
+                    friendsLabel = "friends",
+                    friendsCount = home.friends.size,
+                    requestsLabel = "requests",
+                    requestsCount = home.incoming.size,
+                    selected = tab,
+                    onSelect = { tab = it },
+                    modifier = Modifier.padding(horizontal = Spacing.l, vertical = Spacing.s),
+                )
+            } else {
+                PillTabs(
+                    options = listOf("friends", "requests"),
+                    selected = tab,
+                    onSelect = { tab = it },
+                    badgeCount = home.incoming.size,
+                    modifier = Modifier.padding(horizontal = Spacing.l, vertical = Spacing.s),
+                )
+            }
             androidx.compose.material3.pulltorefresh.PullToRefreshBox(
                 isRefreshing = home.friendsLoading,
                 onRefresh = { app.refreshFriends() },
@@ -125,8 +212,16 @@ fun FriendsScreen(app: AppViewModel, onOpenChat: (String, String) -> Unit, onOpe
                     label = "friendsTabs",
                     modifier = Modifier.fillMaxSize(),
                 ) { page ->
-                    if (page == 0) FriendsTab(app, vm, onOpenChat, onOpenProfile)
-                    else RequestsTab(app, vm, onOpenProfile)
+                    if (galaxy) {
+                        if (page == 0) NovaFriendsTab(app, vm, onOpenChat, onOpenProfile)
+                        else NovaRequestsTab(app, vm, onOpenProfile)
+                    } else if (nova) {
+                        if (page == 0) ExpFriendsTab(app, vm, onOpenChat, onOpenProfile)
+                        else ExpRequestsTab(app, vm, onOpenProfile)
+                    } else {
+                        if (page == 0) FriendsTab(app, vm, onOpenChat, onOpenProfile)
+                        else RequestsTab(app, vm, onOpenProfile)
+                    }
                 }
             }
         }
@@ -134,19 +229,34 @@ fun FriendsScreen(app: AppViewModel, onOpenChat: (String, String) -> Unit, onOpe
 
     if (addOpen) {
         var query by remember { mutableStateOf("") }
-        ModalBottomSheet(onDismissRequest = { if (!adding) { addOpen = false; vm.clearMessage() } }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = MaterialTheme.colorScheme.surfaceContainer) {
+        ModalBottomSheet(
+            onDismissRequest = { if (!adding) { addOpen = false; vm.clearMessage() } },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+            shape = if (nova) NovaCorners.sheet else androidx.compose.material3.BottomSheetDefaults.ExpandedShape,
+        ) {
             Column(Modifier.fillMaxWidth().padding(Spacing.l).padding(bottom = Spacing.xl)) {
                 Text("add a friend", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurface)
                 Text("they'll get a request to accept", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = Spacing.xs))
                 Spacer(Modifier.height(Spacing.l))
-                OutlinedTextField(query, { query = it.take(32); vm.clearMessage() }, label = { Text("username") }, enabled = !adding, singleLine = true, shape = Corners.input, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send))
+                OutlinedTextField(query, { query = it.take(32); vm.clearMessage() }, label = { Text("username") }, enabled = !adding, singleLine = true, shape = if (nova) NovaCorners.input else Corners.input, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send))
                 msg?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = Spacing.s)) }
                 Spacer(Modifier.height(Spacing.l))
-                Button(onClick = { vm.add(query) { app.refreshFriends(); addOpen = false; vm.clearMessage() } }, enabled = !adding, modifier = Modifier.fillMaxWidth(), shape = Corners.button) {
-                    if (adding) {
-                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                        Text("sending...", Modifier.padding(start = Spacing.s))
-                    } else Text("send request")
+                if (nova) {
+                    NovaPillButton(
+                        text = if (adding) "sending..." else "send request",
+                        onClick = { if (!adding) vm.add(query) { app.refreshFriends(); addOpen = false; vm.clearMessage() } },
+                        modifier = Modifier.fillMaxWidth(),
+                        armed = !adding && query.isNotBlank(),
+                        leading = if (adding) ({ CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary) }) else null,
+                    )
+                } else {
+                    Button(onClick = { vm.add(query) { app.refreshFriends(); addOpen = false; vm.clearMessage() } }, enabled = !adding, modifier = Modifier.fillMaxWidth(), shape = Corners.button) {
+                        if (adding) {
+                            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                            Text("sending...", Modifier.padding(start = Spacing.s))
+                        } else Text("send request")
+                    }
                 }
             }
         }
@@ -311,5 +421,576 @@ private fun FriendRow(
         }
         Spacer(Modifier.width(Spacing.s))
         trailing()
+    }
+}
+
+// accept/decline action pair on a tinted card.
+
+@Composable
+private fun NovaSegmentedTabs(
+    friendsLabel: String,
+    friendsCount: Int,
+    requestsLabel: String,
+    requestsCount: Int,
+    selected: Int,
+    onSelect: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val labels = listOf(friendsLabel to friendsCount, requestsLabel to requestsCount)
+    val accent = MaterialTheme.colorScheme.primary
+    BoxWithConstraints(
+        modifier
+            // depth: lifted-top gradient + lit hairline rim so the track floats
+            .fillMaxWidth()
+            .height(54.dp)
+            .novaSurface(NovaCorners.group, MaterialTheme.colorScheme.surfaceContainer, accent)
+            .padding(Spacing.xs),
+    ) {
+        val segW = maxWidth / 2
+        val spec: FiniteAnimationSpec<Dp> = PigeonMotion.bouncy()
+        val x by animateDpAsState(segW * selected, spec, label = "novaTabX")
+        // elastic squash-and-stretch: while the pill is mid-travel (its animated
+        // position lags the target), it stretches along the travel axis then
+        // settles — matching the glass segmented control's delight.
+        val target = segW * selected
+        val stretch = 1f + (kotlin.math.abs((x - target).value) / segW.value.coerceAtLeast(1f)).coerceIn(0f, 1f) * 0.16f
+        Box(
+            Modifier
+                .offset(x = x)
+                .width(segW)
+                .fillMaxHeight()
+                .graphicsLayer {
+                    scaleX = stretch
+                    // counter-squash on the cross axis for a springy feel
+                    scaleY = 1f - (stretch - 1f) * 0.5f
+                }
+                // gradient iris→cyan indicator with a soft accent glow underneath
+                .androidx_tabGlow(accent)
+                .clip(NovaCorners.chip)
+                .background(Brush.horizontalGradient(NovaGradients.cta(accent))),
+        )
+        Row(Modifier.fillMaxSize()) {
+            labels.forEachIndexed { i, (label, count) ->
+                val active = i == selected
+                Row(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .clip(NovaCorners.chip)
+                        .clickable { onSelect(i) },
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        label,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (count > 0) {
+                        Spacer(Modifier.width(Spacing.xs))
+                        Box(
+                            Modifier
+                                .clip(CircleShape)
+                                .background(
+                                    if (active) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.22f)
+                                    else MaterialTheme.colorScheme.surfaceContainerHighest,
+                                )
+                                .padding(horizontal = Spacing.s, vertical = 1.dp),
+                        ) {
+                            NovaAnimatedCount(
+                                count = count,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun Modifier.androidx_tabGlow(accent: androidx.compose.ui.graphics.Color): Modifier =
+    this.shadow(
+        elevation = NovaDepth.raisedElevation,
+        shape = NovaCorners.chip,
+        clip = false,
+        spotColor = accent.copy(alpha = NovaDepth.glowStrong),
+        ambientColor = androidx.compose.ui.graphics.Color.Black,
+    )
+
+@Composable
+private fun NovaFriendsTab(
+    app: AppViewModel,
+    vm: FriendsViewModel,
+    onOpenChat: (String, String) -> Unit,
+    onOpenProfile: (String) -> Unit,
+) {
+    val home by app.home.collectAsState()
+    if (home.friends.isEmpty()) {
+        Empty("no friends yet", "accept a request or add someone", Icons.Outlined.PersonAdd)
+        return
+    }
+    LazyColumn(
+        Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = Spacing.m, end = Spacing.m, top = Spacing.xs, bottom = Spacing.xl),
+        verticalArrangement = Arrangement.spacedBy(Spacing.s),
+    ) {
+        itemsIndexed(home.friends, key = { _, f -> f.id }) { index, f ->
+            NovaFriendCard(
+                f = f,
+                avatar = app.mediaUrl(f.avatar_key),
+                modifier = Modifier.itemAppear(index),
+                onClick = { onOpenProfile(f.id) },
+            ) {
+                FilledTonalButton(
+                    onClick = { vm.openDm(f.id) { ch -> onOpenChat(ch, f.display_name ?: f.username) } },
+                    shape = NovaCorners.button,
+                ) {
+                    Icon(Icons.Outlined.ChatBubbleOutline, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                    Text("message", Modifier.padding(start = Spacing.xs), style = MaterialTheme.typography.labelLarge)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun NovaRequestsTab(
+    app: AppViewModel,
+    vm: FriendsViewModel,
+    onOpenProfile: (String) -> Unit,
+) {
+    val home by app.home.collectAsState()
+    if (home.incoming.isEmpty() && home.outgoing.isEmpty()) {
+        Empty("no pending requests", "requests you send or receive show up here", Icons.Outlined.HourglassEmpty)
+        return
+    }
+    LazyColumn(
+        Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = Spacing.m, end = Spacing.m, top = Spacing.xs, bottom = Spacing.xl),
+        verticalArrangement = Arrangement.spacedBy(Spacing.s),
+    ) {
+        if (home.incoming.isNotEmpty()) {
+            item {
+                NovaSectionLabel(
+                    "incoming · ${home.incoming.size}",
+                    accent = true,
+                    modifier = Modifier.padding(start = Spacing.m, top = Spacing.m),
+                )
+            }
+            itemsIndexed(home.incoming, key = { _, f -> "in-${f.id}" }) { index, f ->
+                NovaFriendCard(
+                    f = f,
+                    avatar = app.mediaUrl(f.avatar_key),
+                    modifier = Modifier.itemAppear(index),
+                    onClick = { onOpenProfile(f.id) },
+                ) {
+                    Button(
+                        onClick = { vm.accept(f.id) { app.refreshFriends() } },
+                        shape = NovaCorners.button,
+                        contentPadding = PaddingValues(horizontal = Spacing.l, vertical = Spacing.s),
+                    ) {
+                        Icon(Icons.Outlined.Check, null, Modifier.size(18.dp))
+                        Text("accept", Modifier.padding(start = Spacing.xs), style = MaterialTheme.typography.labelLarge)
+                    }
+                    Spacer(Modifier.width(Spacing.xs))
+                    FilledTonalIconButton(
+                        onClick = { vm.remove(f.id) { app.refreshFriends() } },
+                        shape = NovaCorners.button,
+                    ) {
+                        Icon(Icons.Outlined.Close, "decline", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.error)
+                    }
+                }
+            }
+        }
+        if (home.outgoing.isNotEmpty()) {
+            item {
+                NovaSectionLabel(
+                    "sent · ${home.outgoing.size}",
+                    modifier = Modifier.padding(start = Spacing.m, top = Spacing.m),
+                )
+            }
+            itemsIndexed(home.outgoing, key = { _, f -> "out-${f.id}" }) { index, f ->
+                NovaFriendCard(
+                    f = f,
+                    avatar = app.mediaUrl(f.avatar_key),
+                    modifier = Modifier.itemAppear(index),
+                    onClick = { onOpenProfile(f.id) },
+                ) {
+                    Row(
+                        Modifier
+                            .novaSurface(NovaCorners.chip, MaterialTheme.colorScheme.surfaceContainerHigh, MaterialTheme.colorScheme.primary)
+                            .padding(horizontal = Spacing.m, vertical = Spacing.xs),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Outlined.HourglassEmpty, null, Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("pending", Modifier.padding(start = Spacing.xs), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun NovaFriendCard(
+    f: FriendDto,
+    avatar: String?,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+    actions: @Composable () -> Unit,
+) {
+    val name = (f.display_name ?: f.username)
+    val online = presence(f.last_online)
+    val cyan = MaterialTheme.colorScheme.secondary
+    val accent = MaterialTheme.colorScheme.primary
+    Column(
+        modifier
+            .fillMaxWidth()
+            // lit rim brightens to cyan when the friend is online (presence cue)
+            .novaSurface(NovaCorners.card, MaterialTheme.colorScheme.surfaceContainer, if (online) cyan else accent, accented = online)
+            .clickableScale(pressedScale = 0.98f, onClick = onClick)
+            .padding(Spacing.m),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            NovaAvatarWithPresence(name = name, avatar = avatar, sharedKey = "avatar-${f.id}", online = online, ringColor = cyan)
+            Spacer(Modifier.width(Spacing.m))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Spacing.xxs)) {
+                Text(
+                    name.lowercase(),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    // cyan "online" is the signature dual-accent presence beat
+                    if (online) "online now" else (f.status_text?.lowercase() ?: "@${f.username}"),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (online) cyan else MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        Spacer(Modifier.height(Spacing.m))
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.s),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            actions()
+        }
+    }
+}
+
+@Composable
+private fun NovaAvatarWithPresence(
+    name: String,
+    avatar: String?,
+    sharedKey: String,
+    online: Boolean,
+    ringColor: androidx.compose.ui.graphics.Color,
+) {
+    if (!online) {
+        Avatar(name, avatar, 56.dp, sharedKey = sharedKey)
+        return
+    }
+    val pulse = rememberNovaPulse(periodMillis = 2600)
+    // 0.6..1.0 ring alpha and 2.0..3.0dp width breathing
+    val ringAlpha = 0.55f + 0.45f * pulse
+    val ringWidth = (2.0f + 1.0f * pulse).dp
+    Box(
+        Modifier
+            .novaHalo(ringColor, alpha = 0.10f + 0.10f * pulse),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier
+                .border(ringWidth, ringColor.copy(alpha = ringAlpha), CircleShape)
+                .padding(3.dp),
+        ) {
+            Avatar(name, avatar, 56.dp, sharedKey = sharedKey)
+        }
+    }
+}
+
+// status-bar-padded hero header, a solid-primary segmented indicator (no gradient
+
+@Composable
+private fun ExpFriendsHeader(
+    friendCount: Int,
+    onlineCount: Int,
+    requestCount: Int,
+    onAdd: () -> Unit,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .statusBarsPadding()
+            .padding(start = Spacing.l, end = Spacing.l, top = Spacing.l, bottom = Spacing.s),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                "friends",
+                style = MaterialTheme.typography.displaySmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            val stat = buildString {
+                append("$friendCount friend").append(if (friendCount == 1) "" else "s")
+                if (onlineCount > 0) append(" · $onlineCount online")
+                if (requestCount > 0) append(" · $requestCount request").append(if (requestCount == 1) "" else "s")
+            }
+            Text(
+                stat,
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (requestCount > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = Spacing.xxs),
+            )
+        }
+        Box(
+            Modifier
+                .size(48.dp)
+                .clip(NovaCorners.iconBadge)
+                .background(MaterialTheme.colorScheme.primary)
+                .clickableScale(pressedScale = 0.9f, onClick = onAdd),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Outlined.PersonAdd, "add", Modifier.size(22.dp), tint = MaterialTheme.colorScheme.onPrimary)
+        }
+    }
+}
+
+@Composable
+private fun ExpSegmentedTabs(
+    friendsLabel: String,
+    friendsCount: Int,
+    requestsLabel: String,
+    requestsCount: Int,
+    selected: Int,
+    onSelect: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val labels = listOf(friendsLabel to friendsCount, requestsLabel to requestsCount)
+    BoxWithConstraints(
+        modifier
+            .fillMaxWidth()
+            .height(52.dp)
+            .clip(NovaCorners.group)
+            .background(MaterialTheme.colorScheme.surfaceContainer)
+            .padding(Spacing.xs),
+    ) {
+        val segW = maxWidth / 2
+        val spec: FiniteAnimationSpec<Dp> = PigeonMotion.bouncy()
+        val x by animateDpAsState(segW * selected, spec, label = "expTabX")
+        Box(
+            Modifier
+                .offset(x = x)
+                .width(segW)
+                .fillMaxHeight()
+                .clip(NovaCorners.chip)
+                .background(MaterialTheme.colorScheme.primary),
+        )
+        Row(Modifier.fillMaxSize()) {
+            labels.forEachIndexed { i, (label, count) ->
+                val active = i == selected
+                Row(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .clip(NovaCorners.chip)
+                        .clickable { onSelect(i) },
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        label,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (count > 0) {
+                        Spacer(Modifier.width(Spacing.xs))
+                        Box(
+                            Modifier
+                                .clip(CircleShape)
+                                .background(
+                                    if (active) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.22f)
+                                    else MaterialTheme.colorScheme.surfaceContainerHighest,
+                                )
+                                .padding(horizontal = Spacing.s, vertical = 1.dp),
+                        ) {
+                            Text(
+                                "$count",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ExpFriendsTab(
+    app: AppViewModel,
+    vm: FriendsViewModel,
+    onOpenChat: (String, String) -> Unit,
+    onOpenProfile: (String) -> Unit,
+) {
+    val home by app.home.collectAsState()
+    if (home.friends.isEmpty()) {
+        Empty("no friends yet", "accept a request or add someone", Icons.Outlined.PersonAdd)
+        return
+    }
+    LazyColumn(
+        Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = Spacing.m, end = Spacing.m, top = Spacing.xs, bottom = Spacing.xl),
+        verticalArrangement = Arrangement.spacedBy(Spacing.s),
+    ) {
+        itemsIndexed(home.friends, key = { _, f -> f.id }) { index, f ->
+            ExpFriendCard(
+                f = f,
+                avatar = app.mediaUrl(f.avatar_key),
+                modifier = Modifier.itemAppear(index),
+                onClick = { onOpenProfile(f.id) },
+            ) {
+                FilledTonalButton(
+                    onClick = { vm.openDm(f.id) { ch -> onOpenChat(ch, f.display_name ?: f.username) } },
+                    shape = NovaCorners.button,
+                ) {
+                    Icon(Icons.Outlined.ChatBubbleOutline, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                    Text("message", Modifier.padding(start = Spacing.xs), style = MaterialTheme.typography.labelLarge)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ExpRequestsTab(
+    app: AppViewModel,
+    vm: FriendsViewModel,
+    onOpenProfile: (String) -> Unit,
+) {
+    val home by app.home.collectAsState()
+    if (home.incoming.isEmpty() && home.outgoing.isEmpty()) {
+        Empty("no pending requests", "requests you send or receive show up here", Icons.Outlined.HourglassEmpty)
+        return
+    }
+    LazyColumn(
+        Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = Spacing.m, end = Spacing.m, top = Spacing.xs, bottom = Spacing.xl),
+        verticalArrangement = Arrangement.spacedBy(Spacing.s),
+    ) {
+        if (home.incoming.isNotEmpty()) {
+            item { ListSectionHeader("incoming · ${home.incoming.size}") }
+            itemsIndexed(home.incoming, key = { _, f -> "in-${f.id}" }) { index, f ->
+                ExpFriendCard(
+                    f = f,
+                    avatar = app.mediaUrl(f.avatar_key),
+                    modifier = Modifier.itemAppear(index),
+                    onClick = { onOpenProfile(f.id) },
+                ) {
+                    Button(
+                        onClick = { vm.accept(f.id) { app.refreshFriends() } },
+                        shape = NovaCorners.button,
+                        contentPadding = PaddingValues(horizontal = Spacing.l, vertical = Spacing.s),
+                    ) {
+                        Icon(Icons.Outlined.Check, null, Modifier.size(18.dp))
+                        Text("accept", Modifier.padding(start = Spacing.xs), style = MaterialTheme.typography.labelLarge)
+                    }
+                    Spacer(Modifier.width(Spacing.xs))
+                    FilledTonalIconButton(
+                        onClick = { vm.remove(f.id) { app.refreshFriends() } },
+                        shape = NovaCorners.button,
+                    ) {
+                        Icon(Icons.Outlined.Close, "decline", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.error)
+                    }
+                }
+            }
+        }
+        if (home.outgoing.isNotEmpty()) {
+            item { ListSectionHeader("sent · ${home.outgoing.size}") }
+            itemsIndexed(home.outgoing, key = { _, f -> "out-${f.id}" }) { index, f ->
+                ExpFriendCard(
+                    f = f,
+                    avatar = app.mediaUrl(f.avatar_key),
+                    modifier = Modifier.itemAppear(index),
+                    onClick = { onOpenProfile(f.id) },
+                ) {
+                    Row(
+                        Modifier
+                            .clip(NovaCorners.chip)
+                            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                            .padding(horizontal = Spacing.m, vertical = Spacing.xs),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Outlined.HourglassEmpty, null, Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("pending", Modifier.padding(start = Spacing.xs), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ExpFriendCard(
+    f: FriendDto,
+    avatar: String?,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+    actions: @Composable () -> Unit,
+) {
+    val name = (f.display_name ?: f.username)
+    Column(
+        modifier
+            .fillMaxWidth()
+            .clip(NovaCorners.card)
+            .background(MaterialTheme.colorScheme.surfaceContainer)
+            .clickableScale(pressedScale = 0.98f, onClick = onClick)
+            .padding(Spacing.m),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier.then(
+                    if (presence(f.last_online)) Modifier.border(2.5.dp, MaterialTheme.colorScheme.secondary, CircleShape).padding(3.dp)
+                    else Modifier,
+                ),
+            ) {
+                Avatar(name, avatar, 56.dp, sharedKey = "avatar-${f.id}")
+            }
+            Spacer(Modifier.width(Spacing.m))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Spacing.xxs)) {
+                Text(
+                    name.lowercase(),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    f.status_text?.lowercase() ?: "@${f.username}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        Spacer(Modifier.height(Spacing.m))
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.s),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            actions()
+        }
     }
 }
