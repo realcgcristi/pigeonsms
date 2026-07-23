@@ -36,6 +36,8 @@ class SettingsViewModel(private val auth: AuthRepository, val theme: ThemeStore)
     fun setWallpaperDim(v: Float) = viewModelScope.launch { theme.setWallpaperDim(v) }
     fun setLiquidGlass(v: Boolean) = viewModelScope.launch { theme.setLiquidGlass(v) }
     fun setDynamicColor(v: Boolean) = viewModelScope.launch { theme.setDynamicColor(v) }
+    fun setExperimentalRedesign(v: Boolean) = viewModelScope.launch { theme.setExperimentalRedesign(v) }
+    fun setUiSkin(skin: String) = viewModelScope.launch { theme.setUiSkin(skin) }
 
     fun loadSessions() = viewModelScope.launch { runCatching { auth.sessions() }.onSuccess { s -> _ui.update { it.copy(sessions = s) } } }
     fun loadHistory() = viewModelScope.launch { runCatching { auth.history() }.onSuccess { h -> _ui.update { it.copy(history = h) } } }

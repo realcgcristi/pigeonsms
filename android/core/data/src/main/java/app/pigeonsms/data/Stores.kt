@@ -46,7 +46,12 @@ data class ThemePrefs(
     val wallpaperDim: Float = 0.3f,
     val liquidGlass: Boolean = false,
     val dynamicColor: Boolean = false,
-)
+
+    val uiSkin: String = "classic",
+) {
+
+    val experimentalRedesign: Boolean get() = uiSkin != "classic"
+}
 
 class ThemeStore(private val context: Context) {
     private object K {
@@ -59,8 +64,15 @@ class ThemeStore(private val context: Context) {
         val wallpaperDim = floatPreferencesKey("app_wallpaper_dim")
         val liquidGlass = booleanPreferencesKey("liquid_glass")
         val dynamicColor = booleanPreferencesKey("dynamic_color")
+        // legacy boolean; migrated to the string skin key below
+        val experimentalRedesign = booleanPreferencesKey("experimental_redesign")
+        val uiSkin = stringPreferencesKey("ui_skin")
     }
     val prefs: Flow<ThemePrefs> = context.dataStore.data.map { p ->
+
+        // (true → "galaxy" = the current experimental look, false → "classic").
+        val skin = p[K.uiSkin]
+            ?: if (p[K.experimentalRedesign] == true) "galaxy" else "classic"
         ThemePrefs(
             mode = runCatching { ThemeMode.valueOf(p[K.mode] ?: "Dark") }.getOrDefault(ThemeMode.Dark),
             accent = p[K.accent] ?: "peach",
@@ -71,6 +83,7 @@ class ThemeStore(private val context: Context) {
             wallpaperDim = p[K.wallpaperDim] ?: 0.3f,
             liquidGlass = p[K.liquidGlass] ?: false,
             dynamicColor = p[K.dynamicColor] ?: false,
+            uiSkin = skin,
         )
     }
     suspend fun setMode(m: ThemeMode) = context.dataStore.edit { it[K.mode] = m.name }
@@ -84,6 +97,11 @@ class ThemeStore(private val context: Context) {
     suspend fun setWallpaperDim(v: Float) = context.dataStore.edit { it[K.wallpaperDim] = v }
     suspend fun setLiquidGlass(v: Boolean) = context.dataStore.edit { it[K.liquidGlass] = v }
     suspend fun setDynamicColor(v: Boolean) = context.dataStore.edit { it[K.dynamicColor] = v }
+
+    suspend fun setUiSkin(skin: String) = context.dataStore.edit { it[K.uiSkin] = skin }
+
+    suspend fun setExperimentalRedesign(v: Boolean) =
+        context.dataStore.edit { it[K.uiSkin] = if (v) "galaxy" else "classic" }
 }
 
 data class ChatAppearance(val wallpaper: String?, val accent: String?, val muted: Boolean = false)

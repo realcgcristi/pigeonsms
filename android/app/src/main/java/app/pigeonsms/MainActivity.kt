@@ -93,6 +93,11 @@ class MainActivity : ComponentActivity() {
                 liquidGlass = theme.liquidGlass,
                 glassTint = glassTint,
                 dynamicColor = theme.dynamicColor,
+                skin = when (theme.uiSkin) {
+                    "nova" -> app.pigeonsms.design.theme.UiSkin.Nova
+                    "galaxy" -> app.pigeonsms.design.theme.UiSkin.Galaxy
+                    else -> app.pigeonsms.design.theme.UiSkin.Classic
+                },
             ) {
                 var crash by remember { mutableStateOf(startupCrash) }
                 val pending = crash
