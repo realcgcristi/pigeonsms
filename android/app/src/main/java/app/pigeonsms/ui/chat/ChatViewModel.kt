@@ -55,6 +55,9 @@ data class ChatUiState(
     val mentionCandidates: List<MentionCandidate> = emptyList(),
     /** @everyone is space-admin-only server side — only offer it when it would succeed. */
     val canMentionEveryone: Boolean = false,
+
+    val channelMembers: List<MentionCandidate> = emptyList(),
+    val channelMemberCount: Int = -1,
 )
 
 class ChatViewModel(
@@ -93,6 +96,8 @@ class ChatViewModel(
             runCatching { social?.dms()?.firstOrNull { it.channel_id == channelId }?.peer?.last_online }
                 .getOrNull()?.let { last -> _ui.update { it.copy(peerLastOnline = last) } }
         }
+        // eager channel roster for the "seen by" info action (member avatars + count)
+        loadChannelRoster()
         viewModelScope.launch {
             repo.reads.collect { all ->
                 val peerSeq = all[channelId]?.filterKeys { it != selfId }?.values?.maxOrNull() ?: 0L
@@ -465,6 +470,46 @@ class ChatViewModel(
     fun reportError(message: String) = _ui.update { it.copy(error = message) }
 
     fun markRead(seq: Long) = viewModelScope.launch { runCatching { repo.markRead(channelId, seq) } }
+
+    private fun loadChannelRoster() {
+        val social = social ?: return
+        viewModelScope.launch {
+            runCatching {
+                if (isSpace) {
+                    val space = social.spaces().firstOrNull { s -> s.channels.any { it.id == channelId } }
+                        ?: return@runCatching
+                    val members = social.spaceMembers(space.id)
+                    _ui.update { state ->
+                        state.copy(
+                            channelMembers = members.map { m ->
+                                MentionCandidate(m.id, m.username, m.display_name, m.avatar_key)
+                            },
+                            channelMemberCount = members.size,
+                        )
+                    }
+                } else {
+                    val peer = social.dms().firstOrNull { it.channel_id == channelId }?.peer
+                        ?: return@runCatching
+                    _ui.update { state ->
+                        state.copy(
+                            channelMembers = listOf(
+                                MentionCandidate(peer.id, peer.username, peer.display_name, peer.avatar_key),
+                            ),
+                            channelMemberCount = 2,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun seenBy(message: MessageEntity): List<MentionCandidate> {
+        if (message.seq <= 0L) return emptyList()
+        val channelReads = repo.reads.value[channelId] ?: emptyMap()
+        return _ui.value.channelMembers.filter { member ->
+            member.id != selfId && (channelReads[member.id] ?: 0L) >= message.seq
+        }
+    }
 
     private fun beginMessageAction(id: String): Boolean {
         if (id in _ui.value.busyMessageIds) return false
