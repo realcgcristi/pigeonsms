@@ -43,6 +43,8 @@ export interface MessageRow {
   kind: MessageKind;
   metadata: string | null;
   thread_id: string | null;
+  forum_tag_id: string | null;
+  marked_at: number | null;
 }
 
 export async function serializeMessages(
@@ -207,9 +209,48 @@ export async function serializeMessages(
     polls.set(poll.message_id, value);
   }
 
+  const forumPostIds = rows.filter((r) => r.kind === 'forum_post').map((r) => r.id);
+  const pinnedSet = new Set<string>();
+  const likeCounts = new Map<string, number>();
+  const likedSet = new Set<string>();
+  const tagDefs = new Map<string, { id: string; name: string; mark_label: string | null }>();
+  if (forumPostIds.length) {
+    const fph = ph(forumPostIds.length);
+    const pinnedRows = (
+      await env.DB.prepare(
+        `SELECT message_id FROM pins WHERE message_id IN (${fph})`,
+      ).bind(...forumPostIds).all<{ message_id: string }>()
+    ).results;
+    for (const p of pinnedRows) pinnedSet.add(p.message_id);
+
+    const likeRows = (
+      await env.DB.prepare(
+        `SELECT message_id, COUNT(*) AS count,
+                MAX(CASE WHEN user_id = ? THEN 1 ELSE 0 END) AS me
+         FROM forum_likes WHERE message_id IN (${fph}) GROUP BY message_id`,
+      ).bind(viewerId, ...forumPostIds).all<{ message_id: string; count: number; me: number }>()
+    ).results;
+    for (const l of likeRows) {
+      likeCounts.set(l.message_id, Number(l.count));
+      if (l.me === 1) likedSet.add(l.message_id);
+    }
+
+    const tagIds = [...new Set(rows.flatMap((r) => r.kind === 'forum_post' && r.forum_tag_id ? [r.forum_tag_id] : []))];
+    if (tagIds.length) {
+      const tagRows = (
+        await env.DB.prepare(
+          `SELECT id, name, mark_label FROM forum_tags WHERE id IN (${ph(tagIds.length)})`,
+        ).bind(...tagIds).all<{ id: string; name: string; mark_label: string | null }>()
+      ).results;
+      for (const t of tagRows) tagDefs.set(t.id, { id: t.id, name: t.name, mark_label: t.mark_label });
+    }
+  }
+
   return rows.map((m) => {
     const author = authors.get(m.author_id);
     const deleted = m.deleted_at !== null;
+    const forumPost = m.kind === 'forum_post';
+    const tag = forumPost && m.forum_tag_id ? (tagDefs.get(m.forum_tag_id) ?? null) : null;
     return {
       id: m.id,
       channel_id: m.channel_id,
@@ -235,6 +276,12 @@ export async function serializeMessages(
       reactions: reactions.get(m.id) ?? [],
       poll: polls.get(m.id) ?? null,
       revisions: isAdmin ? (revisions.get(m.id) ?? []) : undefined,
+
+      pinned: forumPost ? pinnedSet.has(m.id) : undefined,
+      like_count: forumPost ? (likeCounts.get(m.id) ?? 0) : undefined,
+      liked: forumPost ? likedSet.has(m.id) : undefined,
+      tag: forumPost ? tag : undefined,
+      marked: forumPost ? m.marked_at !== null : undefined,
     };
   });
 }
@@ -465,6 +512,8 @@ messages.post('/channels/:id/messages', async (c) => {
     kind,
     metadata: metadata ? JSON.stringify(metadata) : null,
     thread_id: reply?.thread_id ?? null,
+    forum_tag_id: null,
+    marked_at: null,
   };
   const statements = [
     c.env.DB.prepare(
@@ -766,11 +815,17 @@ messages.put('/messages/:id/pin', async (c) => {
     .bind(row.channel_id, row.id, user.id, Date.now())
     .run();
   if (result.meta.changes > 0) {
-    fanout(c, await channelRecipients(c.env, channel), {
+    const recipients = await channelRecipients(c.env, channel);
+    fanout(c, recipients, {
       t: 'pin.add', d: { channel_id: row.channel_id, message_id: row.id, pinned_by: user.id },
     });
+
+    if (row.kind === 'forum_post') {
+      const broadcast = (await serializeMessages(c.env, [await loadMessage(c, row.id)], null, false))[0];
+      fanout(c, recipients, { t: 'forum.post.update', d: broadcast });
+    }
   }
-  return c.json({ ok: true, changed: result.meta.changes > 0 });
+  return c.json({ ok: true, changed: result.meta.changes > 0, pinned: true });
 });
 
 messages.delete('/messages/:id/pin', async (c) => {
@@ -782,11 +837,16 @@ messages.delete('/messages/:id/pin', async (c) => {
     .bind(row.channel_id, row.id)
     .run();
   if (result.meta.changes > 0) {
-    fanout(c, await channelRecipients(c.env, channel), {
+    const recipients = await channelRecipients(c.env, channel);
+    fanout(c, recipients, {
       t: 'pin.remove', d: { channel_id: row.channel_id, message_id: row.id },
     });
+    if (row.kind === 'forum_post') {
+      const broadcast = (await serializeMessages(c.env, [await loadMessage(c, row.id)], null, false))[0];
+      fanout(c, recipients, { t: 'forum.post.update', d: broadcast });
+    }
   }
-  return c.json({ ok: true, changed: result.meta.changes > 0 });
+  return c.json({ ok: true, changed: result.meta.changes > 0, pinned: false });
 });
 
 messages.get('/channels/:id/pins', async (c) => {
@@ -927,7 +987,20 @@ async function createForumMessage(
   const metadata = root
     ? normalizeMessageMetadata(kind, body['metadata'], true)
     : normalizeMessageMetadata(kind, { ...(body['metadata'] as object ?? {}), title: body['title'] }, true);
-  if (!content.trim() && !attachment) throw new ApiError(400, 'empty_message', 'post content is required');
+
+  if (root && !content.trim() && !attachment) {
+    throw new ApiError(400, 'empty_message', 'reply content is required');
+  }
+
+  let forumTagId: string | null = null;
+  if (!root && body['tag'] !== undefined && body['tag'] !== null && body['tag'] !== '') {
+    const tagId = String(body['tag']);
+    const tagDef = await c.env.DB.prepare(
+      'SELECT id FROM forum_tags WHERE id = ? AND channel_id = ?',
+    ).bind(tagId, channel.id).first<{ id: string }>();
+    if (!tagDef) throw new ApiError(400, 'bad_tag', 'no such tag for this forum');
+    forumTagId = tagDef.id;
+  }
 
   const nonce = body['nonce'] ? String(body['nonce']).slice(0, 64) : null;
   if (nonce) {
@@ -970,16 +1043,18 @@ async function createForumMessage(
     kind,
     metadata: metadata ? JSON.stringify(metadata) : null,
     thread_id: root?.id ?? id,
+    forum_tag_id: forumTagId,
+    marked_at: null,
   };
   await c.env.DB.batch([
     c.env.DB.prepare(
       `INSERT INTO messages (id, channel_id, seq, author_id, content, reply_to, nonce,
         attachment_key, attachment_name, attachment_type, attachment_size, created_at,
-        kind, metadata, thread_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        kind, metadata, thread_id, forum_tag_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(
       row.id, row.channel_id, row.seq, row.author_id, row.content, row.reply_to, row.nonce,
       row.attachment_key, row.attachment_name, row.attachment_type, row.attachment_size,
-      row.created_at, row.kind, row.metadata, row.thread_id,
+      row.created_at, row.kind, row.metadata, row.thread_id, row.forum_tag_id,
     ),
     ...mentions.map((mention) => c.env.DB.prepare(
       'INSERT INTO message_mentions (message_id, user_id, kind, created_at) VALUES (?, ?, ?, ?)',
@@ -1046,16 +1121,26 @@ messages.get('/channels/:id/forum/posts', async (c) => {
       ? 'p.created_at ASC'
       : 'last_activity_at DESC';
   const limit = Math.min(100, Math.max(1, Number(c.req.query('limit')) || 30));
+
+  const tagFilter = (c.req.query('tag') ?? '').trim();
+  const tagClause = tagFilter
+    ? `AND p.forum_tag_id IN (
+         SELECT id FROM forum_tags WHERE channel_id = ? AND (id = ? OR lower(name) = lower(?))
+       )`
+    : '';
+  const bindings: unknown[] = tagFilter
+    ? [channel.id, channel.id, tagFilter, tagFilter, limit]
+    : [channel.id, limit];
   const rows = (
     await c.env.DB.prepare(
       `SELECT p.*, COUNT(r.id) AS reply_count,
               COALESCE(MAX(r.created_at), p.created_at) AS last_activity_at
        FROM messages p LEFT JOIN messages r
          ON r.thread_id = p.id AND r.kind = 'forum_reply' AND r.deleted_at IS NULL
-       WHERE p.channel_id = ? AND p.kind = 'forum_post' AND p.deleted_at IS NULL
+       WHERE p.channel_id = ? AND p.kind = 'forum_post' AND p.deleted_at IS NULL ${tagClause}
        GROUP BY p.id ORDER BY ${order} LIMIT ?`,
     )
-      .bind(channel.id, limit)
+      .bind(...bindings)
       .all<MessageRow & { reply_count: number; last_activity_at: number }>()
   ).results;
   const serialized = await serializeMessages(c.env, rows, user.id, user.isAdmin);
@@ -1090,6 +1175,139 @@ messages.get('/channels/:id/forum/posts/:postId', async (c) => {
     replies: await serializeMessages(c.env, replies, user.id, user.isAdmin),
     cursor: { last_seq: replies.at(-1)?.seq ?? after },
   });
+});
+
+async function isSpaceOwner(
+  c: Context<AppEnv>,
+  user: AuthedUser,
+  channel: Awaited<ReturnType<typeof assertChannelAccess>>,
+): Promise<boolean> {
+  if (user.isAdmin) return true;
+  if (!channel.space_id) return false;
+  const row = await c.env.DB.prepare('SELECT owner_id FROM spaces WHERE id = ? AND deleted_at IS NULL')
+    .bind(channel.space_id)
+    .first<{ owner_id: string }>();
+  return row?.owner_id === user.id;
+}
+
+async function broadcastForumPost(
+  c: Context<AppEnv>,
+  channel: Awaited<ReturnType<typeof assertChannelAccess>>,
+  postId: string,
+): Promise<void> {
+  const fresh = await loadMessage(c, postId);
+  const broadcast = (await serializeMessages(c.env, [fresh], null, false))[0];
+  fanout(c, await channelRecipients(c.env, channel), { t: 'forum.post.update', d: broadcast });
+}
+
+messages.post('/channels/:id/forum/tags', async (c) => {
+  const user = c.get('user') as AuthedUser;
+  const channel = await assertChannelAccess(c.env, user.id, c.req.param('id'));
+  if (channel.kind !== 'forum') throw new ApiError(400, 'not_a_forum', 'channel is not a forum');
+  if (!await isSpaceOwner(c, user, channel)) {
+    throw new ApiError(403, 'forbidden', 'only the space owner can manage forum tags');
+  }
+  const body = await c.req.json<Record<string, unknown>>().catch(() => {
+    throw new ApiError(400, 'bad_json', 'body must be json');
+  });
+  const name = String(body['name'] ?? '').trim().slice(0, 60);
+  if (!name) throw new ApiError(400, 'bad_tag', 'tag name is required');
+  const rawLabel = body['mark_label'];
+  const markLabel = rawLabel === undefined || rawLabel === null || String(rawLabel).trim() === ''
+    ? null
+    : String(rawLabel).trim().slice(0, 60);
+  const id = snowflake();
+  await c.env.DB.prepare(
+    'INSERT INTO forum_tags (id, channel_id, name, mark_label, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+  ).bind(id, channel.id, name, markLabel, user.id, Date.now()).run();
+  return c.json({ tag: { id, name, mark_label: markLabel } }, 201);
+});
+
+messages.get('/channels/:id/forum/tags', async (c) => {
+  const user = c.get('user') as AuthedUser;
+  const channel = await assertChannelAccess(c.env, user.id, c.req.param('id'));
+  if (channel.kind !== 'forum') throw new ApiError(400, 'not_a_forum', 'channel is not a forum');
+  const rows = (
+    await c.env.DB.prepare(
+      'SELECT id, name, mark_label FROM forum_tags WHERE channel_id = ? ORDER BY created_at ASC',
+    ).bind(channel.id).all<{ id: string; name: string; mark_label: string | null }>()
+  ).results;
+  return c.json({ tags: rows.map((t) => ({ id: t.id, name: t.name, mark_label: t.mark_label })) });
+});
+
+messages.put('/messages/:id/like', async (c) => {
+  const user = c.get('user') as AuthedUser;
+  const post = await loadMessage(c, c.req.param('id'));
+  const channel = await assertChannelAccess(c.env, user.id, post.channel_id);
+  if (post.kind !== 'forum_post' || post.deleted_at !== null) {
+    throw new ApiError(400, 'not_a_forum_post', 'message is not an active forum post');
+  }
+  const result = await c.env.DB.prepare(
+    'INSERT OR IGNORE INTO forum_likes (message_id, user_id, created_at) VALUES (?, ?, ?)',
+  ).bind(post.id, user.id, Date.now()).run();
+  const count = await c.env.DB.prepare('SELECT COUNT(*) AS count FROM forum_likes WHERE message_id = ?')
+    .bind(post.id).first<{ count: number }>();
+  if (result.meta.changes > 0) {
+    fanout(c, await channelRecipients(c.env, channel), {
+      t: 'forum.like', d: { channel_id: post.channel_id, message_id: post.id, like_count: Number(count?.count ?? 0) },
+    });
+  }
+  return c.json({ ok: true, changed: result.meta.changes > 0, like_count: Number(count?.count ?? 0), liked: true });
+});
+
+messages.delete('/messages/:id/like', async (c) => {
+  const user = c.get('user') as AuthedUser;
+  const post = await loadMessage(c, c.req.param('id'));
+  const channel = await assertChannelAccess(c.env, user.id, post.channel_id);
+  if (post.kind !== 'forum_post') {
+    throw new ApiError(400, 'not_a_forum_post', 'message is not a forum post');
+  }
+  const result = await c.env.DB.prepare('DELETE FROM forum_likes WHERE message_id = ? AND user_id = ?')
+    .bind(post.id, user.id).run();
+  const count = await c.env.DB.prepare('SELECT COUNT(*) AS count FROM forum_likes WHERE message_id = ?')
+    .bind(post.id).first<{ count: number }>();
+  if (result.meta.changes > 0) {
+    fanout(c, await channelRecipients(c.env, channel), {
+      t: 'forum.like', d: { channel_id: post.channel_id, message_id: post.id, like_count: Number(count?.count ?? 0) },
+    });
+  }
+  return c.json({ ok: true, changed: result.meta.changes > 0, like_count: Number(count?.count ?? 0), liked: false });
+});
+
+messages.put('/messages/:id/marked', async (c) => {
+  const user = c.get('user') as AuthedUser;
+  const post = await loadMessage(c, c.req.param('id'));
+  const channel = await assertChannelAccess(c.env, user.id, post.channel_id);
+  if (post.kind !== 'forum_post' || post.deleted_at !== null) {
+    throw new ApiError(400, 'not_a_forum_post', 'message is not an active forum post');
+  }
+  const allowed = post.author_id === user.id || await isSpaceOwner(c, user, channel);
+  if (!allowed) throw new ApiError(403, 'forbidden', 'only the author or space owner can mark this post');
+  if (!post.forum_tag_id) throw new ApiError(400, 'not_markable', 'post has no markable tag');
+  const tag = await c.env.DB.prepare('SELECT mark_label FROM forum_tags WHERE id = ?')
+    .bind(post.forum_tag_id).first<{ mark_label: string | null }>();
+  if (!tag?.mark_label) throw new ApiError(400, 'not_markable', 'this tag is not markable');
+  const result = await c.env.DB.prepare(
+    'UPDATE messages SET marked_at = ? WHERE id = ? AND marked_at IS NULL',
+  ).bind(Date.now(), post.id).run();
+  if (result.meta.changes > 0) await broadcastForumPost(c, channel, post.id);
+  return c.json({ ok: true, changed: result.meta.changes > 0, marked: true });
+});
+
+messages.delete('/messages/:id/marked', async (c) => {
+  const user = c.get('user') as AuthedUser;
+  const post = await loadMessage(c, c.req.param('id'));
+  const channel = await assertChannelAccess(c.env, user.id, post.channel_id);
+  if (post.kind !== 'forum_post') {
+    throw new ApiError(400, 'not_a_forum_post', 'message is not a forum post');
+  }
+  const allowed = post.author_id === user.id || await isSpaceOwner(c, user, channel);
+  if (!allowed) throw new ApiError(403, 'forbidden', 'only the author or space owner can unmark this post');
+  const result = await c.env.DB.prepare(
+    'UPDATE messages SET marked_at = NULL WHERE id = ? AND marked_at IS NOT NULL',
+  ).bind(post.id).run();
+  if (result.meta.changes > 0) await broadcastForumPost(c, channel, post.id);
+  return c.json({ ok: true, changed: result.meta.changes > 0, marked: false });
 });
 
 messages.get('/channels/:id/search', async (c) => {

@@ -194,6 +194,11 @@ class PigeonApi(
         client.delete("$baseUrl/messages/$id/reactions/$emoji") { auth() }.unwrap<ReactionMutationResponse>()
     suspend fun pin(id: String) { client.put("$baseUrl/messages/$id/pin") { auth() }.unwrap<OkResponse>() }
     suspend fun unpin(id: String) { client.delete("$baseUrl/messages/$id/pin") { auth() }.unwrap<OkResponse>() }
+    suspend fun likeMessage(id: String) = client.put("$baseUrl/messages/$id/like") { auth() }.unwrap<LikeMutationResponse>()
+    suspend fun unlikeMessage(id: String) = client.delete("$baseUrl/messages/$id/like") { auth() }.unwrap<LikeMutationResponse>()
+
+    suspend fun markMessage(id: String) = client.put("$baseUrl/messages/$id/marked") { auth() }.unwrap<MarkMutationResponse>()
+    suspend fun unmarkMessage(id: String) = client.delete("$baseUrl/messages/$id/marked") { auth() }.unwrap<MarkMutationResponse>()
     suspend fun pins(channelId: String) = client.get("$baseUrl/channels/$channelId/pins") { auth() }.unwrap<MessagesResponse>().messages
     suspend fun superPin(channelId: String) = client.get("$baseUrl/channels/$channelId/super-pin") { auth() }.unwrap<SuperPinResponse>().super_pin
     suspend fun setSuperPin(messageId: String) = client.put("$baseUrl/messages/$messageId/super-pin") { auth() }.unwrap<SuperPinResponse>().super_pin
@@ -262,23 +267,41 @@ class PigeonApi(
     suspend fun deleteSpace(spaceId: String) { client.delete("$baseUrl/spaces/$spaceId") { auth() }.unwrap<OkResponse>() }
 
     // --- forums (forum-kind channels only; the plain message endpoints 400 there) ---
-    /** sort is one of "active" (default), "recent", "oldest". */
-    suspend fun forumPosts(channelId: String, sort: String = "active") =
-        client.get("$baseUrl/channels/$channelId/forum/posts?sort=${q(sort)}") { auth() }
-            .unwrap<ForumPostsResponse>().posts
+    /** sort is one of "active" (default), "recent", "oldest". tag filters by tag id or name. */
+    suspend fun forumPosts(channelId: String, sort: String = "active", tag: String? = null) =
+        client.get(
+            "$baseUrl/channels/$channelId/forum/posts?sort=${q(sort)}${if (tag != null) "&tag=${q(tag)}" else ""}",
+        ) { auth() }.unwrap<ForumPostsResponse>().posts
+
+    suspend fun createForumTag(channelId: String, name: String, markLabel: String? = null) =
+        client.post("$baseUrl/channels/$channelId/forum/tags") {
+            auth(); contentType(ContentType.Application.Json)
+            setBody(buildJsonObject { put("name", name); if (markLabel != null) put("mark_label", markLabel) })
+        }.unwrap<ForumTagResponse>().tag
+
+    suspend fun forumTags(channelId: String) =
+        client.get("$baseUrl/channels/$channelId/forum/tags") { auth() }.unwrap<ForumTagsResponse>().tags
 
     suspend fun forumThread(channelId: String, postId: String, after: Long? = null) =
         client.get("$baseUrl/channels/$channelId/forum/posts/$postId${if (after != null) "?after=$after" else ""}") { auth() }
             .unwrap<ForumThreadResponse>()
 
-    suspend fun createForumPost(channelId: String, title: String, content: String, nonce: String, attachment: AttachmentDto? = null) =
-        client.post("$baseUrl/channels/$channelId/forum/posts") {
-            auth(); contentType(ContentType.Application.Json)
-            setBody(buildJsonObject {
-                put("title", title); put("content", content); put("nonce", nonce)
-                if (attachment != null) put("attachment", json.encodeToJsonElement(AttachmentDto.serializer(), attachment))
-            })
-        }.unwrap<MessageResponse>().message
+    suspend fun createForumPost(
+        channelId: String,
+        title: String,
+        content: String = "",
+        nonce: String,
+        attachment: AttachmentDto? = null,
+        tag: String? = null,
+    ) = client.post("$baseUrl/channels/$channelId/forum/posts") {
+        auth(); contentType(ContentType.Application.Json)
+        setBody(buildJsonObject {
+            put("title", title); put("nonce", nonce)
+            if (content.isNotBlank()) put("content", content)
+            if (tag != null) put("tag", tag)
+            if (attachment != null) put("attachment", json.encodeToJsonElement(AttachmentDto.serializer(), attachment))
+        })
+    }.unwrap<MessageResponse>().message
 
     suspend fun createForumReply(channelId: String, postId: String, content: String, nonce: String, replyTo: String? = null, attachment: AttachmentDto? = null) =
         client.post("$baseUrl/channels/$channelId/forum/posts/$postId/replies") {
