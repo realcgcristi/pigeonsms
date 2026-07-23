@@ -104,8 +104,36 @@ fun SkeletonRow() {
 
 @Composable
 fun SkeletonList(rows: Int = 8, contentPadding: PaddingValues = PaddingValues(vertical = 8.dp)) {
-    Column(Modifier.fillMaxWidth().padding(contentPadding)) {
-        repeat(rows) { SkeletonRow() }
+    if (app.pigeonsms.design.theme.LocalExperimentalRedesign.current) {
+        Column(
+            Modifier.fillMaxWidth().padding(contentPadding).padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            repeat(rows) { SkeletonCard() }
+        }
+    } else {
+        Column(Modifier.fillMaxWidth().padding(contentPadding)) {
+            repeat(rows) { SkeletonRow() }
+        }
+    }
+}
+
+@Composable
+fun SkeletonCard() {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(app.pigeonsms.design.theme.NovaCorners.card)
+            .background(MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.5f))
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(52.dp).clip(CircleShape).background(shimmerBrush()))
+        Spacer(Modifier.width(16.dp))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            ShimmerBlock(Modifier.fillMaxWidth(0.5f).height(15.dp))
+            ShimmerBlock(Modifier.fillMaxWidth(0.8f).height(12.dp))
+        }
     }
 }
 

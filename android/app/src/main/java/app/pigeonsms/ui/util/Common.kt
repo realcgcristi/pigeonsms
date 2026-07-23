@@ -71,12 +71,29 @@ fun Empty(
     title: String,
     subtitle: String,
     icon: androidx.compose.ui.graphics.vector.ImageVector = androidx.compose.material.icons.Icons.Outlined.ChatBubbleOutline,
+    action: (@Composable () -> Unit)? = null,
 ) {
-    app.pigeonsms.design.components.EmptyState(icon = icon, title = title, subtitle = subtitle)
+    if (action == null) {
+        app.pigeonsms.design.components.EmptyState(icon = icon, title = title, subtitle = subtitle)
+    } else {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            app.pigeonsms.design.components.EmptyState(icon = icon, title = title, subtitle = subtitle)
+            // action floats just below the centered caption block
+            Column(
+                Modifier.fillMaxSize().padding(bottom = Spacing.huge),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Bottom,
+            ) { action() }
+        }
+    }
 }
 
 @Composable
 fun LoadingState(label: String) {
+    if (app.pigeonsms.design.theme.LocalExperimentalRedesign.current) {
+        SkeletonList()
+        return
+    }
     Column(
         Modifier.fillMaxSize().padding(Spacing.xl),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -98,6 +115,7 @@ fun ErrorState(message: String, onRetry: () -> Unit) {
         label = "errorSettle",
     )
     val glass = LocalLiquidGlass.current
+    val experimental = app.pigeonsms.design.theme.LocalExperimentalRedesign.current
     val tone = MaterialTheme.colorScheme.error
     val discFill = if (glass) {
         Brush.verticalGradient(
@@ -106,6 +124,9 @@ fun ErrorState(message: String, onRetry: () -> Unit) {
                 MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.30f),
             ),
         )
+    } else if (experimental) {
+
+        Brush.verticalGradient(listOf(tone.copy(alpha = 0.26f), tone.copy(alpha = 0.12f)))
     } else {
         Brush.verticalGradient(
             listOf(
@@ -137,9 +158,9 @@ fun ErrorState(message: String, onRetry: () -> Unit) {
                     1.dp,
                     Brush.verticalGradient(
                         listOf(
-                            Color.White.copy(alpha = if (glass) 0.18f else 0.08f),
+                            Color.White.copy(alpha = if (glass || experimental) 0.16f else 0.08f),
                             Color.Transparent,
-                            tone.copy(alpha = 0.14f),
+                            tone.copy(alpha = if (experimental) 0.24f else 0.14f),
                         ),
                     ),
                     CircleShape,

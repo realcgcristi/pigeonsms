@@ -49,6 +49,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import app.pigeonsms.design.theme.novaSurface
 import kotlinx.coroutines.delay
 import kotlin.math.abs
 
@@ -121,6 +122,14 @@ fun Modifier.glassCard(
             shape = shape,
             tint = lerp(tint, wallTint, 0.08f),
             accent = if (accented) MaterialTheme.colorScheme.primary else Color.Unspecified,
+        )
+    } else if (app.pigeonsms.design.theme.LocalExperimentalRedesign.current) {
+
+        this.novaSurface(
+            shape = shape,
+            tint = tint,
+            accent = MaterialTheme.colorScheme.primary,
+            accented = accented,
         )
     } else {
         this.clip(shape).background(tint)

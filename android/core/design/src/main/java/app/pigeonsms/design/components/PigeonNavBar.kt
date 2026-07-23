@@ -1,6 +1,7 @@
 package app.pigeonsms.design.components
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
@@ -33,17 +34,24 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.pigeonsms.design.theme.Dimens
+import app.pigeonsms.design.theme.LocalExperimentalRedesign
 import app.pigeonsms.design.theme.LocalGlassTint
 import app.pigeonsms.design.theme.LocalLiquidGlass
 import app.pigeonsms.design.theme.LocalReducedMotion
+import app.pigeonsms.design.theme.NovaColors
+import app.pigeonsms.design.theme.NovaCorners
+import app.pigeonsms.design.theme.NovaDepth
 import app.pigeonsms.design.theme.PigeonMotion
 import app.pigeonsms.design.theme.Spacing
 
@@ -61,9 +69,55 @@ fun PigeonNavBar(
     onSelect: (NavItem) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val experimental = LocalExperimentalRedesign.current
     val glass = LocalLiquidGlass.current
     val barColor = MaterialTheme.colorScheme.surfaceContainerHigh
-    val barModifier = if (glass) {
+
+    val novaShape = NovaCorners.card
+    val galaxy = app.pigeonsms.design.theme.isGalaxySkin()
+    val barModifier = if (experimental && !glass && galaxy) {
+        val accent = MaterialTheme.colorScheme.primary
+        Modifier
+
+            // over the aurora canvas + a bright accent-lit rim.
+            .shadow(
+                elevation = NovaDepth.floatingElevation,
+                shape = novaShape,
+                clip = false,
+                spotColor = accent.copy(alpha = NovaDepth.glowSoft),
+                ambientColor = Color.Black,
+            )
+            .clip(novaShape)
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        MaterialTheme.colorScheme.surfaceContainerHighest,
+                        MaterialTheme.colorScheme.surfaceContainer,
+                    ),
+                ),
+            )
+            .border(
+                1.dp,
+                Brush.linearGradient(
+                    listOf(
+                        accent.copy(alpha = NovaDepth.rimAccent),
+                        Color.White.copy(alpha = NovaDepth.rimTop),
+                        accent.copy(alpha = 0.18f),
+                    ),
+                ),
+                novaShape,
+            )
+    } else if (experimental && !glass) {
+
+        Modifier
+            .clip(novaShape)
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .border(
+                1.dp,
+                Color.White.copy(alpha = 0.05f),
+                novaShape,
+            )
+    } else if (glass) {
         val tint = lerp(barColor, LocalGlassTint.current, 0.08f)
         Modifier
             .clip(CircleShape)
@@ -103,11 +157,16 @@ fun PigeonNavBar(
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        val haptics = LocalHapticFeedback.current
         items.forEach { item ->
+            val isSel = item.route == selectedRoute
             NavBarItem(
                 item = item,
-                selected = item.route == selectedRoute,
-                onClick = { onSelect(item) },
+                selected = isSel,
+                onClick = {
+                    if (!isSel) haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onSelect(item)
+                },
             )
         }
     }
@@ -116,16 +175,28 @@ fun PigeonNavBar(
 @Composable
 private fun NavBarItem(item: NavItem, selected: Boolean, onClick: () -> Unit) {
     val reduced = LocalReducedMotion.current
+    val experimental = LocalExperimentalRedesign.current
+    val galaxy = app.pigeonsms.design.theme.isGalaxySkin()
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
     val accent = MaterialTheme.colorScheme.primary
+
+    // accent pill); classic keeps the tinted accent-on-transparent look.
     val tint by animateColorAsState(
-        targetValue = if (selected) accent else MaterialTheme.colorScheme.onSurfaceVariant,
+        targetValue = when {
+            selected && experimental -> MaterialTheme.colorScheme.onPrimary
+            selected -> accent
+            else -> MaterialTheme.colorScheme.onSurfaceVariant
+        },
         animationSpec = PigeonMotion.snappy(),
         label = "navTint",
     )
     val pillColor by animateColorAsState(
-        targetValue = if (selected) accent.copy(alpha = 0.14f) else Color.Transparent,
+        targetValue = when {
+            selected && experimental -> accent
+            selected -> accent.copy(alpha = 0.14f)
+            else -> Color.Transparent
+        },
         animationSpec = PigeonMotion.smooth(),
         label = "navPill",
     )
@@ -141,25 +212,64 @@ private fun NavBarItem(item: NavItem, selected: Boolean, onClick: () -> Unit) {
         else spring(dampingRatio = 0.65f, stiffness = Spring.StiffnessMediumLow),
         label = "navSettle",
     )
+
+    val grow = if (experimental) 0.12f else 0.06f
+    // the pill's accent glow blooms in on select then eases back — a tab that
+
+    val bloom by animateFloatAsState(
+        targetValue = if (selected) 1f else 0f,
+        animationSpec = spring(dampingRatio = 0.55f, stiffness = Spring.StiffnessMedium),
+        label = "navBloom",
+    )
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .graphicsLayer {
-                scaleX = press * (0.94f + 0.06f * settle)
-                scaleY = press * (0.94f + 0.06f * settle)
+                scaleX = press * ((1f - grow) + grow * settle)
+                scaleY = press * ((1f - grow) + grow * settle)
             }
             .clip(CircleShape)
-            .background(pillColor)
+            .then(
+                if (experimental && selected && galaxy) {
+
+                    // behind that blooms in on select.
+                    Modifier
+                        .background(Brush.horizontalGradient(listOf(accent, lerp(accent, NovaColors.Cyan, 0.55f))))
+                        .drawBehind {
+                            val r = size.maxDimension * 0.75f
+                            drawCircle(
+                                brush = Brush.radialGradient(
+                                    listOf(accent.copy(alpha = 0.30f * bloom), Color.Transparent),
+                                    center = androidx.compose.ui.geometry.Offset(size.width / 2f, size.height / 2f),
+                                    radius = r,
+                                ),
+                                radius = r,
+                                center = androidx.compose.ui.geometry.Offset(size.width / 2f, size.height / 2f),
+                            )
+                        }
+                } else if (experimental && selected) {
+
+                    Modifier.background(accent)
+                } else {
+                    Modifier.background(pillColor)
+                },
+            )
             .clickable(interactionSource = source, indication = null, onClick = onClick)
             .heightIn(min = Dimens.touchTarget)
             .padding(horizontal = Spacing.l),
     ) {
-        Icon(
-            imageVector = if (selected) item.selectedIcon ?: item.icon else item.icon,
-            contentDescription = item.label,
-            tint = tint,
-            modifier = Modifier.size(24.dp),
-        )
+        Crossfade(
+            targetState = selected,
+            animationSpec = PigeonMotion.snappy(),
+            label = "navIcon",
+        ) { sel ->
+            Icon(
+                imageVector = if (sel) item.selectedIcon ?: item.icon else item.icon,
+                contentDescription = item.label,
+                tint = tint,
+                modifier = Modifier.size(24.dp),
+            )
+        }
         AnimatedVisibility(
             visible = selected,
             enter = expandHorizontally(spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessMediumLow)) + fadeIn(),

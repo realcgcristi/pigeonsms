@@ -28,6 +28,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import app.pigeonsms.design.theme.LocalExperimentalRedesign
 import app.pigeonsms.design.theme.LocalLiquidGlass
 import app.pigeonsms.design.theme.LocalReducedMotion
 import app.pigeonsms.design.theme.PigeonMotion
@@ -49,12 +50,30 @@ fun EmptyState(
         label = "emptySettle",
     )
     val glass = LocalLiquidGlass.current
+    val experimental = LocalExperimentalRedesign.current
+    val galaxy = app.pigeonsms.design.theme.isGalaxySkin()
     val accent = MaterialTheme.colorScheme.primary
     val discFill = if (glass) {
         Brush.verticalGradient(
             listOf(
                 MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.62f),
                 MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.30f),
+            ),
+        )
+    } else if (galaxy) {
+
+        Brush.verticalGradient(
+            listOf(
+                accent.copy(alpha = 0.28f),
+                accent.copy(alpha = 0.12f),
+            ),
+        )
+    } else if (experimental) {
+
+        Brush.verticalGradient(
+            listOf(
+                accent.copy(alpha = 0.12f),
+                accent.copy(alpha = 0.12f),
             ),
         )
     } else {
@@ -83,10 +102,13 @@ fun EmptyState(
                 .size(80.dp)
                 .clip(CircleShape)
                 .background(discFill)
-                .background(
-                    Brush.radialGradient(
-                        listOf(accent.copy(alpha = 0.10f), Color.Transparent),
-                    ),
+
+                .then(
+                    if (galaxy || glass) Modifier.background(
+                        Brush.radialGradient(
+                            listOf(accent.copy(alpha = 0.10f), Color.Transparent),
+                        ),
+                    ) else Modifier,
                 )
                 .border(
                     1.dp,
@@ -94,7 +116,7 @@ fun EmptyState(
                         listOf(
                             Color.White.copy(alpha = if (glass) 0.18f else 0.08f),
                             Color.Transparent,
-                            accent.copy(alpha = 0.14f),
+                            accent.copy(alpha = if (galaxy || glass) 0.14f else 0.06f),
                         ),
                     ),
                     CircleShape,
@@ -105,7 +127,7 @@ fun EmptyState(
                 imageVector = icon,
                 contentDescription = null,
                 modifier = Modifier.size(34.dp),
-                tint = accent.copy(alpha = 0.85f),
+                tint = if (experimental) accent else accent.copy(alpha = 0.85f),
             )
         }
         Text(

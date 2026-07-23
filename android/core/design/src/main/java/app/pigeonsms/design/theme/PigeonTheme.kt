@@ -12,10 +12,16 @@ import androidx.compose.runtime.staticCompositionLocalOf
 
 enum class PigeonThemeMode { System, Dark, Oled, Light }
 
+enum class UiSkin { Classic, Nova, Galaxy }
+
+val LocalUiSkin = staticCompositionLocalOf { UiSkin.Classic }
+
 val LocalReducedMotion = staticCompositionLocalOf { false }
 val LocalAccent = staticCompositionLocalOf { accentByKey("peach") }
 
 val LocalLiquidGlass = staticCompositionLocalOf { false }
+
+val LocalExperimentalRedesign = staticCompositionLocalOf { false }
 
 val LocalGlassTint = staticCompositionLocalOf { androidx.compose.ui.graphics.Color.White }
 
@@ -28,9 +34,15 @@ fun PigeonTheme(
     liquidGlass: Boolean = false,
     glassTint: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color.White,
     dynamicColor: Boolean = false,
+    skin: UiSkin = UiSkin.Classic,
     content: @Composable () -> Unit,
 ) {
-    val accent = accentByKey(accentKey)
+
+    val experimental = skin != UiSkin.Classic
+
+    // accent still wins so people keep their pick across the redesign.
+    val accent =
+        if (experimental && accentKey == "peach") NovaAccent else accentByKey(accentKey)
     val dark = when (mode) {
         PigeonThemeMode.Dark, PigeonThemeMode.Oled -> true
         PigeonThemeMode.Light -> false
@@ -42,6 +54,8 @@ fun PigeonTheme(
     val scheme = if (dynamicColor && android.os.Build.VERSION.SDK_INT >= 31) {
         if (dark) androidx.compose.material3.dynamicDarkColorScheme(context)
         else androidx.compose.material3.dynamicLightColorScheme(context)
+    } else if (experimental) {
+        if (dark) novaDarkScheme(accent, oled) else novaLightScheme(accent)
     } else if (dark) {
         darkColorScheme(
             primary = accent.bright,
@@ -89,11 +103,14 @@ fun PigeonTheme(
         LocalAccent provides accent,
         LocalLiquidGlass provides liquidGlass,
         LocalGlassTint provides glassTint,
+        LocalUiSkin provides skin,
+        LocalExperimentalRedesign provides experimental,
     ) {
         MaterialExpressiveTheme(
             colorScheme = scheme,
             motionScheme = if (reducedMotion) MotionScheme.standard() else MotionScheme.expressive(),
-            typography = PigeonTypography,
+            typography = if (experimental) NovaTypography else PigeonTypography,
+            shapes = if (experimental) NovaShapes else androidx.compose.material3.Shapes(),
             content = content,
         )
     }
