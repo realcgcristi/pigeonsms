@@ -222,7 +222,20 @@ private fun inlineMarkdown(value: String, color: Color, linkColor: Color): Annot
                 withStyle(SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline)) { append(label) }
                 pop()
             }
-            raw.startsWith('@') -> withStyle(SpanStyle(color = linkColor, fontWeight = FontWeight.SemiBold, background = linkColor.copy(alpha = 0.12f))) { append(raw) }
+            raw.startsWith('@') -> {
+
+                // self bubbles the background is itself `primary`, so a primary
+
+                // the glyph (guaranteed contrast against its bubble) over a
+                // primary-tinted chip so it still reads as an accented mention.
+                withStyle(
+                    SpanStyle(
+                        color = color,
+                        fontWeight = FontWeight.Bold,
+                        background = linkColor.copy(alpha = 0.22f),
+                    ),
+                ) { append(raw) }
+            }
             raw.startsWith('*') || raw.startsWith('_') -> withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { append(raw.substring(1, raw.length - 1)) }
             else -> append(raw)
         }
