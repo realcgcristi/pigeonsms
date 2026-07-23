@@ -88,6 +88,20 @@ being honest since someone's gonna read the code anyway
 
 if you find something broken, fair, open an issue and i'll probably fix it
 
+## roadmap
+
+the short version (full thing in [ROADMAP.md](ROADMAP.md)):
+
+- **v3 big rocks** — fix calls for real (reliable native mic/camera capture + a TURN server so media traverses NAT), a **desktop client** (thinking tauri, shared backend), and **end-to-end encryption** for DMs since privacy is the whole point.
+- **smaller v3 wants** — a web client, proper server-side search across a nest, better forum threading, richer per-nest roles, scheduled messages, gifs/stickers, data export, an accessibility pass, and one-command self-host.
+- **someday** — federation between self-hosted instances, a small bot/automation api.
+
+calls are the #1 priority and the thing i most want help with (see [CONTRIBUTING.md](CONTRIBUTING.md)).
+
+## contributing & security
+
+PRs welcome — especially on calls. see [CONTRIBUTING.md](CONTRIBUTING.md). found a security issue? see [SECURITY.md](SECURITY.md) (report privately, don't open an issue).
+
 ## license
 
 gpl-3.0, see [LICENSE](LICENSE)
