@@ -3,7 +3,9 @@ package app.pigeonsms.ui.forum
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.pigeonsms.network.AttachmentDto
+import app.pigeonsms.network.ForumLikeEventDto
 import app.pigeonsms.network.ForumPostDto
+import app.pigeonsms.network.ForumTagDto
 import app.pigeonsms.network.Gateway
 import app.pigeonsms.network.MessageDto
 import app.pigeonsms.network.PigeonApi
@@ -19,6 +21,13 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 data class PickedImage(val bytes: ByteArray, val name: String, val type: String)
+
+data class ForumMentionCandidate(
+    val id: String,
+    val username: String,
+    val displayName: String? = null,
+    val avatarKey: String? = null,
+)
 
 fun forumPostTitle(metadata: JsonElement?): String = runCatching {
     metadata?.jsonObject?.get("title")?.jsonPrimitive?.content
@@ -62,6 +71,22 @@ class ForumViewModel(
         val renaming: Boolean = false,
 
         val openPostPinned: Boolean = false,
+
+        val openPostMarked: Boolean = false,
+
+        val openPostTag: ForumTagDto? = null,
+
+        val openPostIsOp: Boolean = false,
+
+        val tags: List<ForumTagDto> = emptyList(),
+
+        val tagFilter: String? = null,
+        val creatingTag: Boolean = false,
+        val tagError: String? = null,
+        /** @mention candidates for the composers (space members), lazily loaded. */
+        val mentionCandidates: List<ForumMentionCandidate> = emptyList(),
+
+        val newSinceSeq: Long = 0,
     )
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -69,9 +94,14 @@ class ForumViewModel(
     val ui: StateFlow<ForumUiState> = _ui
     private var listJob: Job? = null
 
+    private var newBaselineCaptured = false
+    private var mentionsLoaded = false
+    private var mentionJob: Job? = null
+
     init {
         refresh()
         resolveRole()
+        loadTags()
         viewModelScope.launch {
             gateway.events.collect { ev ->
                 if (ev.t == "message.delete") {
@@ -95,6 +125,34 @@ class ForumViewModel(
                         )
                     }
                     refresh(silent = true) // reply counts + activity ordering
+                    return@collect
+                }
+
+                if (ev.t == "forum.like") {
+                    val like = runCatching { json.decodeFromJsonElement(ForumLikeEventDto.serializer(), ev.d) }.getOrNull()
+                        ?: return@collect
+                    if (like.channel_id != channelId) return@collect
+                    _ui.update { s ->
+                        s.copy(posts = s.posts.map {
+                            if (it.id == like.message_id) it.copy(like_count = like.like_count) else it
+                        })
+                    }
+                    return@collect
+                }
+
+                // and the open-thread pin/mark indicators.
+                if (ev.t == "forum.post.update") {
+                    val dto = runCatching { json.decodeFromJsonElement(ForumPostDto.serializer(), ev.d) }.getOrNull()
+                        ?: return@collect
+                    if (dto.channel_id != channelId) return@collect
+                    _ui.update { s ->
+                        s.copy(
+                            posts = s.posts.map { if (it.id == dto.id) dto else it },
+                            openPostPinned = if (s.openPostId == dto.id) dto.pinned else s.openPostPinned,
+                            openPostMarked = if (s.openPostId == dto.id) dto.marked else s.openPostMarked,
+                            openPostTag = if (s.openPostId == dto.id) dto.tag else s.openPostTag,
+                        )
+                    }
                     return@collect
                 }
                 if (ev.t != "forum.post" && ev.t != "forum.reply") return@collect
@@ -123,8 +181,16 @@ class ForumViewModel(
         listJob?.cancel()
         listJob = viewModelScope.launch {
             if (!silent) _ui.update { it.copy(loading = true, error = null) }
-            runCatching { api.forumPosts(channelId, _ui.value.sort) }
+            runCatching { api.forumPosts(channelId, _ui.value.sort, _ui.value.tagFilter) }
                 .onSuccess { posts ->
+
+                    // it, so posts newer than the user's last visit stay highlighted for
+                    // the whole session on this channel.
+                    if (!newBaselineCaptured) {
+                        newBaselineCaptured = true
+                        val baseline = runCatching { api.channelLastSeq(channelId) }.getOrDefault(0L)
+                        _ui.update { it.copy(newSinceSeq = baseline) }
+                    }
                     _ui.update { it.copy(posts = posts, loading = false, error = null) }
 
                     // so marking read at the max post seq leaves the unread badge
@@ -149,19 +215,19 @@ class ForumViewModel(
 
     fun clearCreateError() = _ui.update { it.copy(createError = null) }
 
-    fun createPost(title: String, content: String, image: PickedImage? = null, onDone: () -> Unit) {
+    fun createPost(title: String, content: String, image: PickedImage? = null, tag: String? = null, onDone: () -> Unit) {
         val cleanTitle = title.trim().take(160)
         val cleanContent = content.trim().take(4000)
         when {
             _ui.value.creating -> return
+
             cleanTitle.isEmpty() -> { _ui.update { it.copy(createError = "give your post a title") }; return }
-            cleanContent.isEmpty() && image == null -> { _ui.update { it.copy(createError = "write something first") }; return }
         }
         _ui.update { it.copy(creating = true, createError = null) }
         viewModelScope.launch {
             runCatching {
                 val attachment = image?.let { social.uploadFile(it.bytes, it.name, it.type) }
-                api.createForumPost(channelId, cleanTitle, cleanContent, UUID.randomUUID().toString(), attachment)
+                api.createForumPost(channelId, cleanTitle, cleanContent, UUID.randomUUID().toString(), attachment, tag)
             }
                 .onSuccess { message ->
                     _ui.update { it.copy(creating = false) }
@@ -176,9 +242,22 @@ class ForumViewModel(
     }
 
     fun openPost(postId: String) {
-        _ui.update { it.copy(openPostId = postId, thread = ThreadState(loading = true), openPostPinned = false) }
 
-        viewModelScope.launch {
+        // thread's indicators are correct immediately (the thread endpoint returns a
+
+        val row = _ui.value.posts.firstOrNull { it.id == postId }
+        _ui.update {
+            it.copy(
+                openPostId = postId,
+                thread = ThreadState(loading = true),
+                openPostPinned = row?.pinned ?: false,
+                openPostMarked = row?.marked ?: false,
+                openPostTag = row?.tag,
+                openPostIsOp = row?.author?.id != null && row.author.id == it.selfId,
+            )
+        }
+
+        if (row == null) viewModelScope.launch {
             val pinned = runCatching { api.pins(channelId).any { it.id == postId } }.getOrDefault(false)
             _ui.update { if (it.openPostId == postId) it.copy(openPostPinned = pinned) else it }
         }
@@ -188,7 +267,10 @@ class ForumViewModel(
 
                     _ui.update { state ->
                         if (state.openPostId != postId) state
-                        else state.copy(thread = ThreadState(post = thread.post, replies = thread.replies))
+                        else state.copy(
+                            thread = ThreadState(post = thread.post, replies = thread.replies),
+                            openPostIsOp = state.selfId != null && thread.post.author.id == state.selfId,
+                        )
                     }
                     thread.replies.maxOfOrNull { it.seq }?.let { api.markRead(channelId, it) }
                 }
@@ -201,7 +283,16 @@ class ForumViewModel(
         }
     }
 
-    fun closePost() = _ui.update { it.copy(openPostId = null, thread = ThreadState(), openPostPinned = false) }
+    fun closePost() = _ui.update {
+        it.copy(
+            openPostId = null,
+            thread = ThreadState(),
+            openPostPinned = false,
+            openPostMarked = false,
+            openPostTag = null,
+            openPostIsOp = false,
+        )
+    }
 
     fun sendReply(content: String, image: PickedImage? = null, onSent: () -> Unit) {
         val postId = _ui.value.openPostId ?: return
@@ -310,12 +401,126 @@ class ForumViewModel(
             runCatching { if (pinned) api.unpin(id) else api.pin(id) }
                 .onSuccess {
                     _ui.update { s ->
-                        if (s.openPostId == id) s.copy(openPostPinned = !pinned) else s
+                        s.copy(
+                            openPostPinned = if (s.openPostId == id) !pinned else s.openPostPinned,
+                            posts = s.posts.map { if (it.id == id) it.copy(pinned = !pinned) else it },
+                        )
                     }
                 }
                 .onFailure { error ->
                     _ui.update { it.copy(error = userMessage(error, if (pinned) "couldn't unpin" else "couldn't pin")) }
                 }
+        }
+    }
+
+    // --- tags ---------------------------------------------------------------
+
+    fun loadTags() {
+        viewModelScope.launch {
+            runCatching { api.forumTags(channelId) }
+                .onSuccess { tags -> _ui.update { it.copy(tags = tags) } }
+
+        }
+    }
+
+    fun clearTagError() = _ui.update { it.copy(tagError = null) }
+
+    fun createTag(name: String, markLabel: String?, onDone: () -> Unit) {
+        val clean = name.trim().take(40)
+        val cleanLabel = markLabel?.trim()?.take(40)?.takeIf { it.isNotEmpty() }
+        when {
+            _ui.value.creatingTag -> return
+            clean.isEmpty() -> { _ui.update { it.copy(tagError = "give the tag a name") }; return }
+        }
+        _ui.update { it.copy(creatingTag = true, tagError = null) }
+        viewModelScope.launch {
+            runCatching { api.createForumTag(channelId, clean, cleanLabel) }
+                .onSuccess { tag ->
+                    _ui.update {
+                        it.copy(
+                            creatingTag = false,
+                            tags = if (it.tags.any { t -> t.id == tag.id }) it.tags else it.tags + tag,
+                        )
+                    }
+                    onDone()
+                }
+                .onFailure { error ->
+                    _ui.update { it.copy(creatingTag = false, tagError = userMessage(error, "couldn't create the tag")) }
+                }
+        }
+    }
+
+    fun setTagFilter(tagId: String?) {
+        if (tagId == _ui.value.tagFilter) return
+        _ui.update { it.copy(tagFilter = tagId) }
+        refresh()
+    }
+
+    // --- like / mark --------------------------------------------------------
+
+    fun toggleLike(id: String) {
+        val post = _ui.value.posts.firstOrNull { it.id == id } ?: return
+        val nowLiked = !post.liked
+        val optimisticCount = (post.like_count + if (nowLiked) 1 else -1).coerceAtLeast(0)
+        _ui.update { s ->
+            s.copy(posts = s.posts.map { if (it.id == id) it.copy(liked = nowLiked, like_count = optimisticCount) else it })
+        }
+        viewModelScope.launch {
+            runCatching { if (nowLiked) api.likeMessage(id) else api.unlikeMessage(id) }
+                .onSuccess { res ->
+                    _ui.update { s ->
+                        s.copy(posts = s.posts.map {
+                            if (it.id == id) it.copy(liked = res.liked, like_count = res.like_count) else it
+                        })
+                    }
+                }
+                .onFailure { error ->
+
+                    _ui.update { s ->
+                        s.copy(
+                            posts = s.posts.map {
+                                if (it.id == id) it.copy(liked = post.liked, like_count = post.like_count) else it
+                            },
+                            error = userMessage(error, if (nowLiked) "couldn't like" else "couldn't unlike"),
+                        )
+                    }
+                }
+        }
+    }
+
+    fun toggleMark(id: String) {
+        val marked = _ui.value.openPostMarked
+        viewModelScope.launch {
+            runCatching { if (marked) api.unmarkMessage(id) else api.markMessage(id) }
+                .onSuccess { res ->
+                    _ui.update { s ->
+                        s.copy(
+                            openPostMarked = if (s.openPostId == id) res.marked else s.openPostMarked,
+                            posts = s.posts.map { if (it.id == id) it.copy(marked = res.marked) else it },
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    _ui.update { it.copy(error = userMessage(error, if (marked) "couldn't unmark" else "couldn't mark")) }
+                }
+        }
+    }
+
+    // --- @mentions ----------------------------------------------------------
+
+    fun loadMentionCandidates() {
+        if (mentionsLoaded || mentionJob?.isActive == true) return
+        mentionJob = viewModelScope.launch {
+            runCatching {
+                val space = social.spaces().firstOrNull { s -> s.channels.any { it.id == channelId } }
+                    ?: return@runCatching
+                val members = social.spaceMembers(space.id)
+                _ui.update { state ->
+                    state.copy(mentionCandidates = members.map { m ->
+                        ForumMentionCandidate(m.id, m.username, m.display_name, m.avatar_key)
+                    })
+                }
+            }.onSuccess { mentionsLoaded = true }
         }
     }
 

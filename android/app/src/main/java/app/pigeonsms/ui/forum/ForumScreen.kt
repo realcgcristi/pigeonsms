@@ -34,6 +34,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -48,9 +49,14 @@ import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.FavoriteBorder
+import androidx.compose.material.icons.outlined.Label
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AlertDialogDefaults
 import androidx.compose.material3.Button
@@ -64,6 +70,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.TextButton
@@ -103,8 +110,11 @@ import app.pigeonsms.design.components.NovaTag
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import app.pigeonsms.network.ApiUser
 import app.pigeonsms.network.ForumPostDto
+import app.pigeonsms.network.ForumTagDto
 import app.pigeonsms.network.MessageDto
 import app.pigeonsms.ui.itemAppear
 import app.pigeonsms.ui.pigeonVm
@@ -129,6 +139,7 @@ fun ForumScreen(
     val ui by vm.ui.collectAsState()
     var composeOpen by rememberSaveable(channelId) { mutableStateOf(false) }
     var renameOpen by rememberSaveable(channelId) { mutableStateOf(false) }
+    var tagDialogOpen by rememberSaveable(channelId) { mutableStateOf(false) }
 
     val liveTitle = ui.title.takeIf { it.isNotBlank() } ?: title
 
@@ -195,12 +206,20 @@ fun ForumScreen(
                         onNewPost = { vm.clearCreateError(); composeOpen = true },
                         canDelete = vm::canDelete,
                         onDelete = vm::deletePost,
+                        onTagFilter = vm::setTagFilter,
+                        onLike = vm::toggleLike,
+                        onCreateTag = { vm.clearTagError(); tagDialogOpen = true },
                     )
                 } else {
                     ThreadView(
                         thread = ui.thread,
                         isOwner = ui.isOwner,
                         pinned = ui.openPostPinned,
+                        marked = ui.openPostMarked,
+                        markLabel = ui.openPostTag?.mark_label,
+                        canMark = ui.isOwner || ui.openPostIsOp,
+                        mentions = ui.mentionCandidates,
+                        onMentionLookup = vm::loadMentionCandidates,
                         avatarUrl = vm::mediaUrl,
                         onRetry = { vm.openPost(openPostId) },
                         onOpenProfile = onOpenProfile,
@@ -208,6 +227,7 @@ fun ForumScreen(
                         canDelete = vm::canDelete,
                         onDelete = vm::deletePost,
                         onTogglePin = { vm.togglePin(openPostId) },
+                        onToggleMark = { vm.toggleMark(openPostId) },
                     )
                 }
             }
@@ -249,8 +269,23 @@ fun ForumScreen(
         NewPostDialog(
             creating = ui.creating,
             error = ui.createError,
+            tags = ui.tags,
+            mentions = ui.mentionCandidates,
+            onMentionLookup = vm::loadMentionCandidates,
+            avatarUrl = vm::mediaUrl,
             onDismiss = { if (!ui.creating) { composeOpen = false; vm.clearCreateError() } },
-            onCreate = { postTitle, body, image -> vm.createPost(postTitle, body, image) { composeOpen = false } },
+            onCreate = { postTitle, body, image, tagId ->
+                vm.createPost(postTitle, body, image, tagId) { composeOpen = false }
+            },
+        )
+    }
+
+    if (tagDialogOpen) {
+        CreateTagDialog(
+            busy = ui.creatingTag,
+            error = ui.tagError,
+            onDismiss = { if (!ui.creatingTag) { tagDialogOpen = false; vm.clearTagError() } },
+            onCreate = { name, markLabel -> vm.createTag(name, markLabel) { tagDialogOpen = false } },
         )
     }
 
@@ -467,6 +502,9 @@ private fun PostList(
     onNewPost: () -> Unit,
     canDelete: (String) -> Boolean,
     onDelete: (String) -> Unit,
+    onTagFilter: (String?) -> Unit,
+    onLike: (String) -> Unit,
+    onCreateTag: () -> Unit,
 ) {
     val skin = LocalUiSkin.current
     val galaxy = skin == UiSkin.Galaxy
@@ -487,6 +525,17 @@ private fun PostList(
                     )
                 }
             }
+        }
+
+        if (ui.tags.isNotEmpty() || ui.isOwner) {
+            TagFilterRow(
+                tags = ui.tags,
+                selected = ui.tagFilter,
+                galaxy = galaxy,
+                canCreate = ui.isOwner,
+                onSelect = onTagFilter,
+                onCreateTag = onCreateTag,
+            )
         }
         when {
             ui.loading && ui.posts.isEmpty() -> LoadingState("loading posts")
@@ -509,10 +558,14 @@ private fun PostList(
                 itemsIndexed(ui.posts, key = { _, p -> p.id }) { index, post ->
                     val deletable = canDelete(post.author.id)
                     val onDeleteThis: (() -> Unit)? = if (deletable) { { onDelete(post.id) } } else null
+                    // "new since last visit": post seq is past the read watermark we
+
+                    // (baseline 0) doesn't light every post.
+                    val isNew = ui.newSinceSeq > 0 && post.seq > ui.newSinceSeq
                     when (skin) {
-                        UiSkin.Galaxy -> NovaPostCard(post, avatarUrl, modifier = Modifier.itemAppear(index), onOpen = { onOpen(post) }, onOpenProfile = onOpenProfile, onDelete = onDeleteThis)
-                        UiSkin.Nova -> ExpNovaPostCard(post, avatarUrl, modifier = Modifier.itemAppear(index), onOpen = { onOpen(post) }, onOpenProfile = onOpenProfile, onDelete = onDeleteThis)
-                        UiSkin.Classic -> PostCard(post, avatarUrl, modifier = Modifier.itemAppear(index), onOpen = { onOpen(post) }, onOpenProfile = onOpenProfile, onDelete = onDeleteThis)
+                        UiSkin.Galaxy -> NovaPostCard(post, avatarUrl, isNew = isNew, modifier = Modifier.itemAppear(index), onOpen = { onOpen(post) }, onOpenProfile = onOpenProfile, onDelete = onDeleteThis, onLike = { onLike(post.id) })
+                        UiSkin.Nova -> ExpNovaPostCard(post, avatarUrl, isNew = isNew, modifier = Modifier.itemAppear(index), onOpen = { onOpen(post) }, onOpenProfile = onOpenProfile, onDelete = onDeleteThis, onLike = { onLike(post.id) })
+                        UiSkin.Classic -> PostCard(post, avatarUrl, isNew = isNew, modifier = Modifier.itemAppear(index), onOpen = { onOpen(post) }, onOpenProfile = onOpenProfile, onDelete = onDeleteThis, onLike = { onLike(post.id) })
                     }
                 }
             }
@@ -523,6 +576,208 @@ private fun PostList(
 @Composable
 private fun forumCard(): Modifier =
     Modifier.clip(Corners.card).background(MaterialTheme.colorScheme.surfaceContainer)
+
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+
+@Composable
+private fun TagFilterRow(
+    tags: List<ForumTagDto>,
+    selected: String?,
+    galaxy: Boolean,
+    canCreate: Boolean,
+    onSelect: (String?) -> Unit,
+    onCreateTag: () -> Unit,
+) {
+    LazyRow(
+        Modifier.fillMaxWidth().padding(bottom = if (galaxy) Spacing.s else Spacing.xs),
+        contentPadding = PaddingValues(horizontal = Spacing.l),
+        horizontalArrangement = Arrangement.spacedBy(Spacing.s),
+    ) {
+        item(key = "__all") {
+            if (galaxy) {
+                NovaTag(selected = selected == null, onClick = { onSelect(null) }) { Text("all") }
+            } else {
+                FilterChip(selected = selected == null, onClick = { onSelect(null) }, label = { Text("all") }, shape = Corners.chip)
+            }
+        }
+        items(tags, key = { it.id }) { tag ->
+            if (galaxy) {
+                NovaTag(selected = selected == tag.id, onClick = { onSelect(tag.id) }) { Text(tag.name) }
+            } else {
+                FilterChip(
+                    selected = selected == tag.id,
+                    onClick = { onSelect(tag.id) },
+                    label = { Text(tag.name) },
+                    leadingIcon = if (tag.mark_label != null) {
+                        { Icon(Icons.Outlined.Check, null, Modifier.size(14.dp)) }
+                    } else null,
+                    shape = Corners.chip,
+                )
+            }
+        }
+        if (canCreate) {
+            item(key = "__newtag") {
+                FilterChip(
+                    selected = false,
+                    onClick = onCreateTag,
+                    label = { Text("tag") },
+                    leadingIcon = { Icon(Icons.Outlined.Add, null, Modifier.size(16.dp)) },
+                    shape = Corners.chip,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ForumTagChip(tag: ForumTagDto, marked: Boolean = false) {
+    val accent = MaterialTheme.colorScheme.primary
+    Row(
+        Modifier
+            .clip(Corners.chip)
+            .background(accent.copy(alpha = 0.14f))
+            .padding(horizontal = Spacing.s, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (marked && tag.mark_label != null) {
+            Icon(Icons.Outlined.Check, null, Modifier.size(13.dp), tint = accent)
+            Text(
+                tag.mark_label!!,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = accent,
+                modifier = Modifier.padding(start = 2.dp),
+            )
+        } else {
+            Icon(Icons.Outlined.Label, null, Modifier.size(13.dp), tint = accent)
+            Text(
+                tag.name,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = accent,
+                modifier = Modifier.padding(start = 2.dp),
+            )
+        }
+    }
+}
+
+/** "new" accent badge for posts unseen since the last visit. */
+@Composable
+private fun NewBadge() {
+    val accent = MaterialTheme.colorScheme.primary
+    Box(
+        Modifier.clip(Corners.chip).background(accent).padding(horizontal = Spacing.s, vertical = 1.dp),
+    ) {
+        Text(
+            "new",
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onPrimary,
+        )
+    }
+}
+
+@Composable
+private fun ForumLikeButton(liked: Boolean, count: Int, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .clip(Corners.chip)
+            .clickable(onClick = onClick)
+            .padding(horizontal = Spacing.xs, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            if (liked) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
+            if (liked) "unlike" else "like",
+            Modifier.size(18.dp),
+            tint = if (liked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (count > 0) {
+            Text(
+                "$count",
+                style = MaterialTheme.typography.labelMedium,
+                color = if (liked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = Spacing.xxs),
+            )
+        }
+    }
+}
+
+private fun forumMentionToken(value: TextFieldValue): Pair<Int, String>? {
+    if (!value.selection.collapsed) return null
+    val cursor = value.selection.end
+    val s = value.text
+    if (cursor > s.length) return null
+    var i = cursor - 1
+    while (i >= 0 && forumMentionWordChar(s[i])) i--
+    if (i < 0 || s[i] != '@') return null
+    if (i > 0 && forumMentionWordChar(s[i - 1])) return null
+    return i to s.substring(i + 1, cursor)
+}
+
+private fun forumMentionWordChar(c: Char) = c.isLetterOrDigit() || c == '_' || c == '.'
+
+private fun forumInsertMention(value: TextFieldValue, username: String): TextFieldValue {
+    val token = forumMentionToken(value) ?: return value
+    val start = token.first
+    val end = value.selection.end
+    val insert = "@$username "
+    val newText = value.text.substring(0, start) + insert + value.text.substring(end)
+    val caret = start + insert.length
+    return TextFieldValue(newText, TextRange(caret))
+}
+
+@Composable
+private fun ForumMentionSuggestions(
+    suggestions: List<ForumMentionCandidate>,
+    avatarUrl: (String?) -> String?,
+    onPick: (String) -> Unit,
+) {
+    LazyColumn(
+        Modifier
+            .fillMaxWidth()
+            .padding(bottom = Spacing.xs)
+            .heightIn(max = 48.dp * 4)
+            .clip(Corners.card)
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+        contentPadding = PaddingValues(vertical = Spacing.xs),
+    ) {
+        items(suggestions, key = { it.id }) { candidate ->
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable { onPick(candidate.username) }
+                    .padding(horizontal = Spacing.m, vertical = Spacing.s),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Spacing.s),
+            ) {
+                Avatar(name = candidate.username, model = avatarUrl(candidate.avatarKey), size = 28.dp)
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "@${candidate.username}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    val subtitle = candidate.displayName?.takeIf { it.isNotBlank() && it != candidate.username }
+                    if (subtitle != null) {
+                        Text(
+                            subtitle,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
 
 @Composable
 private fun AuthorLine(author: ApiUser, timestamp: Long, avatarUrl: (String?) -> String?, onOpenProfile: (String) -> Unit) {
@@ -584,10 +839,12 @@ private fun PostCardBox(
 private fun PostCard(
     post: ForumPostDto,
     avatarUrl: (String?) -> String?,
+    isNew: Boolean = false,
     modifier: Modifier = Modifier,
     onOpen: () -> Unit,
     onOpenProfile: (String) -> Unit,
     onDelete: (() -> Unit)? = null,
+    onLike: () -> Unit = {},
 ) = PostCardBox(onOpen, onDelete) { clickMod ->
     Column(
         modifier
@@ -596,6 +853,8 @@ private fun PostCard(
             .then(clickMod)
             .padding(Spacing.l),
     ) {
+
+        ForumCardBadges(post, isNew)
         Text(
             forumPostTitle(post.metadata),
             style = MaterialTheme.typography.titleMedium,
@@ -621,10 +880,11 @@ private fun PostCard(
             Box(Modifier.weight(1f)) {
                 AuthorLine(post.author, post.created_at, avatarUrl, onOpenProfile)
             }
+            ForumLikeButton(post.liked, post.like_count, onLike)
             Icon(
                 Icons.Outlined.ChatBubbleOutline,
                 null,
-                Modifier.size(20.dp),
+                Modifier.size(20.dp).padding(start = Spacing.xs),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
@@ -633,14 +893,23 @@ private fun PostCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = Spacing.xs),
             )
-            if (post.last_activity_at > post.created_at) {
-                Text(
-                    " · ${smartTime(post.last_activity_at)}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
         }
+    }
+}
+
+@Composable
+private fun ForumCardBadges(post: ForumPostDto, isNew: Boolean) {
+    if (!post.pinned && !isNew && post.tag == null) return
+    Row(
+        Modifier.fillMaxWidth().padding(bottom = Spacing.xs),
+        horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (post.pinned) {
+            Icon(Icons.Filled.PushPin, "pinned", Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
+        }
+        if (isNew) NewBadge()
+        post.tag?.let { ForumTagChip(it, marked = post.marked) }
     }
 }
 
@@ -649,6 +918,11 @@ private fun ThreadView(
     thread: ForumViewModel.ThreadState,
     isOwner: Boolean,
     pinned: Boolean,
+    marked: Boolean,
+    markLabel: String?,
+    canMark: Boolean,
+    mentions: List<ForumMentionCandidate>,
+    onMentionLookup: () -> Unit,
     avatarUrl: (String?) -> String?,
     onRetry: () -> Unit,
     onOpenProfile: (String) -> Unit,
@@ -656,6 +930,7 @@ private fun ThreadView(
     canDelete: (String) -> Boolean,
     onDelete: (String) -> Unit,
     onTogglePin: () -> Unit,
+    onToggleMark: () -> Unit,
 ) {
     when {
         thread.loading -> { LoadingState("loading post"); return }
@@ -666,7 +941,9 @@ private fun ThreadView(
     val galaxy = skin == UiSkin.Galaxy
     val nova = skin == UiSkin.Nova
     val listState = rememberLazyListState()
-    var draft by rememberSaveable(post.id) { mutableStateOf("") }
+    var draft by rememberSaveable(post.id, stateSaver = androidx.compose.ui.text.input.TextFieldValue.Saver) {
+        mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(""))
+    }
     LaunchedEffect(thread.replies.size) {
         if (thread.replies.isNotEmpty()) {
             // +1 for the root post header item
@@ -717,9 +994,14 @@ private fun ThreadView(
 
                     ThreadPostActions(
                         pinned = pinned,
+                        marked = marked,
+                        markLabel = markLabel,
                         canPin = isOwner,
+
+                        canMark = canMark && markLabel != null,
                         canDelete = canDelete(post.author.id),
                         onTogglePin = onTogglePin,
+                        onToggleMark = onToggleMark,
                         onDelete = { onDelete(post.id) },
                     )
                 }
@@ -755,12 +1037,29 @@ private fun ThreadView(
         val replyPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
             if (uri != null) scope.launch { replyImage = readPickedImage(context, uri) }
         }
-        val armed = (draft.isNotBlank() || replyImage != null) && !thread.sending
+        val armed = (draft.text.isNotBlank() || replyImage != null) && !thread.sending
         val submit: () -> Unit = {
             if (armed) {
                 val img = replyImage
-                onSend(draft, img) { draft = ""; replyImage = null }
+                onSend(draft.text, img) { draft = androidx.compose.ui.text.input.TextFieldValue(""); replyImage = null }
             }
+        }
+        // @mention autocomplete: fetch candidates lazily the first time an "@" appears,
+        // and show the filtered panel above the composer.
+        val mentionToken = remember(draft) { forumMentionToken(draft) }
+        LaunchedEffect(mentionToken != null) { if (mentionToken != null) onMentionLookup() }
+        val mentionSuggestions = remember(mentionToken, mentions) {
+            val query = mentionToken?.second?.lowercase() ?: return@remember emptyList()
+            mentions.filter { it.username.lowercase().startsWith(query) || (it.displayName?.lowercase()?.contains(query) == true) }
+                .sortedByDescending { it.username.lowercase().startsWith(query) }
+                .take(6)
+        }
+        if (mentionSuggestions.isNotEmpty()) {
+            ForumMentionSuggestions(
+                suggestions = mentionSuggestions,
+                avatarUrl = avatarUrl,
+                onPick = { username -> draft = forumInsertMention(draft, username) },
+            )
         }
 
         replyImage?.let { img ->
@@ -796,7 +1095,7 @@ private fun ThreadView(
             }
             OutlinedTextField(
                 value = draft,
-                onValueChange = { draft = it.take(4000) },
+                onValueChange = { if (it.text.length <= 4000) draft = it },
                 placeholder = { Text("reply to this post") },
                 enabled = !thread.sending,
                 shape = if (galaxy) NovaCorners.input else Corners.input,
@@ -864,12 +1163,16 @@ private fun ThreadView(
 @Composable
 private fun ThreadPostActions(
     pinned: Boolean,
+    marked: Boolean,
+    markLabel: String?,
     canPin: Boolean,
+    canMark: Boolean,
     canDelete: Boolean,
     onTogglePin: () -> Unit,
+    onToggleMark: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    if (!canPin && !canDelete) return
+    if (!canPin && !canMark && !canDelete) return
     Row(
         Modifier.fillMaxWidth().padding(top = Spacing.xs, start = Spacing.s, end = Spacing.s),
         verticalAlignment = Alignment.CenterVertically,
@@ -878,7 +1181,7 @@ private fun ThreadPostActions(
         if (canPin) {
             TextButton(onClick = onTogglePin) {
                 Icon(
-                    if (pinned) Icons.Outlined.PushPin else Icons.Outlined.PushPin,
+                    if (pinned) Icons.Filled.PushPin else Icons.Outlined.PushPin,
                     null,
                     Modifier.size(18.dp),
                     tint = if (pinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -887,6 +1190,22 @@ private fun ThreadPostActions(
                     if (pinned) "unpin" else "pin",
                     Modifier.padding(start = Spacing.xs),
                     color = if (pinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        if (canMark && markLabel != null) {
+            TextButton(onClick = onToggleMark) {
+                Icon(
+                    Icons.Outlined.Check,
+                    null,
+                    Modifier.size(18.dp),
+                    tint = if (marked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    if (marked) "✓ $markLabel" else "mark as $markLabel",
+                    Modifier.padding(start = Spacing.xs),
+                    color = if (marked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
@@ -940,18 +1259,32 @@ private fun ReplyRow(reply: MessageDto, avatarUrl: (String?) -> String?, onOpenP
 private fun NewPostDialog(
     creating: Boolean,
     error: String?,
+    tags: List<ForumTagDto>,
+    mentions: List<ForumMentionCandidate>,
+    onMentionLookup: () -> Unit,
+    avatarUrl: (String?) -> String?,
     onDismiss: () -> Unit,
-    onCreate: (title: String, body: String, image: PickedImage?) -> Unit,
+    onCreate: (title: String, body: String, image: PickedImage?, tagId: String?) -> Unit,
 ) {
     val galaxy = LocalUiSkin.current == UiSkin.Galaxy
     val inputShape = if (galaxy) NovaCorners.input else Corners.input
     var postTitle by rememberSaveable { mutableStateOf("") }
-    var body by rememberSaveable { mutableStateOf("") }
+    var body by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue("")) }
     var image by remember { mutableStateOf<PickedImage?>(null) }
+    var selectedTag by rememberSaveable { mutableStateOf<String?>(null) }
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) scope.launch { image = readPickedImage(context, uri) }
+    }
+    // @mention autocomplete for the body field.
+    val mentionToken = remember(body) { forumMentionToken(body) }
+    LaunchedEffect(mentionToken != null) { if (mentionToken != null) onMentionLookup() }
+    val mentionSuggestions = remember(mentionToken, mentions) {
+        val query = mentionToken?.second?.lowercase() ?: return@remember emptyList()
+        mentions.filter { it.username.lowercase().startsWith(query) || (it.displayName?.lowercase()?.contains(query) == true) }
+            .sortedByDescending { it.username.lowercase().startsWith(query) }
+            .take(6)
     }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -972,14 +1305,42 @@ private fun NewPostDialog(
                 )
                 OutlinedTextField(
                     value = body,
-                    onValueChange = { body = it.take(4000) },
-                    label = { Text("what's on your mind?") },
+                    onValueChange = { if (it.text.length <= 4000) body = it },
+
+                    label = { Text("description (optional)") },
                     enabled = !creating,
                     shape = inputShape,
                     minLines = 3,
                     maxLines = 8,
                     modifier = Modifier.fillMaxWidth().padding(top = Spacing.s).heightIn(min = 96.dp),
                 )
+                if (mentionSuggestions.isNotEmpty()) {
+                    ForumMentionSuggestions(
+                        suggestions = mentionSuggestions,
+                        avatarUrl = avatarUrl,
+                        onPick = { username -> body = forumInsertMention(body, username) },
+                    )
+                }
+
+                if (tags.isNotEmpty()) {
+                    LazyRow(
+                        Modifier.fillMaxWidth().padding(top = Spacing.s),
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.s),
+                    ) {
+                        items(tags, key = { it.id }) { tag ->
+                            FilterChip(
+                                selected = selectedTag == tag.id,
+                                onClick = { selectedTag = if (selectedTag == tag.id) null else tag.id },
+                                label = { Text(tag.name) },
+                                enabled = !creating,
+                                leadingIcon = if (tag.mark_label != null) {
+                                    { Icon(Icons.Outlined.Check, null, Modifier.size(14.dp)) }
+                                } else null,
+                                shape = Corners.chip,
+                            )
+                        }
+                    }
+                }
                 if (image == null) {
                     TextButton(
                         onClick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
@@ -1007,11 +1368,12 @@ private fun NewPostDialog(
             }
         },
         confirmButton = {
-            val canPost = !creating && postTitle.isNotBlank() && (body.isNotBlank() || image != null)
+
+            val canPost = !creating && postTitle.isNotBlank()
             if (galaxy) {
                 NovaPillButton(
                     text = if (creating) "posting..." else "post",
-                    onClick = { if (canPost) onCreate(postTitle, body, image) },
+                    onClick = { if (canPost) onCreate(postTitle, body.text, image, selectedTag) },
                     armed = canPost,
                     height = 48.dp,
                     modifier = Modifier.width(150.dp),
@@ -1021,7 +1383,7 @@ private fun NewPostDialog(
                 )
             } else {
                 Button(
-                    onClick = { onCreate(postTitle, body, image) },
+                    onClick = { onCreate(postTitle, body.text, image, selectedTag) },
                     enabled = canPost,
                 ) {
                     if (creating) {
@@ -1037,6 +1399,90 @@ private fun NewPostDialog(
     )
 }
 
+@Composable
+private fun CreateTagDialog(
+    busy: Boolean,
+    error: String?,
+    onDismiss: () -> Unit,
+    onCreate: (name: String, markLabel: String?) -> Unit,
+) {
+    val galaxy = LocalUiSkin.current == UiSkin.Galaxy
+    val inputShape = if (galaxy) NovaCorners.input else Corners.input
+    var name by rememberSaveable { mutableStateOf("") }
+    var markable by rememberSaveable { mutableStateOf(false) }
+    var markLabel by rememberSaveable { mutableStateOf("") }
+    val canCreate = !busy && name.isNotBlank() && (!markable || markLabel.isNotBlank())
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = if (galaxy) NovaCorners.card else AlertDialogDefaults.shape,
+        title = { Text("new tag") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it.take(40) },
+                    label = { Text("tag name") },
+                    enabled = !busy,
+                    singleLine = true,
+                    shape = inputShape,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(
+                    Modifier.fillMaxWidth().padding(top = Spacing.m),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("can be marked", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
+                        Text(
+                            "posts with this tag get a \"mark as …\" button",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = markable, onCheckedChange = { markable = it }, enabled = !busy)
+                }
+                AnimatedVisibility(visible = markable) {
+                    OutlinedTextField(
+                        value = markLabel,
+                        onValueChange = { markLabel = it.take(40) },
+                        label = { Text("mark label (e.g. completed)") },
+                        enabled = !busy,
+                        singleLine = true,
+                        shape = inputShape,
+                        modifier = Modifier.fillMaxWidth().padding(top = Spacing.s),
+                    )
+                }
+                AnimatedVisibility(
+                    visible = error != null,
+                    enter = fadeIn(PigeonMotion.snappy()),
+                    exit = fadeOut(PigeonMotion.snappy()),
+                ) {
+                    Text(
+                        error.orEmpty(),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(top = Spacing.s),
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onCreate(name, if (markable) markLabel else null) },
+                enabled = canCreate,
+            ) {
+                if (busy) {
+                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    Text("saving...", Modifier.padding(start = Spacing.s))
+                } else {
+                    Text("create")
+                }
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss, enabled = !busy) { Text("cancel") } },
+    )
+}
+
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
@@ -1045,16 +1491,17 @@ private fun NewPostDialog(
 private fun NovaPostCard(
     post: ForumPostDto,
     avatarUrl: (String?) -> String?,
+    isNew: Boolean = false,
     modifier: Modifier = Modifier,
     onOpen: () -> Unit,
     onOpenProfile: (String) -> Unit,
     onDelete: (() -> Unit)? = null,
+    onLike: () -> Unit = {},
 ) = PostCardBox(onOpen, onDelete) { clickMod ->
     val accent = MaterialTheme.colorScheme.primary
     val cyan = MaterialTheme.colorScheme.secondary
 
-    // read as "hot" without an intrusive full outline.
-    val hot = post.reply_count > 0
+    val hot = post.reply_count > 0 || isNew
     Row(
         modifier
             .fillMaxWidth()
@@ -1081,6 +1528,7 @@ private fun NovaPostCard(
             )
         }
         Column(Modifier.weight(1f).padding(start = Spacing.m)) {
+            ForumCardBadges(post, isNew)
 
             Text(
                 forumPostTitle(post.metadata),
@@ -1123,7 +1571,8 @@ private fun NovaPostCard(
                     modifier = Modifier.weight(1f, fill = false).padding(start = Spacing.xs).clickable { onOpenProfile(post.author.id) },
                 )
                 Spacer(Modifier.weight(1f))
-                Icon(Icons.Outlined.Schedule, null, Modifier.size(13.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                ForumLikeButton(post.liked, post.like_count, onLike)
+                Icon(Icons.Outlined.Schedule, null, Modifier.padding(start = Spacing.xs).size(13.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(
                     " ${smartTime(if (post.last_activity_at > post.created_at) post.last_activity_at else post.created_at)}",
                     style = MaterialTheme.typography.labelSmall,
@@ -1279,10 +1728,12 @@ private fun NovaReplyRow(reply: MessageDto, avatarUrl: (String?) -> String?, onO
 private fun ExpNovaPostCard(
     post: ForumPostDto,
     avatarUrl: (String?) -> String?,
+    isNew: Boolean = false,
     modifier: Modifier = Modifier,
     onOpen: () -> Unit,
     onOpenProfile: (String) -> Unit,
     onDelete: (() -> Unit)? = null,
+    onLike: () -> Unit = {},
 ) = PostCardBox(onOpen, onDelete) { clickMod ->
     Row(
         modifier
@@ -1311,6 +1762,7 @@ private fun ExpNovaPostCard(
             )
         }
         Column(Modifier.weight(1f).padding(start = Spacing.m)) {
+            ForumCardBadges(post, isNew)
 
             Text(
                 forumPostTitle(post.metadata),
@@ -1353,7 +1805,8 @@ private fun ExpNovaPostCard(
                     modifier = Modifier.weight(1f, fill = false).padding(start = Spacing.xs).clickable { onOpenProfile(post.author.id) },
                 )
                 Spacer(Modifier.weight(1f))
-                Icon(Icons.Outlined.Schedule, null, Modifier.size(13.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                ForumLikeButton(post.liked, post.like_count, onLike)
+                Icon(Icons.Outlined.Schedule, null, Modifier.padding(start = Spacing.xs).size(13.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(
                     " ${smartTime(if (post.last_activity_at > post.created_at) post.last_activity_at else post.created_at)}",
                     style = MaterialTheme.typography.labelSmall,

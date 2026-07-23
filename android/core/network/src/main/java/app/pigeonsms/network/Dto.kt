@@ -300,6 +300,12 @@ data class MutualSpaceDto(
 @Serializable data class ProfileResponse(val profile: ProfileDto, val mutual_spaces: List<MutualSpaceDto> = emptyList())
 
 @Serializable
+data class ForumTagDto(val id: String, val name: String, val mark_label: String? = null)
+
+@Serializable data class ForumTagResponse(val tag: ForumTagDto)
+@Serializable data class ForumTagsResponse(val tags: List<ForumTagDto> = emptyList())
+
+@Serializable
 data class ForumPostDto(
     val id: String,
     val channel_id: String,
@@ -315,10 +321,22 @@ data class ForumPostDto(
     val reactions: List<ReactionDto> = emptyList(),
     val reply_count: Int = 0,
     val last_activity_at: Long = 0,
+    val pinned: Boolean = false,
+    val like_count: Int = 0,
+    val liked: Boolean = false,
+    val marked: Boolean = false,
+    val tag: ForumTagDto? = null,
 )
 
 @Serializable data class ForumPostsResponse(val posts: List<ForumPostDto> = emptyList())
+@Serializable data class ForumPostResponse(val message: ForumPostDto)
 @Serializable data class ForumCursorDto(val last_seq: Long? = null)
+
+@Serializable data class LikeMutationResponse(val like_count: Int = 0, val liked: Boolean = false)
+
+@Serializable data class MarkMutationResponse(val marked: Boolean = false)
+
+@Serializable data class ForumLikeEventDto(val channel_id: String, val message_id: String, val like_count: Int = 0)
 
 @Serializable
 data class ForumThreadResponse(
