@@ -4,6 +4,44 @@ so this is pigeonsms, a chat app i've been chipping away at for the past couple 
 
 it's a passion project, built with privacy in mind — a way for friend groups to chat on a platform they actually control. you can self-host the whole thing (it's all here, gpl'd), or just use the instance i already run at pigeonsms.aldi.best. no ads, no tracking, no data mining, no premium tier gating features behind a paywall. it's yours.
 
+
+here are some screenshots:
+<p align="center">
+  <img
+    src="https://cdn.getswift.cloud/bo0ba"
+    alt="sc 1"
+    width="31%"
+  />
+  &nbsp;
+  <img
+    src="https://app.getswift.cloud/file/2qcze"
+    alt="sc 2"
+    width="31%"
+  />
+  &nbsp;
+  <img
+    src="https://cdn.getswift.cloud/iwc9c"
+    alt="sc 3"
+    width="31%"
+  />
+</p>
+
+<p align="center">
+  <img
+    src="https://cdn.getswift.cloud/xtszd"
+    alt="screen 4"
+    width="720"
+  />
+</p>
+
+<p align="center">
+  <img
+    src="https://cdn.getswift.cloud/pe9si"
+    alt="screen 5"
+    width="720"
+  />
+</p>
+
 it started as a "i bet i can build a messenger in a weekend" kind of idea and uh, it was not a weekend. but it works now and i'm honestly kind of proud of it so here it is
 
 ## what works
