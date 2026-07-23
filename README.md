@@ -41,6 +41,8 @@ here are some screenshots:
     width="720"
   />
 </p>
+(this is the lead designer of logos and other stuff)
+(other stuff = giving me 50 things to fix but hey anything to make it better)
 
 it started as a "i bet i can build a messenger in a weekend" kind of idea and uh, it was not a weekend. but it works now and i'm honestly kind of proud of it so here it is
 
