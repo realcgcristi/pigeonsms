@@ -236,6 +236,12 @@ class PigeonApi(
     suspend fun createChannel(spaceId: String, name: String, kind: String = "text") = client.post("$baseUrl/spaces/$spaceId/channels") {
         auth(); contentType(ContentType.Application.Json); setBody(buildJsonObject { put("name", name); put("kind", kind) })
     }.unwrap<CreateChannelResponse>().channel
+
+    suspend fun renameChannel(spaceId: String, channelId: String, name: String) = client.patch("$baseUrl/spaces/$spaceId/channels/$channelId") {
+        auth(); contentType(ContentType.Application.Json); setBody(buildJsonObject { put("name", name) })
+    }.unwrap<CreateChannelResponse>().channel
+
+    suspend fun deleteChannel(spaceId: String, channelId: String) { client.delete("$baseUrl/spaces/$spaceId/channels/$channelId") { auth() }.unwrap<OkResponse>() }
     suspend fun spaceInvite(spaceId: String) = client.post("$baseUrl/spaces/$spaceId/invites") {
         auth(); contentType(ContentType.Application.Json); setBody(buildJsonObject { })
     }.unwrap<SpaceInviteResponse>()
@@ -265,18 +271,22 @@ class PigeonApi(
         client.get("$baseUrl/channels/$channelId/forum/posts/$postId${if (after != null) "?after=$after" else ""}") { auth() }
             .unwrap<ForumThreadResponse>()
 
-    suspend fun createForumPost(channelId: String, title: String, content: String, nonce: String) =
+    suspend fun createForumPost(channelId: String, title: String, content: String, nonce: String, attachment: AttachmentDto? = null) =
         client.post("$baseUrl/channels/$channelId/forum/posts") {
             auth(); contentType(ContentType.Application.Json)
-            setBody(buildJsonObject { put("title", title); put("content", content); put("nonce", nonce) })
+            setBody(buildJsonObject {
+                put("title", title); put("content", content); put("nonce", nonce)
+                if (attachment != null) put("attachment", json.encodeToJsonElement(AttachmentDto.serializer(), attachment))
+            })
         }.unwrap<MessageResponse>().message
 
-    suspend fun createForumReply(channelId: String, postId: String, content: String, nonce: String, replyTo: String? = null) =
+    suspend fun createForumReply(channelId: String, postId: String, content: String, nonce: String, replyTo: String? = null, attachment: AttachmentDto? = null) =
         client.post("$baseUrl/channels/$channelId/forum/posts/$postId/replies") {
             auth(); contentType(ContentType.Application.Json)
             setBody(buildJsonObject {
                 put("content", content); put("nonce", nonce)
                 if (replyTo != null) put("reply_to", replyTo)
+                if (attachment != null) put("attachment", json.encodeToJsonElement(AttachmentDto.serializer(), attachment))
             })
         }.unwrap<MessageResponse>().message
 

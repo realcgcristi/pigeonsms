@@ -161,7 +161,7 @@ class AppViewModel(
                         val event = runCatching { json.decodeFromJsonElement(SuperPinRemoveEventDto.serializer(), ev.d) }.getOrNull()
                         if (event != null) chat.applyPinEvent(PinEvent.SuperPinRemoved(event.channel_id))
                     }
-                    "space.update" -> refreshSpaces()
+                    "space.update", "channel.update", "channel.delete" -> refreshSpaces()
                     "reaction.add", "reaction.remove" -> {
                         val data = ev.d.jsonObject
                         val messageId = data["message_id"]?.jsonPrimitive?.content

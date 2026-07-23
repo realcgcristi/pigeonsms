@@ -242,6 +242,17 @@ data class SpaceDto(
     val channels: List<ChannelDto> = emptyList(),
 )
 
+@Serializable
+data class ChannelUpdateEventDto(
+    val id: String,
+    val space_id: String,
+    val name: String? = null,
+    val topic: String? = null,
+    val kind: String = "text",
+)
+
+@Serializable data class ChannelDeleteEventDto(val id: String, val space_id: String)
+
 @Serializable data class SpacesResponse(val spaces: List<SpaceDto> = emptyList())
 @Serializable data class CreateSpaceResponse(val space: SpaceDto)
 @Serializable data class SpaceResponse(val space: SpaceDto)

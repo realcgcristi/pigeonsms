@@ -116,6 +116,7 @@ fun SettingsScreen(
     onAppearance: () -> Unit,
     onPrivacy: () -> Unit,
     onNotifications: () -> Unit,
+    onNests: () -> Unit,
     onSignOut: () -> Unit,
 ) {
     val skin = LocalUiSkin.current
@@ -175,6 +176,8 @@ fun SettingsScreen(
             Group("account")
             GroupCard {
                 MenuRow(Icons.Outlined.Person, "edit profile", "name, avatar, status", onEditProfile)
+                RowDivider()
+                MenuRow(Icons.Outlined.Groups, "bird nests", "manage your nests and channels", onNests)
                 RowDivider()
                 MenuRow(Icons.Outlined.Devices, "devices", "active sessions", onSessions)
                 RowDivider()
@@ -270,7 +273,8 @@ private fun Exp2IdentityHero(
             Box(
                 Modifier.size(72.dp).background(MaterialTheme.colorScheme.surface, CircleShape)
                     .border(3.dp, MaterialTheme.colorScheme.primary, CircleShape).padding(4.dp),
-            ) { Avatar(displayName, avatarModel, 60.dp) }
+                contentAlignment = Alignment.Center,
+            ) { Avatar(displayName, avatarModel, 58.dp) }
             Column(Modifier.weight(1f).padding(start = Spacing.l)) {
                 Text(displayName, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text("@$username", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)

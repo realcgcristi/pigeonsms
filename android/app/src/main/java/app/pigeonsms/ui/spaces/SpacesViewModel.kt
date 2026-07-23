@@ -9,7 +9,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-enum class SpaceAction { Create, Join, CreateChannel, Delete, Leave, ChangeIcon }
+enum class SpaceAction { Create, Join, CreateChannel, Delete, Leave, ChangeIcon, RenameChannel, DeleteChannel }
 
 data class CreatedChannel(
     val id: String,
@@ -108,6 +108,32 @@ class SpacesViewModel(
             val attachment = repo.uploadFile(bytes, "space-icon", type)
             repo.setSpaceIcon(spaceId, attachment.key)
         }, onDone)
+    }
+
+    fun renameChannel(spaceId: String, channelId: String, name: String, onDone: () -> Unit) {
+        if (_ui.value.action != null) return
+        val cleanName = name
+            .trim()
+            .lowercase()
+            .replace(Regex("[^a-z0-9-]"), "-")
+            .replace(Regex("-+"), "-")
+            .trim('-')
+        when {
+            cleanName.length < 2 -> {
+                _ui.update { it.copy(error = "channel name needs at least 2 letters or numbers") }
+                return
+            }
+            cleanName.length > 32 -> {
+                _ui.update { it.copy(error = "channel name must be 32 characters or less") }
+                return
+            }
+        }
+        runAction(SpaceAction.RenameChannel, "couldn't rename channel", { repo.renameChannel(spaceId, channelId, cleanName) }, onDone)
+    }
+
+    fun deleteChannel(spaceId: String, channelId: String, onDone: () -> Unit) {
+        if (_ui.value.action != null) return
+        runAction(SpaceAction.DeleteChannel, "couldn't delete channel", { repo.deleteChannel(spaceId, channelId) }, onDone)
     }
 
     fun delete(spaceId: String, onDone: () -> Unit) {

@@ -26,6 +26,8 @@ class SocialRepository(private val api: PigeonApi) {
     suspend fun spaces(): List<SpaceDto> = api.spaces()
     suspend fun createSpace(name: String) = api.createSpace(name, UUID.randomUUID().toString())
     suspend fun createChannel(spaceId: String, name: String) = api.createChannel(spaceId, name)
+    suspend fun renameChannel(spaceId: String, channelId: String, name: String) = api.renameChannel(spaceId, channelId, name)
+    suspend fun deleteChannel(spaceId: String, channelId: String) = api.deleteChannel(spaceId, channelId)
     suspend fun spaceInvite(spaceId: String) = api.spaceInvite(spaceId)
     suspend fun joinSpace(code: String) = api.joinSpace(code)
     suspend fun spaceMembers(spaceId: String) = api.spaceMembers(spaceId)

@@ -40,7 +40,12 @@ import androidx.compose.material.icons.outlined.Tag
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.VolumeUp
 import androidx.compose.material.icons.outlined.ChevronRight
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.CircularProgressIndicator
@@ -66,6 +71,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -126,6 +132,8 @@ fun SpacesScreen(app: AppViewModel, onOpenChannel: (id: String, name: String, ki
     var leaveTarget by remember { mutableStateOf<SpaceDto?>(null) }
     var inviteCode by remember { mutableStateOf<String?>(null) }
     var iconTarget by remember { mutableStateOf<SpaceDto?>(null) }
+    var renameChannelTarget by remember { mutableStateOf<Pair<SpaceDto, app.pigeonsms.network.ChannelDto>?>(null) }
+    var deleteChannelTarget by remember { mutableStateOf<Pair<SpaceDto, app.pigeonsms.network.ChannelDto>?>(null) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val iconPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
@@ -184,7 +192,7 @@ fun SpacesScreen(app: AppViewModel, onOpenChannel: (id: String, name: String, ki
             }
         }
         AnimatedVisibility(
-            visible = ui.error != null && !sheetOpen && createChannelTarget == null && deleteTarget == null && leaveTarget == null,
+            visible = ui.error != null && !sheetOpen && createChannelTarget == null && deleteTarget == null && leaveTarget == null && renameChannelTarget == null && deleteChannelTarget == null,
             enter = fadeIn(PigeonMotion.snappy()),
             exit = fadeOut(PigeonMotion.snappy()),
         ) {
@@ -239,6 +247,16 @@ fun SpacesScreen(app: AppViewModel, onOpenChannel: (id: String, name: String, ki
                     val onLeave: (() -> Unit)? = if (space.role != "owner") {
                         { vm.clearFeedback(); leaveTarget = space }
                     } else null
+
+                    val channelMenu: ((app.pigeonsms.network.ChannelDto) -> ChannelMenuActions)? =
+                        if (space.role == "owner") {
+                            { channel ->
+                                ChannelMenuActions(
+                                    onRename = { vm.clearFeedback(); renameChannelTarget = space to channel },
+                                    onDelete = { vm.clearFeedback(); deleteChannelTarget = space to channel },
+                                )
+                            }
+                        } else null
                     val iconBusy = ui.action == SpaceAction.ChangeIcon && iconTarget?.id == space.id
                     if (galaxy) {
                         NovaSpaceCard(
@@ -246,12 +264,14 @@ fun SpacesScreen(app: AppViewModel, onOpenChannel: (id: String, name: String, ki
                             modifier = Modifier.itemAppear(index),
                             iconUrl = app.mediaUrl(space.icon_key),
                             iconBusy = iconBusy,
+                            singleNest = home.spaces.size == 1,
                             onChangeIcon = onChangeIcon,
                             onInvite = onInvite,
                             onOpenChannel = onOpenChannel,
                             onAddChannel = onAddChannel,
                             onDelete = onDelete,
                             onLeave = onLeave,
+                            channelMenu = channelMenu,
                         )
                     } else if (novaSkin) {
                         ExpSpaceCard(
@@ -259,12 +279,14 @@ fun SpacesScreen(app: AppViewModel, onOpenChannel: (id: String, name: String, ki
                             modifier = Modifier.itemAppear(index),
                             iconUrl = app.mediaUrl(space.icon_key),
                             iconBusy = iconBusy,
+                            singleNest = home.spaces.size == 1,
                             onChangeIcon = onChangeIcon,
                             onInvite = onInvite,
                             onOpenChannel = onOpenChannel,
                             onAddChannel = onAddChannel,
                             onDelete = onDelete,
                             onLeave = onLeave,
+                            channelMenu = channelMenu,
                         )
                     } else {
                         SpaceCard(
@@ -272,12 +294,14 @@ fun SpacesScreen(app: AppViewModel, onOpenChannel: (id: String, name: String, ki
                             modifier = Modifier.itemAppear(index),
                             iconUrl = app.mediaUrl(space.icon_key),
                             iconBusy = iconBusy,
+                            singleNest = home.spaces.size == 1,
                             onChangeIcon = onChangeIcon,
                             onInvite = onInvite,
                             onOpenChannel = onOpenChannel,
                             onAddChannel = onAddChannel,
                             onDelete = onDelete,
                             onLeave = onLeave,
+                            channelMenu = channelMenu,
                         )
                     }
                 }
@@ -494,6 +518,107 @@ fun SpacesScreen(app: AppViewModel, onOpenChannel: (id: String, name: String, ki
             },
         )
     }
+
+    renameChannelTarget?.let { (space, channel) ->
+        var channelName by rememberSaveable(channel.id) { mutableStateOf(channel.name ?: "") }
+        val busy = ui.action != null
+        val submit: () -> Unit = {
+            vm.renameChannel(space.id, channel.id, channelName) {
+                renameChannelTarget = null
+                app.refreshSpaces()
+            }
+        }
+        AlertDialog(
+            onDismissRequest = { if (!busy) { renameChannelTarget = null; vm.clearFeedback() } },
+            title = { Text("rename channel") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = channelName,
+                        onValueChange = { channelName = it.take(32); vm.clearFeedback() },
+                        label = { Text("channel name") },
+                        prefix = { Text(if (channel.kind == "voice") "🔊 " else "#") },
+                        supportingText = { Text("${channelName.length}/32") },
+                        enabled = !busy,
+                        singleLine = true,
+                        shape = Corners.input,
+                        modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(onDone = { if (!busy) submit() }),
+                    )
+                    AnimatedVisibility(
+                        visible = ui.error != null,
+                        enter = fadeIn(PigeonMotion.snappy()),
+                        exit = fadeOut(PigeonMotion.snappy()),
+                    ) {
+                        Text(ui.error.orEmpty(), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = Spacing.s))
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = submit, enabled = !busy) {
+                    ActionLabel(ui.action == SpaceAction.RenameChannel, "rename")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { renameChannelTarget = null; vm.clearFeedback() }, enabled = !busy) { Text("cancel") }
+            },
+        )
+    }
+
+    deleteChannelTarget?.let { (space, channel) ->
+        AlertDialog(
+            onDismissRequest = { if (ui.action == null) { deleteChannelTarget = null; vm.clearFeedback() } },
+            title = { Text("delete #${channel.name ?: "channel"}?") },
+            text = {
+                Column {
+                    Text("This removes the channel and its messages for everyone. This cannot be undone.")
+                    if (ui.error != null) Text(ui.error!!, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = Spacing.m))
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        vm.deleteChannel(space.id, channel.id) {
+                            deleteChannelTarget = null
+                            app.refreshSpaces()
+                        }
+                    },
+                    enabled = ui.action == null,
+                ) { ActionLabel(ui.action == SpaceAction.DeleteChannel, "delete") }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteChannelTarget = null; vm.clearFeedback() }, enabled = ui.action == null) { Text("cancel") }
+            },
+        )
+    }
+}
+
+private data class ChannelMenuActions(
+    val onRename: () -> Unit,
+    val onDelete: () -> Unit,
+)
+
+@Composable
+private fun ChannelOverflowMenu(actions: ChannelMenuActions, tint: Color) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { open = true }, modifier = Modifier.size(32.dp)) {
+            Icon(Icons.Outlined.MoreVert, "channel options", Modifier.size(18.dp), tint = tint)
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text("rename") },
+                leadingIcon = { Icon(Icons.Outlined.Edit, null, Modifier.size(18.dp)) },
+                onClick = { open = false; actions.onRename() },
+            )
+            DropdownMenuItem(
+                text = { Text("delete") },
+                leadingIcon = { Icon(Icons.Outlined.DeleteOutline, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.error) },
+                onClick = { open = false; actions.onDelete() },
+            )
+        }
+    }
 }
 
 private const val MAX_ICON_BYTES = 8 * 1024 * 1024
@@ -535,19 +660,26 @@ private fun SpaceCard(
     modifier: Modifier = Modifier,
     iconUrl: String?,
     iconBusy: Boolean,
+    singleNest: Boolean = false,
     onChangeIcon: (() -> Unit)?,
     onInvite: () -> Unit,
     onOpenChannel: (id: String, name: String, kind: String) -> Unit,
     onAddChannel: (() -> Unit)?,
     onDelete: (() -> Unit)?,
     onLeave: (() -> Unit)? = null,
+    channelMenu: ((app.pigeonsms.network.ChannelDto) -> ChannelMenuActions)? = null,
 ) {
+
+    // a lone nest auto-expands so there's nothing to click through.
+    var expanded by rememberSaveable(space.id) { mutableStateOf(singleNest) }
+    val totalUnread = space.channels.sumOf { it.unread }
 
     Column(
         modifier
             .fillMaxWidth()
             .clip(Corners.card)
             .background(MaterialTheme.colorScheme.surfaceContainer)
+            .clickableScale { expanded = !expanded }
             .padding(Spacing.l),
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -612,63 +744,80 @@ private fun SpaceCard(
             if (onLeave != null) {
                 IconButton(onClick = onLeave) { Icon(Icons.AutoMirrored.Outlined.Logout, "leave space", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
             }
-        }
 
-        Row(
-            Modifier.fillMaxWidth().padding(top = Spacing.m),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                "channels",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.weight(1f),
-            )
-            if (onAddChannel != null) {
-                IconButton(onClick = onAddChannel) {
-                    Icon(Icons.Outlined.Add, "add channel to ${space.name}", tint = MaterialTheme.colorScheme.primary)
-                }
+            if (!expanded && totalUnread > 0) {
+                Spacer(Modifier.width(Spacing.xs))
+                UnreadPill(totalUnread)
             }
+            val chevronRotation by androidx.compose.animation.core.animateFloatAsState(if (expanded) 180f else 0f, label = "spaceChevron")
+            Icon(
+                Icons.Outlined.ExpandMore,
+                if (expanded) "collapse channels" else "show channels",
+                Modifier.padding(start = Spacing.xs).size(24.dp).rotate(chevronRotation),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
 
-        if (space.channels.isEmpty()) {
-            Text("no channels yet", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = Spacing.xs, bottom = Spacing.s))
-        } else {
+        AnimatedVisibility(visible = expanded) {
+            Column {
+                Row(
+                    Modifier.fillMaxWidth().padding(top = Spacing.m),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "channels",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (onAddChannel != null) {
+                        IconButton(onClick = onAddChannel) {
+                            Icon(Icons.Outlined.Add, "add channel to ${space.name}", tint = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                }
 
-            // a primary-tinted wash + pill instead of shouting with boxes.
-            Column(Modifier.padding(start = Spacing.s, top = Spacing.xs), verticalArrangement = Arrangement.spacedBy(Spacing.xxs)) {
-                space.channels.forEach { channel ->
-                    val unread = channel.unread > 0
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = 44.dp)
-                            .clip(Corners.button)
-                            .background(if (unread) MaterialTheme.colorScheme.primary.copy(alpha = 0.10f) else Color.Transparent)
-                            .clickableScale { onOpenChannel(channel.id, channel.name ?: "channel", channel.kind) }
-                            .padding(horizontal = Spacing.m),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(
-                            when (channel.kind.lowercase()) {
-                                "forum" -> Icons.Outlined.Forum
-                                "voice" -> Icons.Outlined.VolumeUp
-                                else -> Icons.Outlined.Tag
-                            },
-                            null,
-                            Modifier.size(20.dp),
-                            tint = if (unread) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Text(
-                            channel.name ?: "channel",
-                            style = MaterialTheme.typography.bodyLarge,
-                            fontWeight = if (unread) androidx.compose.ui.text.font.FontWeight.SemiBold else null,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.weight(1f).padding(start = Spacing.m),
-                            maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        )
-                        if (channel.kind != "text") Text(channel.kind, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(end = Spacing.s))
-                        if (unread) UnreadPill(channel.unread)
+                if (space.channels.isEmpty()) {
+                    Text("no channels yet", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = Spacing.xs, bottom = Spacing.s))
+                } else {
+
+                    // a primary-tinted wash + pill instead of shouting with boxes.
+                    Column(Modifier.padding(start = Spacing.s, top = Spacing.xs), verticalArrangement = Arrangement.spacedBy(Spacing.xxs)) {
+                        space.channels.forEach { channel ->
+                            val unread = channel.unread > 0
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 44.dp)
+                                    .clip(Corners.button)
+                                    .background(if (unread) MaterialTheme.colorScheme.primary.copy(alpha = 0.10f) else Color.Transparent)
+                                    .clickableScale { onOpenChannel(channel.id, channel.name ?: "channel", channel.kind) }
+                                    .padding(start = Spacing.m),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(
+                                    when (channel.kind.lowercase()) {
+                                        "forum" -> Icons.Outlined.Forum
+                                        "voice" -> Icons.Outlined.VolumeUp
+                                        else -> Icons.Outlined.Tag
+                                    },
+                                    null,
+                                    Modifier.size(20.dp),
+                                    tint = if (unread) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Text(
+                                    channel.name ?: "channel",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = if (unread) androidx.compose.ui.text.font.FontWeight.SemiBold else null,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.weight(1f).padding(start = Spacing.m),
+                                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                )
+                                if (channel.kind != "text") Text(channel.kind, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(end = Spacing.s))
+                                if (unread) UnreadPill(channel.unread)
+                                channelMenu?.let { ChannelOverflowMenu(it(channel), MaterialTheme.colorScheme.onSurfaceVariant) }
+                            }
+                        }
                     }
                 }
             }
@@ -705,13 +854,16 @@ private fun NovaSpaceCard(
     modifier: Modifier = Modifier,
     iconUrl: String?,
     iconBusy: Boolean,
+    singleNest: Boolean = false,
     onChangeIcon: (() -> Unit)?,
     onInvite: () -> Unit,
     onOpenChannel: (id: String, name: String, kind: String) -> Unit,
     onAddChannel: (() -> Unit)?,
     onDelete: (() -> Unit)?,
     onLeave: (() -> Unit)? = null,
+    channelMenu: ((app.pigeonsms.network.ChannelDto) -> ChannelMenuActions)? = null,
 ) {
+    var expanded by rememberSaveable(space.id) { mutableStateOf(singleNest) }
     val totalUnread = space.channels.sumOf { it.unread }
     val accent = MaterialTheme.colorScheme.primary
     val cardShape = NovaCorners.card
@@ -792,15 +944,29 @@ private fun NovaSpaceCard(
         }
 
         Column(Modifier.padding(Spacing.l)) {
-            Text(
-                space.name,
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = (-0.5).sp,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
+            val chevronRotation by androidx.compose.animation.core.animateFloatAsState(if (expanded) 180f else 0f, label = "novaChevron")
+            Row(Modifier.fillMaxWidth().clickableScale { expanded = !expanded }, verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    space.name,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = (-0.5).sp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                if (!expanded && totalUnread > 0) {
+                    UnreadPill(totalUnread)
+                    Spacer(Modifier.width(Spacing.xs))
+                }
+                Icon(
+                    Icons.Outlined.ExpandMore,
+                    if (expanded) "collapse channels" else "show channels",
+                    Modifier.size(26.dp).rotate(chevronRotation),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             space.description?.takeIf { it.isNotBlank() }?.let { description ->
                 Text(
                     description,
@@ -838,30 +1004,35 @@ private fun NovaSpaceCard(
                 if (onLeave != null) IconButton(onClick = onLeave) { Icon(Icons.AutoMirrored.Outlined.Logout, "leave space", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
             }
 
-            Row(
-                Modifier.fillMaxWidth().padding(top = Spacing.m),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                NovaSectionLabel(
-                    "channels",
-                    accent = true,
-                    modifier = Modifier.weight(1f),
-                )
-                if (onAddChannel != null) {
-                    IconButton(onClick = onAddChannel) {
-                        Icon(Icons.Outlined.Add, "add channel to ${space.name}", tint = MaterialTheme.colorScheme.primary)
-                    }
-                }
-            }
-            if (space.channels.isEmpty()) {
-                Text("no channels yet", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = Spacing.xs, bottom = Spacing.xs))
-            } else {
-                Column(Modifier.padding(top = Spacing.xs), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
-                    space.channels.forEach { channel ->
-                        NovaChannelRow(
-                            channel = channel,
-                            onClick = { onOpenChannel(channel.id, channel.name ?: "channel", channel.kind) },
+            AnimatedVisibility(visible = expanded) {
+                Column {
+                    Row(
+                        Modifier.fillMaxWidth().padding(top = Spacing.m),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        NovaSectionLabel(
+                            "channels",
+                            accent = true,
+                            modifier = Modifier.weight(1f),
                         )
+                        if (onAddChannel != null) {
+                            IconButton(onClick = onAddChannel) {
+                                Icon(Icons.Outlined.Add, "add channel to ${space.name}", tint = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+                    }
+                    if (space.channels.isEmpty()) {
+                        Text("no channels yet", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = Spacing.xs, bottom = Spacing.xs))
+                    } else {
+                        Column(Modifier.padding(top = Spacing.xs), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                            space.channels.forEach { channel ->
+                                NovaChannelRow(
+                                    channel = channel,
+                                    onClick = { onOpenChannel(channel.id, channel.name ?: "channel", channel.kind) },
+                                    menu = channelMenu?.invoke(channel),
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -870,7 +1041,7 @@ private fun NovaSpaceCard(
 }
 
 @Composable
-private fun NovaChannelRow(channel: app.pigeonsms.network.ChannelDto, onClick: () -> Unit) {
+private fun NovaChannelRow(channel: app.pigeonsms.network.ChannelDto, onClick: () -> Unit, menu: ChannelMenuActions? = null) {
     val unread = channel.unread > 0
     val accent = MaterialTheme.colorScheme.primary
     val shape = NovaCorners.button
@@ -927,9 +1098,10 @@ private fun NovaChannelRow(channel: app.pigeonsms.network.ChannelDto, onClick: (
         )
         if (unread) {
             UnreadPill(channel.unread)
-        } else {
+        } else if (menu == null) {
             Icon(Icons.Outlined.ChevronRight, null, Modifier.size(18.dp), tint = subColor)
         }
+        menu?.let { ChannelOverflowMenu(it, if (unread) MaterialTheme.colorScheme.onPrimary else subColor) }
     }
 }
 
@@ -943,13 +1115,16 @@ private fun ExpSpaceCard(
     modifier: Modifier = Modifier,
     iconUrl: String?,
     iconBusy: Boolean,
+    singleNest: Boolean = false,
     onChangeIcon: (() -> Unit)?,
     onInvite: () -> Unit,
     onOpenChannel: (id: String, name: String, kind: String) -> Unit,
     onAddChannel: (() -> Unit)?,
     onDelete: (() -> Unit)?,
     onLeave: (() -> Unit)? = null,
+    channelMenu: ((app.pigeonsms.network.ChannelDto) -> ChannelMenuActions)? = null,
 ) {
+    var expanded by rememberSaveable(space.id) { mutableStateOf(singleNest) }
     val totalUnread = space.channels.sumOf { it.unread }
     Column(
         modifier
@@ -1012,15 +1187,29 @@ private fun ExpSpaceCard(
         }
 
         Column(Modifier.padding(Spacing.l)) {
-            Text(
-                space.name,
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = (-0.5).sp,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
+            val chevronRotation by androidx.compose.animation.core.animateFloatAsState(if (expanded) 180f else 0f, label = "expChevron")
+            Row(Modifier.fillMaxWidth().clickableScale { expanded = !expanded }, verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    space.name,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = (-0.5).sp,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                if (!expanded && totalUnread > 0) {
+                    UnreadPill(totalUnread)
+                    Spacer(Modifier.width(Spacing.xs))
+                }
+                Icon(
+                    Icons.Outlined.ExpandMore,
+                    if (expanded) "collapse channels" else "show channels",
+                    Modifier.size(26.dp).rotate(chevronRotation),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             space.description?.takeIf { it.isNotBlank() }?.let { description ->
                 Text(
                     description,
@@ -1052,33 +1241,38 @@ private fun ExpSpaceCard(
                 if (onLeave != null) IconButton(onClick = onLeave) { Icon(Icons.AutoMirrored.Outlined.Logout, "leave space", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
             }
 
-            Row(
-                Modifier.fillMaxWidth().padding(top = Spacing.m),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    "CHANNELS",
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.sp,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.weight(1f),
-                )
-                if (onAddChannel != null) {
-                    IconButton(onClick = onAddChannel) {
-                        Icon(Icons.Outlined.Add, "add channel to ${space.name}", tint = MaterialTheme.colorScheme.primary)
-                    }
-                }
-            }
-            if (space.channels.isEmpty()) {
-                Text("no channels yet", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = Spacing.xs, bottom = Spacing.xs))
-            } else {
-                Column(Modifier.padding(top = Spacing.xs), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
-                    space.channels.forEach { channel ->
-                        ExpChannelRow(
-                            channel = channel,
-                            onClick = { onOpenChannel(channel.id, channel.name ?: "channel", channel.kind) },
+            AnimatedVisibility(visible = expanded) {
+                Column {
+                    Row(
+                        Modifier.fillMaxWidth().padding(top = Spacing.m),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            "CHANNELS",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.sp,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.weight(1f),
                         )
+                        if (onAddChannel != null) {
+                            IconButton(onClick = onAddChannel) {
+                                Icon(Icons.Outlined.Add, "add channel to ${space.name}", tint = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+                    }
+                    if (space.channels.isEmpty()) {
+                        Text("no channels yet", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = Spacing.xs, bottom = Spacing.xs))
+                    } else {
+                        Column(Modifier.padding(top = Spacing.xs), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                            space.channels.forEach { channel ->
+                                ExpChannelRow(
+                                    channel = channel,
+                                    onClick = { onOpenChannel(channel.id, channel.name ?: "channel", channel.kind) },
+                                    menu = channelMenu?.invoke(channel),
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -1087,7 +1281,7 @@ private fun ExpSpaceCard(
 }
 
 @Composable
-private fun ExpChannelRow(channel: app.pigeonsms.network.ChannelDto, onClick: () -> Unit) {
+private fun ExpChannelRow(channel: app.pigeonsms.network.ChannelDto, onClick: () -> Unit, menu: ChannelMenuActions? = null) {
     val unread = channel.unread > 0
     Row(
         Modifier
@@ -1127,9 +1321,10 @@ private fun ExpChannelRow(channel: app.pigeonsms.network.ChannelDto, onClick: ()
         )
         if (unread) {
             UnreadPill(channel.unread)
-        } else {
+        } else if (menu == null) {
             Icon(Icons.Outlined.ChevronRight, null, Modifier.size(18.dp), tint = subColor)
         }
+        menu?.let { ChannelOverflowMenu(it, if (unread) MaterialTheme.colorScheme.onPrimary else subColor) }
     }
 }
 

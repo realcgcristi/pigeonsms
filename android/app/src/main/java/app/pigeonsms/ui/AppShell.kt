@@ -88,6 +88,7 @@ import app.pigeonsms.ui.settings.PrivacyScreen
 import app.pigeonsms.ui.settings.HistoryScreen
 import app.pigeonsms.ui.settings.SecurityScreen
 import app.pigeonsms.ui.settings.SettingsScreen
+import app.pigeonsms.ui.settings.NestSettingsScreen
 import app.pigeonsms.ui.settings.NotificationSettingsScreen
 import app.pigeonsms.ui.forum.ForumScreen
 import app.pigeonsms.ui.spaces.SpacesScreen
@@ -244,6 +245,7 @@ fun AppShell(session: LocalSession) {
                     onAppearance = { nav.navigate("appearance") },
                     onPrivacy = { nav.navigate("privacy") },
                     onNotifications = { nav.navigate("notifications") },
+                    onNests = { nav.navigate("nestsettings") },
                     onSignOut = { app.viewModelScopeSignOut() },
                 )
             }
@@ -292,6 +294,7 @@ fun AppShell(session: LocalSession) {
             }
             composable("privacy") { PrivacyScreen(onBack = { nav.popBackStack() }, onBlocked = { nav.navigate("blocked") }) }
             composable("notifications") { NotificationSettingsScreen(onBack = { nav.popBackStack() }) }
+            composable("nestsettings") { NestSettingsScreen(app, onBack = { nav.popBackStack() }) }
         }
         }
         }
