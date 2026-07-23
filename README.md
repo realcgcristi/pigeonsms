@@ -14,7 +14,7 @@ here are some screenshots:
   />
   &nbsp;
   <img
-    src="https://app.getswift.cloud/file/2qcze"
+    src="https://cdn.getswift.cloud/2qcze"
     alt="sc 2"
     width="31%"
   />
