@@ -347,6 +347,80 @@ spaces.post('/:id/channels', async (c) => {
   return c.json({ channel: { id, name, topic, kind } }, 201);
 });
 
+spaces.patch('/:id/channels/:channelId', async (c) => {
+  const user = c.get('user') as AuthedUser;
+  const spaceId = c.req.param('id');
+  const channelId = c.req.param('channelId');
+  await requireRole(c, spaceId, user.id, ['owner']);
+  const body = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
+  if (body['name'] === undefined) throw new ApiError(400, 'bad_name', 'name is required');
+  const name = String(body['name']).trim().toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 32);
+  if (name.length < 2) throw new ApiError(400, 'bad_name', 'channel name needs 2+ characters');
+
+  const updated = await c.env.DB.prepare(
+    `UPDATE channels SET name = ? WHERE id = ? AND space_id = ? AND deleted_at IS NULL
+     RETURNING id, name, topic, kind`,
+  )
+    .bind(name, channelId, spaceId)
+    .first<{ id: string; name: string; topic: string | null; kind: string }>();
+  if (!updated) throw new ApiError(404, 'not_found', 'no such channel');
+  audit(c, user.id, 'channel.update', channelId);
+
+  const members = (
+    await c.env.DB.prepare('SELECT user_id FROM space_members WHERE space_id = ?')
+      .bind(spaceId)
+      .all<{ user_id: string }>()
+  ).results.map((row) => row.user_id);
+  fanout(c, members, {
+    t: 'channel.update',
+    d: { id: channelId, space_id: spaceId, name: updated.name, topic: updated.topic, kind: updated.kind },
+  });
+  return c.json({ channel: updated });
+});
+
+spaces.delete('/:id/channels/:channelId', async (c) => {
+  const user = c.get('user') as AuthedUser;
+  const spaceId = c.req.param('id');
+  const channelId = c.req.param('channelId');
+  await requireRole(c, spaceId, user.id, ['owner']);
+
+  const channel = await c.env.DB.prepare(
+    'SELECT id, deleted_at FROM channels WHERE id = ? AND space_id = ?',
+  )
+    .bind(channelId, spaceId)
+    .first<{ id: string; deleted_at: number | null }>();
+  if (!channel) throw new ApiError(404, 'not_found', 'no such channel');
+  if (channel.deleted_at !== null) {
+    return c.json({ ok: true, deleted: true, deleted_at: channel.deleted_at });
+  }
+
+  const live = await c.env.DB.prepare(
+    'SELECT COUNT(*) AS count FROM channels WHERE space_id = ? AND deleted_at IS NULL',
+  )
+    .bind(spaceId)
+    .first<{ count: number }>();
+  if (Number(live?.count ?? 0) <= 1) {
+    throw new ApiError(400, 'last_channel', "can't delete the space's only channel");
+  }
+
+  const deletedAt = Date.now();
+  const deleted = await c.env.DB.prepare(
+    'UPDATE channels SET deleted_at = ? WHERE id = ? AND space_id = ? AND deleted_at IS NULL RETURNING deleted_at',
+  )
+    .bind(deletedAt, channelId, spaceId)
+    .first<{ deleted_at: number }>();
+  if (!deleted) throw new ApiError(409, 'delete_conflict', 'channel changed; try again');
+  audit(c, user.id, 'channel.delete', channelId);
+
+  const members = (
+    await c.env.DB.prepare('SELECT user_id FROM space_members WHERE space_id = ?')
+      .bind(spaceId)
+      .all<{ user_id: string }>()
+  ).results.map((row) => row.user_id);
+  fanout(c, members, { t: 'channel.delete', d: { id: channelId, space_id: spaceId } });
+  return c.json({ ok: true, deleted: true, deleted_at: deleted.deleted_at });
+});
+
 spaces.post('/:id/invites', async (c) => {
   const user = c.get('user') as AuthedUser;
   const spaceId = c.req.param('id');
