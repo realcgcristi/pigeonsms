@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import app.pigeonsms.ui.util.clickableScale
 import app.pigeonsms.ui.util.glassCard
+import app.pigeonsms.ui.util.shimmerBrush
 import app.pigeonsms.ui.util.glassPanel
 import app.pigeonsms.ui.util.pressScale
 import androidx.compose.foundation.layout.Column
@@ -53,11 +54,13 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Reply
 import androidx.compose.material.icons.outlined.AddReaction
@@ -65,6 +68,7 @@ import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Done
 import androidx.compose.material.icons.outlined.Edit
@@ -114,14 +118,17 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
@@ -132,6 +139,17 @@ import app.pigeonsms.db.MessageEntity
 import app.pigeonsms.data.ChatAppearance
 import app.pigeonsms.data.ChatAppearanceStore
 import app.pigeonsms.design.theme.Corners
+import app.pigeonsms.design.theme.LocalExperimentalRedesign
+import app.pigeonsms.design.theme.LocalReducedMotion
+import app.pigeonsms.design.theme.NovaCorners
+import app.pigeonsms.design.theme.NovaDepth
+import app.pigeonsms.design.theme.NovaGradients
+import app.pigeonsms.design.theme.NovaMotion
+import app.pigeonsms.design.theme.novaAuroraBackground
+import app.pigeonsms.design.theme.novaElevation
+import app.pigeonsms.design.theme.novaHalo
+import app.pigeonsms.design.theme.rememberNovaPulse
+import app.pigeonsms.design.components.NovaAnimatedCount
 import app.pigeonsms.design.theme.PigeonAccents
 import app.pigeonsms.design.theme.PigeonWallpapers
 import app.pigeonsms.design.theme.Spacing
@@ -139,6 +157,7 @@ import app.pigeonsms.design.theme.accentByKey
 import app.pigeonsms.design.theme.rememberWallpaperBrush
 import app.pigeonsms.design.theme.wallpaperByKey
 import android.content.Intent
+import android.widget.Toast
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -162,6 +181,8 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
+import androidx.compose.material.icons.outlined.KeyboardArrowUp
+import androidx.compose.material.icons.outlined.ContentPaste
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -246,6 +267,16 @@ fun ChatScreen(
     }
     var mediaViewerIndex by remember(channelId) { mutableStateOf<Int?>(null) }
     var infoOpen by remember(channelId) { mutableStateOf(false) }
+
+    var seenByMessage by remember(channelId) { mutableStateOf<MessageEntity?>(null) }
+
+    val selectedIds = remember(channelId) { mutableStateListOf<String>() }
+    val selectionMode = selectedIds.isNotEmpty()
+    val clipboardManager = LocalClipboardManager.current
+    val multiSelectContext = LocalContext.current
+    // "seen by" is offered for space channels; restricted to small nests
+
+    val seenByEligible = isSpace && (ui.channelMemberCount in 1..20 || ui.channelMemberCount < 0)
     val listState = rememberLazyListState()
     val replyNavigationScope = rememberCoroutineScope()
     val messageById = remember(messages) { messages.associateBy(MessageEntity::id) }
@@ -265,7 +296,9 @@ fun ChatScreen(
         .collectAsState(initial = app.pigeonsms.data.ThemePrefs())
     val chatHaze = remember { HazeState() }
     // messages scroll under the frosted top bar, so pad the list past it
-    val barInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 64.dp
+
+    val novaChrome = LocalExperimentalRedesign.current
+    val barInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + (if (novaChrome) 72.dp else 64.dp)
     var unseenWhileUp by remember(channelId) { mutableStateOf(0) }
     var prevMsgCount by remember(channelId) { mutableStateOf(0) }
 
@@ -366,7 +399,20 @@ fun ChatScreen(
     }
 
     ChatAccent(appearance.accent) {
-    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+    val novaAurora = novaChrome && appearance.wallpaper == null
+    Box(
+        Modifier.fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .then(
+
+                // the message canvas has real layered depth instead of a flat fill.
+
+                if (novaAurora) Modifier.novaAuroraBackground(
+                    accent = MaterialTheme.colorScheme.primary,
+                    animate = true,
+                ) else Modifier,
+            ),
+    ) {
         ChatWallpaper(appearance.wallpaper)
         Column(
 
@@ -379,7 +425,11 @@ fun ChatScreen(
             Box(Modifier.fillMaxSize().hazeSource(chatHaze)) {
             when {
                 messages.isEmpty() && ui.initialLoading -> {
-                    LoadingIndicator(modifier = Modifier.size(48.dp).align(Alignment.Center))
+                    if (novaChrome) {
+                        NovaChatSkeleton(Modifier.fillMaxSize().padding(top = barInset + Spacing.s))
+                    } else {
+                        LoadingIndicator(modifier = Modifier.size(48.dp).align(Alignment.Center))
+                    }
                 }
                 messages.isEmpty() -> EmptyChatState(Modifier.align(Alignment.Center))
                 else -> LazyColumn(
@@ -454,6 +504,19 @@ fun ChatScreen(
                             onVote = { optionId -> vm.votePoll(message, optionId) },
                             seen = message.id == lastOwnId && ui.peerReadSeq >= message.seq,
                             groupedBelow = groupedBelow,
+
+                            showSeenBy = seenByEligible && !message.deleted && message.seq > 0,
+                            onSeenBy = { seenByMessage = message },
+
+                            selectionMode = selectionMode,
+                            selected = message.id in selectedIds,
+                            onEnterSelection = {
+                                if (message.id !in selectedIds) selectedIds.add(message.id)
+                            },
+                            onToggleSelected = {
+                                if (message.id in selectedIds) selectedIds.remove(message.id)
+                                else selectedIds.add(message.id)
+                            },
                         )
                         }
                     }
@@ -461,12 +524,45 @@ fun ChatScreen(
             }
             }
             Column(Modifier.align(Alignment.TopCenter)) {
+
+                // contextual action bar (count + mass copy/delete + exit).
+                if (selectionMode) {
+                    SelectionActionBar(
+                        count = selectedIds.size,
+                        hazeState = chatHaze,
+                        onClose = { selectedIds.clear() },
+                        onCopy = {
+
+                            val ordered = messages
+                                .filter { it.id in selectedIds && !it.deleted && it.content.isNotBlank() }
+                                .joinToString("\n") { "${it.authorName}: ${it.content}" }
+                            if (ordered.isNotBlank()) {
+                                clipboardManager.setText(AnnotatedString(ordered))
+                                Toast.makeText(multiSelectContext, "Copied ${selectedIds.size} messages", Toast.LENGTH_SHORT).show()
+                            }
+                            selectedIds.clear()
+                        },
+                        onDelete = {
+
+                            // (own messages, or any when admin; not already deleted).
+                            messages.filter {
+                                it.id in selectedIds && !it.deleted && it.state == "SENT" &&
+                                    (vm.isOwn(it) || ui.isAdmin)
+                            }.forEach { vm.delete(it) }
+                            selectedIds.clear()
+                        },
+                    )
+                } else
                 ChatTopBar(title, avatarKey, channelId, vm::mediaUrl, chatHaze, onBack, onSearch = vm::openSearch, onPins = vm::loadPins, onAppearance = { showAppearance = true }, onCall = ::startCall, onInfo = { infoOpen = true })
-                ui.superPin?.let { superPin ->
-                    val superIndex = messages.indexOfFirst { it.id == superPin.id }
-                    SuperPinBanner(superPin, onDismiss = vm::dismissSuperPin) {
-                        if (superIndex >= 0) appearanceScope.launch { listState.animateScrollToItem(superIndex + if (ui.loadingOlder) 1 else 0) }
-                    }
+                if (ui.pins.isNotEmpty()) {
+                    SuperPinBanner(
+                        pins = ui.pins,
+                        onOpen = { pin ->
+                            val idx = messages.indexOfFirst { it.id == pin.id }
+                            if (idx >= 0) appearanceScope.launch { listState.animateScrollToItem(idx + if (ui.loadingOlder) 1 else 0) }
+                        },
+                        onUnpin = { pin -> vm.unpin(pin.id) },
+                    )
                 }
                 AnimatedVisibility(
                     visible = ui.error != null,
@@ -476,10 +572,13 @@ fun ChatScreen(
                     ErrorBanner(message = ui.error.orEmpty(), onRetry = vm::refresh, onDismiss = vm::clearError)
                 }
             }
+
+            // instead of a bare fade, so it draws the eye when it arrives.
+            val fabScaleSpec = NovaMotion.emphasized<Float>()
             androidx.compose.animation.AnimatedVisibility(
                 visible = listState.canScrollForward && messages.isNotEmpty(),
                 modifier = Modifier.align(Alignment.BottomEnd).padding(Spacing.m),
-                enter = fadeIn(),
+                enter = if (novaChrome) fadeIn() + androidx.compose.animation.scaleIn(fabScaleSpec, initialScale = 0.7f) else fadeIn(),
                 exit = fadeOut(),
             ) {
                 Box {
@@ -493,7 +592,14 @@ fun ChatScreen(
                         Badge(
                             modifier = Modifier.align(Alignment.TopEnd),
                             containerColor = MaterialTheme.colorScheme.error,
-                        ) { Text("$unseenWhileUp") }
+                        ) {
+
+                            if (novaChrome) NovaAnimatedCount(
+                                unseenWhileUp,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onError,
+                            ) else Text("$unseenWhileUp")
+                        }
                     }
                 }
             }
@@ -649,6 +755,15 @@ fun ChatScreen(
             },
         )
     }
+    seenByMessage?.let { msg ->
+        SeenByDialog(
+            readers = vm.seenBy(msg),
+            memberCount = ui.channelMemberCount,
+            mediaUrl = vm::mediaUrl,
+            onOpenProfile = { id -> seenByMessage = null; onOpenProfile(id) },
+            onDismiss = { seenByMessage = null },
+        )
+    }
     mediaViewerIndex?.let { index ->
         ConversationMediaViewer(mediaItems, index) { mediaViewerIndex = null }
     }
@@ -682,6 +797,10 @@ private fun ChatTopBar(
     // frosted glass over the scrolling messages (they pass underneath)
     val frostBg = MaterialTheme.colorScheme.surface
     val frostTint = MaterialTheme.colorScheme.surfaceContainerHigh
+    if (LocalExperimentalRedesign.current) {
+        NovaChatTopBar(title, avatarKey, channelId, mediaUrl, hazeState, frostBg, frostTint, onBack, onSearch, onPins, onAppearance, onCall, onInfo)
+        return
+    }
     Box(
         Modifier.fillMaxWidth().hazeEffect(hazeState) {
             backgroundColor = frostBg
@@ -777,6 +896,158 @@ private fun ChatTopBar(
 }
 
 @Composable
+private fun NovaChatTopBar(
+    title: String,
+    avatarKey: String?,
+    channelId: String,
+    mediaUrl: (String) -> String,
+    hazeState: HazeState,
+    frostBg: Color,
+    frostTint: Color,
+    onBack: () -> Unit,
+    onSearch: () -> Unit,
+    onPins: () -> Unit,
+    onAppearance: () -> Unit,
+    onCall: (Boolean) -> Unit,
+    onInfo: () -> Unit,
+) {
+    Box(
+        Modifier.fillMaxWidth().hazeEffect(hazeState) {
+            backgroundColor = frostBg
+            tints = listOf(HazeTint(frostTint.copy(alpha = 0.62f)))
+            blurRadius = 30.dp
+        },
+    ) {
+        Row(
+            Modifier.fillMaxWidth().statusBarsPadding().height(72.dp).padding(horizontal = Spacing.s),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // pill-framed back affordance
+            Box(
+                Modifier.size(40.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f))
+                    .clickable(onClickLabel = "back", onClick = onBack),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.AutoMirrored.Outlined.ArrowBack, "back", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(22.dp))
+            }
+            Spacer(Modifier.width(Spacing.s))
+            // enlarged avatar with an iris ring + stacked name / presence subline
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(NovaCorners.chip)
+                    .clickable(onClickLabel = "open conversation info", onClick = onInfo)
+                    .padding(vertical = Spacing.xs, horizontal = Spacing.xs),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // iris→cyan ring with a slow breathing cyan halo behind it so the
+                // avatar quietly lives instead of sitting flat on the frosted bar.
+                val ringPulse = rememberNovaPulse(periodMillis = 3200)
+                Box(
+                    Modifier.size(46.dp)
+                        .novaHalo(MaterialTheme.colorScheme.secondary, alpha = 0.10f + 0.12f * ringPulse)
+                        .background(
+                            Brush.linearGradient(listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.secondary)),
+                            CircleShape,
+                        )
+                        .padding(2.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Box(
+                        Modifier.fillMaxSize().clip(CircleShape).background(MaterialTheme.colorScheme.surface),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Avatar(
+                            name = title,
+                            model = avatarKey?.let(mediaUrl),
+                            size = 40.dp,
+                            sharedKey = "chat-avatar-$channelId",
+                        )
+                    }
+                }
+                Column(Modifier.weight(1f).padding(start = Spacing.m)) {
+                    Text(
+                        title,
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    // cyan meta cue — the dual-accent pair, and a real affordance
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                        Box(Modifier.size(5.dp).clip(CircleShape).background(MaterialTheme.colorScheme.secondary))
+                        Text(
+                            "tap for info",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.secondary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+            // action cluster: call + overflow inside one rounded pill
+            Row(
+                Modifier.clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f))
+                    .padding(horizontal = Spacing.xxs),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box {
+                    var callMenuOpen by remember { mutableStateOf(false) }
+                    IconButton(onClick = { callMenuOpen = true }, modifier = Modifier.size(40.dp)) {
+                        Icon(Icons.Outlined.Call, "call", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
+                    }
+                    DropdownMenu(expanded = callMenuOpen, onDismissRequest = { callMenuOpen = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Voice call") },
+                            leadingIcon = { Icon(Icons.Outlined.Call, null) },
+                            onClick = { callMenuOpen = false; onCall(false) },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Video call") },
+                            leadingIcon = { Icon(Icons.Outlined.Videocam, null) },
+                            onClick = { callMenuOpen = false; onCall(true) },
+                        )
+                    }
+                }
+                Box {
+                    var overflowOpen by remember { mutableStateOf(false) }
+                    IconButton(onClick = { overflowOpen = true }, modifier = Modifier.size(40.dp)) {
+                        Icon(Icons.Outlined.MoreVert, "more actions", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(22.dp))
+                    }
+                    DropdownMenu(expanded = overflowOpen, onDismissRequest = { overflowOpen = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Search") },
+                            leadingIcon = { Icon(Icons.Outlined.Search, null) },
+                            onClick = { overflowOpen = false; onSearch() },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Conversation info") },
+                            leadingIcon = { Icon(Icons.Outlined.Info, null) },
+                            onClick = { overflowOpen = false; onInfo() },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Theme") },
+                            leadingIcon = { Icon(Icons.Outlined.Palette, null) },
+                            onClick = { overflowOpen = false; onAppearance() },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Pins") },
+                            leadingIcon = { Icon(Icons.Outlined.PushPin, null) },
+                            onClick = { overflowOpen = false; onPins() },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun ErrorBanner(message: String, onRetry: () -> Unit, onDismiss: () -> Unit) {
     val glass = app.pigeonsms.design.theme.LocalLiquidGlass.current
     val row: @Composable RowScope.() -> Unit = {
@@ -796,7 +1067,24 @@ private fun ErrorBanner(message: String, onRetry: () -> Unit, onDismiss: () -> U
             Icon(Icons.Outlined.Close, "dismiss", tint = MaterialTheme.colorScheme.onErrorContainer)
         }
     }
-    if (glass) {
+    if (LocalExperimentalRedesign.current) {
+
+        // a soft drop shadow + accented rim rather than a full-bleed error bar.
+        Box(Modifier.fillMaxWidth().padding(horizontal = Spacing.m, vertical = Spacing.s)) {
+            Row(
+                Modifier.fillMaxWidth()
+                    .novaElevation(
+                        NovaCorners.card,
+                        tint = MaterialTheme.colorScheme.errorContainer,
+                        accent = MaterialTheme.colorScheme.error,
+                        accented = true,
+                    )
+                    .defaultMinSize(minHeight = 48.dp).padding(start = Spacing.m),
+                verticalAlignment = Alignment.CenterVertically,
+                content = row,
+            )
+        }
+    } else if (glass) {
         Box(Modifier.fillMaxWidth().padding(horizontal = Spacing.m, vertical = Spacing.s)) {
             Row(
                 Modifier.fillMaxWidth()
@@ -817,10 +1105,20 @@ private fun ErrorBanner(message: String, onRetry: () -> Unit, onDismiss: () -> U
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun SuperPinBanner(message: app.pigeonsms.network.MessageDto, onDismiss: () -> Unit, onOpen: () -> Unit) {
+private fun SuperPinBanner(
+    pins: List<app.pigeonsms.network.MessageDto>,
+    onOpen: (app.pigeonsms.network.MessageDto) -> Unit,
+    onUnpin: (app.pigeonsms.network.MessageDto) -> Unit,
+) {
+    if (pins.isEmpty()) return
+    var index by remember(pins.size) { mutableStateOf(0) }
+    // clamp against list shrinking underneath us (e.g. after an unpin)
+    val safeIndex = index.coerceIn(0, pins.lastIndex)
+    val current = pins[safeIndex]
+    var menuOpen by remember { mutableStateOf(false) }
     Surface(
-        onClick = onOpen,
         color = Color.Transparent,
         shape = Corners.chip,
         modifier = Modifier.fillMaxWidth()
@@ -828,18 +1126,88 @@ private fun SuperPinBanner(message: app.pigeonsms.network.MessageDto, onDismiss:
             .glassCard(Corners.chip, tint = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.92f), accented = true),
     ) {
         Row(Modifier.fillMaxWidth().padding(horizontal = Spacing.m, vertical = Spacing.s), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Outlined.PushPin, "Super Pin", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-            Column(Modifier.weight(1f).padding(horizontal = Spacing.s)) {
-                Text("Super Pin", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                Text(message.content.ifBlank { message.attachment?.name ?: "Pinned attachment" }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Icon(Icons.Outlined.PushPin, "Pinned messages", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+            Column(
+                Modifier.weight(1f)
+                    .padding(horizontal = Spacing.s)
+                    .combinedClickable(
+                        onClick = { onOpen(current) },
+                        onLongClick = { menuOpen = true },
+                    ),
+            ) {
+                Text(
+                    if (pins.size > 1) "Pinned ${safeIndex + 1}/${pins.size}" else "Pinned",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Text(current.content.ifBlank { current.attachment?.name ?: "Pinned attachment" }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenuItem(
+                        text = { Text("delete") },
+                        leadingIcon = { Icon(Icons.Outlined.Delete, null) },
+                        onClick = {
+                            menuOpen = false
+                            onUnpin(current)
+                        },
+                    )
+                }
             }
-            IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) { Icon(Icons.Outlined.Close, "hide Super Pin", tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(18.dp)) }
+            if (pins.size > 1) {
+                IconButton(
+                    onClick = { index = if (safeIndex == 0) pins.lastIndex else safeIndex - 1 },
+                    modifier = Modifier.size(32.dp),
+                ) { Icon(Icons.Outlined.KeyboardArrowUp, "previous pinned message", tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(18.dp)) }
+                IconButton(
+                    onClick = { index = if (safeIndex == pins.lastIndex) 0 else safeIndex + 1 },
+                    modifier = Modifier.size(32.dp),
+                ) { Icon(Icons.Outlined.KeyboardArrowDown, "next pinned message", tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(18.dp)) }
+            }
         }
     }
 }
 
 @Composable
 private fun EmptyChatState(modifier: Modifier = Modifier) {
+    if (LocalExperimentalRedesign.current) {
+
+        // thread reads as an intentional, inviting canvas — not a broken screen.
+        val pulse = rememberNovaPulse(periodMillis = 3400)
+        val accent = MaterialTheme.colorScheme.primary
+        Column(modifier.padding(Spacing.xl), horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(
+                Modifier.size(96.dp)
+                    .novaHalo(accent, alpha = 0.10f + 0.14f * pulse)
+                    .clip(CircleShape)
+                    .background(
+                        Brush.linearGradient(
+                            listOf(accent.copy(alpha = 0.20f), MaterialTheme.colorScheme.secondary.copy(alpha = 0.14f)),
+                        ),
+                    )
+                    .border(1.dp, Color.White.copy(alpha = NovaDepth.rimTop), CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Outlined.ChatBubbleOutline,
+                    null,
+                    modifier = Modifier.size(38.dp),
+                    tint = accent,
+                )
+            }
+            Spacer(Modifier.height(Spacing.l))
+            Text(
+                "say hello",
+                style = MaterialTheme.typography.headlineMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Spacer(Modifier.height(Spacing.xs))
+            Text(
+                "no messages yet — send the first one",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        return
+    }
     Column(modifier.padding(Spacing.xl), horizontalAlignment = Alignment.CenterHorizontally) {
         Icon(
             Icons.Outlined.ChatBubbleOutline,
@@ -857,7 +1225,54 @@ private fun EmptyChatState(modifier: Modifier = Modifier) {
 }
 
 @Composable
+private fun NovaChatSkeleton(modifier: Modifier = Modifier) {
+    // width fractions + side, hand-tuned to feel like an organic conversation
+    val rows = remember {
+        listOf(
+            0.55f to false, 0.42f to false, 0.60f to true,
+            0.48f to true, 0.66f to false, 0.38f to false,
+            0.52f to true, 0.58f to false,
+        )
+    }
+    Column(
+        modifier.padding(horizontal = Spacing.m),
+        verticalArrangement = Arrangement.spacedBy(Spacing.s),
+    ) {
+        rows.forEach { (frac, self) ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = if (self) Arrangement.End else Arrangement.Start) {
+                if (!self) {
+                    Box(Modifier.size(32.dp).clip(CircleShape).background(shimmerBrush()))
+                    Spacer(Modifier.width(Spacing.s))
+                }
+                Box(
+                    Modifier.fillMaxWidth(frac).height(44.dp)
+                        .clip(NovaCorners.bubble)
+                        .background(shimmerBrush()),
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun DaySeparator(label: String) {
+    if (LocalExperimentalRedesign.current) {
+
+        Box(Modifier.fillMaxWidth().padding(vertical = Spacing.m), contentAlignment = Alignment.Center) {
+            Text(
+                label,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.7f))
+                    .border(1.dp, Color.White.copy(alpha = NovaDepth.rimTop), CircleShape)
+                    .padding(horizontal = Spacing.l, vertical = Spacing.xs),
+            )
+        }
+        return
+    }
     Row(
         Modifier.fillMaxWidth().padding(vertical = Spacing.m),
         verticalAlignment = Alignment.CenterVertically,
@@ -899,12 +1314,20 @@ private fun MessageBubble(
     superPinned: Boolean = false,
     seen: Boolean = false,
     groupedBelow: Boolean = false,
+    showSeenBy: Boolean = false,
+    onSeenBy: () -> Unit = {},
+    selectionMode: Boolean = false,
+    selected: Boolean = false,
+    onEnterSelection: () -> Unit = {},
+    onToggleSelected: () -> Unit = {},
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     var reactionPickerOpen by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     var bubbleWindowY by remember(message.id) { mutableStateOf(-1f) }
     val haptics = LocalHapticFeedback.current
+    val clipboard = LocalClipboardManager.current
+    val copyContext = LocalContext.current
     val onDoubleTapReact = {
         haptics.performHapticFeedback(HapticFeedbackType.LongPress)
         onReact("❤️", true)
@@ -921,6 +1344,7 @@ private fun MessageBubble(
     val canMutate = !message.deleted && message.state == "SENT"
     val canEdit = self && canMutate
     val canDelete = (self || isAdmin) && canMutate
+    val canCopy = !message.deleted && message.content.isNotBlank()
     val imageKey = message.attachmentKey?.takeIf {
         !message.deleted && message.attachmentType?.startsWith("image/") == true
     }
@@ -932,9 +1356,33 @@ private fun MessageBubble(
         tween(220),
         label = "replyHighlight",
     )
+    val nova = LocalExperimentalRedesign.current
     // corners tighten between messages of the same run; the tail only shows on the last one
-    val tight = 7.dp
-    val bubbleShape = if (self) {
+    val tight = if (nova) 9.dp else 7.dp
+    val bubbleShape = if (nova) {
+
+        // "beak" corner on the sending side (bottom-end for self, bottom-start for
+
+        // in the middle of a run tighten toward the sender so the run reads as a
+        // single column of connected tiles.
+        val big = 24.dp
+        val beak = 6.dp
+        if (self) {
+            RoundedCornerShape(
+                topStart = big,
+                topEnd = if (grouped) tight else big,
+                bottomStart = big,
+                bottomEnd = if (groupedBelow) tight else beak,
+            )
+        } else {
+            RoundedCornerShape(
+                topStart = if (grouped) tight else big,
+                topEnd = big,
+                bottomStart = if (groupedBelow) tight else beak,
+                bottomEnd = big,
+            )
+        }
+    } else if (self) {
         RoundedCornerShape(
             topStart = 18.dp,
             topEnd = if (grouped) tight else 18.dp,
@@ -950,10 +1398,24 @@ private fun MessageBubble(
         )
     }
 
+    // row toggles selection and the per-message gestures/menu are suppressed.
+    val selectionTint by animateColorAsState(
+        if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.16f) else Color.Transparent,
+        tween(160),
+        label = "selectionTint",
+    )
     Column(
         Modifier.fillMaxWidth()
             .padding(top = if (grouped) Spacing.xxs else Spacing.s)
             .background(highlightColor, Corners.card)
+            .then(if (selectionMode) Modifier.background(selectionTint, Corners.card) else Modifier)
+            .then(
+                if (selectionMode) Modifier.clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = onToggleSelected,
+                ) else Modifier,
+            )
             .animateContentSize(tween(160))
             .alpha(if (busy) 0.72f else 1f)
             .onGloballyPositioned { bubbleWindowY = it.positionInWindow().y },
@@ -980,7 +1442,9 @@ private fun MessageBubble(
         Row(
             Modifier.fillMaxWidth()
                 .offset { IntOffset(swipeOffset.roundToInt(), 0) }
-                .pointerInput(message.id) {
+                // swipe-to-reply is disabled while selecting so drags don't fight taps
+                .then(
+                    if (selectionMode) Modifier else Modifier.pointerInput(message.id) {
                     detectHorizontalDragGestures(
                         onDragEnd = {
                             if (replyArmed) onReply()
@@ -996,9 +1460,35 @@ private fun MessageBubble(
                         replyArmed = armed
                     }
                 },
+                ),
             horizontalArrangement = if (self) Arrangement.End else Arrangement.Start,
             verticalAlignment = Alignment.Bottom,
         ) {
+
+            if (selectionMode) {
+                Box(
+                    Modifier.padding(bottom = Spacing.xs).size(24.dp)
+                        .clip(CircleShape)
+                        .background(
+                            if (selected) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.surfaceContainerHigh,
+                        )
+                        .border(
+                            1.dp,
+                            if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                            CircleShape,
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (selected) Icon(
+                        Icons.Outlined.Check,
+                        "selected",
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
+                Spacer(Modifier.width(Spacing.s))
+            }
             if (!self) {
                 Box(Modifier.width(40.dp), contentAlignment = Alignment.BottomCenter) {
                     if (!grouped) {
@@ -1028,46 +1518,80 @@ private fun MessageBubble(
                 modifier = Modifier.fillMaxWidth(if (self) 0.84f else 0.82f),
             ) {
                 if (!grouped && !self) {
-                    Row(
-                        Modifier.padding(start = Spacing.s, end = Spacing.s, bottom = Spacing.xs),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(Spacing.s),
-                    ) {
-                        Text(
-                            message.authorName,
-                            modifier = Modifier.weight(1f, fill = false),
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.SemiBold,
-                            color = authorColor(message.authorId),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        Text(
-                            smartTime(message.createdAt),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                    if (nova) {
+
+                        // time trailing it — a distinct "chip header" over the tile.
+                        Row(
+                            Modifier.padding(start = Spacing.xs, bottom = Spacing.xs),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(Spacing.s),
+                        ) {
+                            Text(
+                                message.authorName,
+                                modifier = Modifier
+                                    .weight(1f, fill = false)
+                                    .clip(NovaCorners.chip)
+                                    .background(authorColor(message.authorId).copy(alpha = 0.16f))
+                                    .padding(horizontal = Spacing.s, vertical = Spacing.xxs),
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = authorColor(message.authorId),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                smartTime(message.createdAt),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    } else {
+                        Row(
+                            Modifier.padding(start = Spacing.s, end = Spacing.s, bottom = Spacing.xs),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(Spacing.s),
+                        ) {
+                            Text(
+                                message.authorName,
+                                modifier = Modifier.weight(1f, fill = false),
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                color = authorColor(message.authorId),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                smartTime(message.createdAt),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 }
 
                 if (imageKey != null) {
+
+                    // banner above the media is capped to the media's own max width
+
+                    // bleed full-width over the media or neighbouring bubbles.
                     Column(
                         modifier = Modifier.clip(bubbleShape)
-                            .then(
-                                if (self) Modifier.background(
-                                    Brush.linearGradient(listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.primaryContainer)),
-                                ) else Modifier.background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                            )
+                            .then(selfBubbleFill(self, nova, bubbleShape))
                             .combinedClickable(
-                            enabled = canMutate && !busy,
-                            onClick = { menuOpen = true },
-                            onLongClick = { menuOpen = true },
-                            onDoubleClick = { onDoubleTapReact() },
+                            enabled = (canMutate && !busy) || selectionMode,
+                            onClick = { if (selectionMode) onToggleSelected() else menuOpen = true },
+                            onLongClick = { if (selectionMode) onToggleSelected() else onEnterSelection() },
+                            onDoubleClick = { if (!selectionMode) onDoubleTapReact() },
                         ),
                         horizontalAlignment = if (self) Alignment.End else Alignment.Start,
                     ) {
                         if (replyId != null) {
-                            ReplyPreview(reply, self = false) { onNavigateToReply(replyId) }
+                            Box(
+                                Modifier.widthIn(max = 320.dp)
+                                    .padding(start = Spacing.xs, end = Spacing.xs, top = Spacing.xs),
+                            ) {
+                                ReplyPreview(reply, self) { onNavigateToReply(replyId) }
+                            }
                             Spacer(Modifier.height(Spacing.s))
                         }
                         AttachmentView(
@@ -1096,22 +1620,12 @@ private fun MessageBubble(
                 } else {
                     Box(
                         Modifier.clip(bubbleShape)
-                            .then(
-                                if (self) Modifier.background(
-                                    Brush.linearGradient(
-                                        listOf(
-                                            MaterialTheme.colorScheme.primary,
-                                            MaterialTheme.colorScheme.primaryContainer,
-                                        ),
-                                    ),
-                                )
-                                else Modifier.background(MaterialTheme.colorScheme.surfaceContainerHigh),
-                            )
+                            .then(selfBubbleFill(self, nova, bubbleShape))
                             .combinedClickable(
-                                enabled = canMutate && !busy,
-                                onClick = { menuOpen = true },
-                                onLongClick = { menuOpen = true },
-                                onDoubleClick = { onDoubleTapReact() },
+                                enabled = (canMutate && !busy) || selectionMode,
+                                onClick = { if (selectionMode) onToggleSelected() else menuOpen = true },
+                                onLongClick = { if (selectionMode) onToggleSelected() else onEnterSelection() },
+                                onDoubleClick = { if (!selectionMode) onDoubleTapReact() },
                             )
                             .padding(horizontal = Spacing.m, vertical = Spacing.s),
                     ) {
@@ -1191,8 +1705,12 @@ private fun MessageBubble(
                 )
 
                 if (!message.deleted) {
+
+                    // (overlapping) so it reads as attached to the tile, rather than a
+                    // separate row floating below it.
                     Row(
-                        Modifier.horizontalScroll(rememberScrollState()).padding(top = Spacing.xs),
+                        Modifier.horizontalScroll(rememberScrollState())
+                            .then(if (nova) Modifier.offset(y = (-8).dp).animateContentSize() else Modifier.padding(top = Spacing.xs)),
                         horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -1222,6 +1740,7 @@ private fun MessageBubble(
             canDelete = canDelete,
             canPin = canMutate,
             canSuperPin = isAdmin || self,
+            canCopy = canCopy,
             pinned = pinned,
             superPinned = superPinned,
             onDismiss = { menuOpen = false },
@@ -1232,6 +1751,14 @@ private fun MessageBubble(
             onPin = { on -> menuOpen = false; onPin(on) },
             onReactPicker = { menuOpen = false; reactionPickerOpen = true },
             onSuperPin = { on -> menuOpen = false; onSuperPin(on) },
+            onCopy = {
+                menuOpen = false
+                clipboard.setText(AnnotatedString(message.content))
+                Toast.makeText(copyContext, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+            },
+            showSeenBy = showSeenBy,
+            onSeenBy = { menuOpen = false; onSeenBy() },
+            onSelect = { menuOpen = false; onEnterSelection() },
         )
     }
 
@@ -1328,6 +1855,7 @@ private fun MessageMeta(message: MessageEntity, showSentTime: Boolean, onRetry: 
             style = MaterialTheme.typography.labelSmall,
         )
         else -> if (showSentTime || seen) {
+            val nova = LocalExperimentalRedesign.current
             Row(
                 Modifier.padding(horizontal = Spacing.s, vertical = Spacing.xxs).widthIn(max = 180.dp),
                 horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
@@ -1342,7 +1870,15 @@ private fun MessageMeta(message: MessageEntity, showSentTime: Boolean, onRetry: 
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                if (seen) Text("seen", color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f), style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                if (seen) {
+                    if (nova) {
+
+                        Box(Modifier.size(6.dp).clip(CircleShape).background(MaterialTheme.colorScheme.secondary))
+                        Text("seen", color = MaterialTheme.colorScheme.secondary, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                    } else {
+                        Text("seen", color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f), style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                    }
+                }
             }
         }
     }
@@ -1350,12 +1886,22 @@ private fun MessageMeta(message: MessageEntity, showSentTime: Boolean, onRetry: 
 
 @Composable
 private fun ReactionChip(reaction: ReactionDto, enabled: Boolean, onClick: () -> Unit) {
+    val nova = LocalExperimentalRedesign.current
     val interactionSource = remember { MutableInteractionSource() }
     val container by animateColorAsState(
         if (reaction.me) MaterialTheme.colorScheme.primaryContainer
         else MaterialTheme.colorScheme.surfaceContainer,
         tween(180),
         label = "reactionContainer",
+    )
+
+    var appeared by remember(reaction.emoji) { mutableStateOf(!nova) }
+    LaunchedEffect(reaction.emoji) { appeared = true }
+    val appearSpec = NovaMotion.pop<Float>()
+    val appearScale by animateFloatAsState(
+        if (appeared) 1f else 0.7f,
+        if (nova) appearSpec else tween(0),
+        label = "reactionAppear",
     )
     Surface(
         onClick = onClick,
@@ -1366,7 +1912,9 @@ private fun ReactionChip(reaction: ReactionDto, enabled: Boolean, onClick: () ->
             androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary)
         } else null,
         interactionSource = interactionSource,
-        modifier = Modifier.pressScale(interactionSource, pressedScale = 0.92f)
+        modifier = Modifier
+            .graphicsLayer { scaleX = appearScale; scaleY = appearScale }
+            .pressScale(interactionSource, pressedScale = 0.92f)
             .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
             .semantics {
                 contentDescription = "${reaction.emoji} reaction, ${reaction.count}"
@@ -1472,6 +2020,41 @@ private fun bubbleContentColor(self: Boolean): Color =
     if (self) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
 
 @Composable
+private fun selfBubbleFill(self: Boolean, nova: Boolean, shape: androidx.compose.ui.graphics.Shape): Modifier {
+    if (!nova) {
+        return if (self) Modifier.background(
+            Brush.linearGradient(listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.primaryContainer)),
+        ) else Modifier.background(MaterialTheme.colorScheme.surfaceContainerHigh)
+    }
+    return if (self) {
+        Modifier
+            .background(
+                Brush.linearGradient(NovaGradients.selfBubble(MaterialTheme.colorScheme.primary)),
+            )
+            .border(
+                1.dp,
+                Brush.verticalGradient(
+                    listOf(Color.White.copy(alpha = NovaDepth.highlightTop), Color.Transparent),
+                ),
+                shape,
+            )
+    } else {
+        Modifier
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .border(
+                1.dp,
+                Brush.verticalGradient(
+                    listOf(
+                        Color.White.copy(alpha = NovaDepth.rimTop),
+                        MaterialTheme.colorScheme.primary.copy(alpha = NovaDepth.rimBottom),
+                    ),
+                ),
+                shape,
+            )
+    }
+}
+
+@Composable
 private fun MessageMenu(
     message: MessageEntity,
     self: Boolean,
@@ -1483,6 +2066,7 @@ private fun MessageMenu(
     canDelete: Boolean,
     canPin: Boolean,
     canSuperPin: Boolean,
+    canCopy: Boolean,
     pinned: Boolean,
     superPinned: Boolean,
     onDismiss: () -> Unit,
@@ -1493,6 +2077,10 @@ private fun MessageMenu(
     onPin: (Boolean) -> Unit,
     onReactPicker: () -> Unit,
     onSuperPin: (Boolean) -> Unit,
+    onCopy: () -> Unit,
+    showSeenBy: Boolean = false,
+    onSeenBy: () -> Unit = {},
+    onSelect: () -> Unit = {},
 ) {
     val selected = remember(reactions) { reactions.filter(ReactionDto::me).map(ReactionDto::emoji).toSet() }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
@@ -1587,6 +2175,7 @@ private fun MessageMenu(
                 ) {
                     Column(Modifier.width(250.dp).padding(horizontal = Spacing.l, vertical = Spacing.xs)) {
                         if (!deleted) MenuRow(Icons.AutoMirrored.Outlined.Reply, "reply", onReply)
+                        if (canCopy) MenuRow(Icons.Outlined.ContentCopy, "copy", onCopy)
                         if (!deleted && canReact) MenuRow(Icons.Outlined.AddReaction, "add reaction", onReactPicker)
                         if (canPin) {
                             MenuRow(
@@ -1602,6 +2191,8 @@ private fun MessageMenu(
                                 onClick = { onSuperPin(!superPinned) },
                             )
                         }
+                        if (showSeenBy) MenuRow(Icons.Outlined.Info, "seen by", onSeenBy)
+                        MenuRow(Icons.Outlined.Done, "select", onSelect)
                         if (canEdit) MenuRow(Icons.Outlined.Edit, "edit", onEdit)
                         if (canDelete) MenuRow(Icons.Outlined.Delete, "delete", onDelete, danger = true)
                     }
@@ -1609,6 +2200,115 @@ private fun MessageMenu(
             }
         }
     }
+}
+
+@Composable
+private fun SelectionActionBar(
+    count: Int,
+    hazeState: HazeState,
+    onClose: () -> Unit,
+    onCopy: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val nova = LocalExperimentalRedesign.current
+    val frostBg = MaterialTheme.colorScheme.surface
+    val frostTint = MaterialTheme.colorScheme.surfaceContainerHigh
+    Box(
+        Modifier.fillMaxWidth().hazeEffect(hazeState) {
+            backgroundColor = frostBg
+            tints = listOf(HazeTint(frostTint.copy(alpha = 0.6f)))
+            blurRadius = 24.dp
+        },
+    ) {
+        Row(
+            Modifier.fillMaxWidth().statusBarsPadding().height(if (nova) 72.dp else 64.dp).padding(horizontal = Spacing.xs),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onClose) {
+                Icon(Icons.Outlined.Close, "exit selection", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(24.dp))
+            }
+            Text(
+                "$count selected",
+                modifier = Modifier.weight(1f).padding(horizontal = Spacing.s),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            IconButton(onClick = onCopy, enabled = count > 0) {
+                Icon(Icons.Outlined.ContentCopy, "copy selected", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(22.dp))
+            }
+            IconButton(onClick = onDelete, enabled = count > 0) {
+                Icon(Icons.Outlined.Delete, "delete selected", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(22.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun SeenByDialog(
+    readers: List<MentionCandidate>,
+    memberCount: Int,
+    mediaUrl: (String) -> String,
+    onOpenProfile: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Outlined.Info, null) },
+        title = { Text(if (readers.isEmpty()) "seen by" else "seen by ${readers.size}") },
+        text = {
+            if (readers.isEmpty()) {
+                Text(
+                    if (memberCount < 0) "No read information available yet."
+                    else "No one else has read this message yet.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                Column(
+                    Modifier.fillMaxWidth().heightIn(max = 320.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(Spacing.xs),
+                ) {
+                    readers.forEach { reader ->
+                        val display = reader.displayName?.takeIf { it.isNotBlank() } ?: reader.username
+                        Row(
+                            Modifier.fillMaxWidth()
+                                .clip(Corners.chip)
+                                .clickable { onOpenProfile(reader.id) }
+                                .padding(vertical = Spacing.xs, horizontal = Spacing.xs),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Avatar(
+                                name = display,
+                                model = reader.avatarKey?.let(mediaUrl),
+                                size = 36.dp,
+                            )
+                            Column(Modifier.weight(1f).padding(start = Spacing.s)) {
+                                Text(
+                                    display,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(
+                                    "@${reader.username}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("close") } },
+    )
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -1634,18 +2334,79 @@ private fun MenuRow(
 }
 
 private object ActiveVoice {
-    private var current: android.media.MediaPlayer? = null
-    private var onPreempt: (() -> Unit)? = null
-    fun claim(p: android.media.MediaPlayer, preempt: () -> Unit) {
-        if (current !== p) {
-            runCatching { if (current?.isPlaying == true) current?.pause() }
-            onPreempt?.invoke()
-        }
-        current = p
-        onPreempt = preempt
+    private var player: android.media.MediaPlayer? = null
+    private var activeUrl: String? = null
+    private var prepared: Boolean = false
+    private var speed: Float = 1f
+
+    fun isActive(url: String): Boolean = activeUrl == url && player != null
+    fun isPrepared(url: String): Boolean = isActive(url) && prepared
+    fun isPlaying(url: String): Boolean =
+        isActive(url) && runCatching { player?.isPlaying == true }.getOrDefault(false)
+    fun speedOf(url: String): Float = if (isActive(url)) speed else 1f
+    fun positionMs(url: String): Int =
+        if (isPrepared(url)) runCatching { player?.currentPosition ?: 0 }.getOrDefault(0) else 0
+    fun durationMs(url: String): Int =
+        if (isPrepared(url)) runCatching { (player?.duration ?: 0).coerceAtLeast(0) }.getOrDefault(0) else 0
+
+    private fun releaseCurrent() {
+        val p = player
+        player = null
+        activeUrl = null
+        prepared = false
+        speed = 1f
+        runCatching { p?.setOnCompletionListener(null) }
+        runCatching { p?.setOnPreparedListener(null) }
+        runCatching { if (p?.isPlaying == true) p.stop() }
+        runCatching { p?.release() }
     }
-    fun forget(p: android.media.MediaPlayer) {
-        if (current === p) { current = null; onPreempt = null }
+
+    fun toggle(url: String, desiredSpeed: Float) {
+        val p = player
+        if (activeUrl == url && p != null && prepared) {
+            runCatching {
+                if (p.isPlaying) {
+                    p.pause()
+                } else {
+                    speed = desiredSpeed
+                    p.start()
+                    runCatching { p.playbackParams = p.playbackParams.setSpeed(desiredSpeed) }
+                }
+            }
+            return
+        }
+
+        releaseCurrent()
+        speed = desiredSpeed
+        val fresh = android.media.MediaPlayer()
+        player = fresh
+        activeUrl = url
+        prepared = false
+        runCatching {
+            fresh.setDataSource(url)
+            fresh.setOnPreparedListener {
+                if (player === fresh) {
+                    prepared = true
+                    it.start()
+                    runCatching { it.playbackParams = it.playbackParams.setSpeed(speed) }
+                }
+            }
+            fresh.setOnCompletionListener {
+                if (player === fresh) runCatching { it.seekTo(0) }
+            }
+            fresh.prepareAsync()
+        }.onFailure { releaseCurrent() }
+    }
+
+    fun seekTo(url: String, ms: Int) {
+        if (isPrepared(url)) runCatching { player?.seekTo(ms) }
+    }
+
+    fun setSpeed(url: String, desiredSpeed: Float) {
+        if (isActive(url)) {
+            speed = desiredSpeed
+            runCatching { if (player?.isPlaying == true) player?.let { it.playbackParams = it.playbackParams.setSpeed(desiredSpeed) } }
+        }
     }
 }
 
@@ -1664,47 +2425,32 @@ private fun AttachmentView(name: String?, type: String?, url: String, self: Bool
     } else if (type?.startsWith("video/") == true) {
         EmbeddedVideo(url, name, onFullscreen = onOpenMedia)
     } else if (type?.startsWith("audio/") == true) {
-        var playing by remember { mutableStateOf(false) }
-        var prepared by remember { mutableStateOf(false) }
-        var positionMs by remember { mutableStateOf(0) }
-        var durationMs by remember { mutableStateOf(0) }
-        var speed by remember { mutableStateOf(1f) }
-        val player = remember { android.media.MediaPlayer() }
+
+        // composable is a thin view: it polls the singleton for live state and drives
+
+        // intent; it is mirrored back from the singleton when this url is active.
+        var playing by remember(url) { mutableStateOf(ActiveVoice.isPlaying(url)) }
+        var prepared by remember(url) { mutableStateOf(ActiveVoice.isPrepared(url)) }
+        var positionMs by remember(url) { mutableStateOf(ActiveVoice.positionMs(url)) }
+        var durationMs by remember(url) { mutableStateOf(ActiveVoice.durationMs(url)) }
+        var speed by remember(url) { mutableStateOf(ActiveVoice.speedOf(url)) }
         val amps = remember(url) { pseudoWaveform(url) }
         val content = bubbleContentColor(self)
-        DisposableEffect(url) { onDispose { ActiveVoice.forget(player); runCatching { player.release() } } }
-        LaunchedEffect(playing) {
-            while (playing && isActive) {
-                runCatching {
-                    positionMs = player.currentPosition
-                    if (player.duration > 0) durationMs = player.duration
+
+        // while composed; no player is released on dispose.
+        LaunchedEffect(url) {
+            while (isActive) {
+                playing = ActiveVoice.isPlaying(url)
+                prepared = ActiveVoice.isPrepared(url)
+                if (prepared) {
+                    positionMs = ActiveVoice.positionMs(url)
+                    val d = ActiveVoice.durationMs(url)
+                    if (d > 0) durationMs = d
+                    speed = ActiveVoice.speedOf(url)
+                } else {
+                    positionMs = 0
                 }
-                delay(50)
-            }
-        }
-        fun toggle() {
-            runCatching {
-                when {
-                    player.isPlaying -> { player.pause(); playing = false }
-                    prepared -> {
-                        ActiveVoice.claim(player) { playing = false }
-                        player.start()
-                        if (speed != 1f) runCatching { player.playbackParams = player.playbackParams.setSpeed(speed) }
-                        playing = true
-                    }
-                    else -> {
-                        player.setDataSource(url)
-                        player.setOnPreparedListener {
-                            prepared = true; durationMs = it.duration
-                            ActiveVoice.claim(player) { playing = false }
-                            it.start()
-                            if (speed != 1f) runCatching { it.playbackParams = it.playbackParams.setSpeed(speed) }
-                            playing = true
-                        }
-                        player.setOnCompletionListener { playing = false; positionMs = 0 }
-                        player.prepareAsync()
-                    }
-                }
+                delay(if (playing) 50 else 250)
             }
         }
         val progress = if (durationMs > 0) positionMs.toFloat() / durationMs else 0f
@@ -1715,7 +2461,11 @@ private fun AttachmentView(name: String?, type: String?, url: String, self: Bool
                 .padding(horizontal = Spacing.s, vertical = Spacing.xs),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = { toggle() }) {
+            IconButton(onClick = {
+                ActiveVoice.toggle(url, speed)
+                // reflect immediately; the poll loop keeps it in sync afterwards
+                playing = ActiveVoice.isPlaying(url)
+            }) {
                 Icon(
                     if (playing) Icons.Outlined.Pause else Icons.Outlined.PlayArrow,
                     "play voice message",
@@ -1733,7 +2483,8 @@ private fun AttachmentView(name: String?, type: String?, url: String, self: Bool
                             if (prepared && durationMs > 0) {
                                 val frac = (off.x / size.width).coerceIn(0f, 1f)
                                 val target = (frac * durationMs).toInt()
-                                runCatching { player.seekTo(target); positionMs = target }
+                                ActiveVoice.seekTo(url, target)
+                                positionMs = target
                             }
                         }
                     },
@@ -1754,7 +2505,7 @@ private fun AttachmentView(name: String?, type: String?, url: String, self: Bool
                     .background(content.copy(alpha = 0.14f))
                     .clickableScale(pressedScale = 0.9f) {
                         speed = if (speed >= 2f) 1f else speed + 0.5f
-                        if (playing) runCatching { player.playbackParams = player.playbackParams.setSpeed(speed) }
+                        ActiveVoice.setSpeed(url, speed)
                     }
                     .padding(horizontal = Spacing.s, vertical = Spacing.xxs),
             )
@@ -1804,6 +2555,10 @@ private fun Composer(
     var text by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue("")) }
     var readingAttachment by remember { mutableStateOf(false) }
     var showAttachmentOptions by remember { mutableStateOf(false) }
+
+    val recentMedia = remember { mutableStateListOf<RecentMediaItem>() }
+
+    var clipboardImageUri by remember { mutableStateOf<Uri?>(null) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val focusRequester = remember { FocusRequester() }
@@ -1812,12 +2567,15 @@ private fun Composer(
     var keepKeyboardAfterSend by remember { mutableStateOf(false) }
 
     var pendingImageEdit by remember { mutableStateOf<SelectedAttachment?>(null) }
-    fun dispatchAttachment(bytes: ByteArray, name: String, type: String) {
-        pendingSentText = text.text
+    // caption == null → reuse the live composer text (gallery/document/video path);
+    // a non-null caption comes from the pre-send image editor and overrides it.
+    fun dispatchAttachment(bytes: ByteArray, name: String, type: String, caption: String? = null) {
+        val body = caption ?: text.text
+        pendingSentText = body
         keepKeyboardAfterSend = true
         focusRequester.requestFocus()
         keyboardController?.show()
-        onAttachment(bytes, name, type, text.text)
+        onAttachment(bytes, name, type, body)
     }
     fun consumeAttachment(uri: Uri?) {
         if (uri != null) {
@@ -1845,6 +2603,27 @@ private fun Composer(
                 readingAttachment = false
             }
         }
+    }
+
+    // and surface a paste affordance when one is present.
+    fun refreshClipboardImage() {
+        clipboardImageUri = runCatching {
+            val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+            val clip = cm?.primaryClip ?: return@runCatching null
+            if (clip.itemCount == 0) return@runCatching null
+            val desc = clip.description
+            val looksImage = desc != null && (0 until desc.mimeTypeCount).any { desc.getMimeType(it).startsWith("image/") }
+            val uri = (0 until clip.itemCount).firstNotNullOfOrNull { clip.getItemAt(it).uri }
+            if (uri == null) return@runCatching null
+            val resolvedImage = looksImage || context.contentResolver.getType(uri)?.startsWith("image/") == true
+            if (resolvedImage) uri else null
+        }.getOrNull()
+    }
+
+    fun pasteClipboardImage() {
+        val uri = clipboardImageUri ?: return
+        clipboardImageUri = null
+        consumeAttachment(uri)
     }
     val attachmentLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> consumeAttachment(uri) }
     val photoLauncher = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri -> consumeAttachment(uri) }
@@ -2033,11 +2812,32 @@ private fun Composer(
         text = TextFieldValue(newText, TextRange(start + replacement.length))
     }
 
-    Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 3.dp) {
+    val nova = LocalExperimentalRedesign.current
+
+    // ring, and the rim lights up when the field is focused so it "wakes up".
+
+    var composerFocused by remember { mutableStateOf(false) }
+    // a short-lived "sent" tick drives a celebratory pop on the send button
+    var sendTick by remember { mutableStateOf(0) }
+    val composerAccent = MaterialTheme.colorScheme.primary
+    val composerContent: @Composable () -> Unit = {
         Column(
             Modifier.fillMaxWidth()
                 .animateContentSize(tween(160))
-                .padding(horizontal = Spacing.s, vertical = Spacing.s),
+                .then(
+                    if (nova) Modifier
+                        .padding(horizontal = Spacing.m, vertical = Spacing.s)
+                        .novaElevation(
+                            NovaCorners.card,
+                            tint = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            accent = composerAccent,
+                            accented = composerFocused,
+                            glow = true,
+                            elevation = NovaDepth.floatingElevation,
+                        )
+                        .padding(horizontal = Spacing.s, vertical = Spacing.s)
+                    else Modifier.padding(horizontal = Spacing.s, vertical = Spacing.s),
+                ),
         ) {
             // suggestion panel above the input — hidden whenever there's no "@"
             // context or nothing matches (also covers select/space/cursor-move)
@@ -2128,6 +2928,21 @@ private fun Composer(
                         )
                     }
                 }
+
+                if (clipboardImageUri != null && ui.editing == null) {
+                    IconButton(
+                        onClick = { pasteClipboardImage() },
+                        enabled = !readingAttachment && !ui.sending,
+                        modifier = Modifier.size(48.dp),
+                    ) {
+                        Icon(
+                            Icons.Outlined.ContentPaste,
+                            "paste image from clipboard",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(22.dp),
+                        )
+                    }
+                }
                 OutlinedTextField(
                     value = text,
                     onValueChange = { value ->
@@ -2136,8 +2951,12 @@ private fun Composer(
                         onTyping()
                     },
                     placeholder = { Text("message") },
-                    modifier = Modifier.weight(1f).focusRequester(focusRequester),
-                    shape = Corners.input,
+                    modifier = Modifier.weight(1f).focusRequester(focusRequester)
+                        .onFocusChanged {
+                            composerFocused = it.isFocused
+                            if (it.isFocused) refreshClipboardImage()
+                        },
+                    shape = if (nova) NovaCorners.input else Corners.input,
                     minLines = 1,
                     maxLines = 6,
                     enabled = !readingAttachment,
@@ -2168,31 +2987,74 @@ private fun Composer(
                             contentColor = MaterialTheme.colorScheme.onPrimary,
                         ),
                     ) { Icon(Icons.Outlined.Mic, "record voice message") }
-                    else -> FilledIconButton(
-                        onClick = {
+                    else -> {
+                        val armed = text.text.isNotBlank() && !ui.sending && !readingAttachment
+                        val doSend = {
                             val submitted = text.text
                             pendingSentText = submitted
                             keepKeyboardAfterSend = true
                             focusRequester.requestFocus()
                             keyboardController?.show()
                             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            sendTick++
                             onSend(submitted)
-                        },
-                        enabled = text.text.isNotBlank() && !ui.sending && !readingAttachment,
-                        modifier = Modifier.size(48.dp),
-                        colors = IconButtonDefaults.filledIconButtonColors(
-                            containerColor = MaterialTheme.colorScheme.primary,
-                            contentColor = MaterialTheme.colorScheme.onPrimary,
-                        ),
-                    ) {
-                        Icon(
-                            if (ui.editing != null) Icons.Outlined.Done else Icons.Outlined.Send,
-                            if (ui.editing != null) "save edit" else "send message",
-                        )
+                        }
+                        val sendIcon = if (ui.editing != null) Icons.Outlined.Done else Icons.AutoMirrored.Filled.Send
+                        val sendLabel = if (ui.editing != null) "save edit" else "send message"
+                        if (nova) {
+
+                            // overshoot then settle) each time a message leaves, so
+                            // sending feels physical rather than a silent state change.
+                            val reduced = LocalReducedMotion.current
+                            // a transient 1.18→1 settle, restarted on every send tick
+                            val pop = remember { androidx.compose.animation.core.Animatable(1f) }
+                            val popSpec = NovaMotion.pop<Float>()
+                            LaunchedEffect(sendTick) {
+                                if (sendTick > 0 && !reduced) {
+                                    pop.snapTo(1.18f)
+                                    pop.animateTo(1f, popSpec)
+                                }
+                            }
+                            Box(
+                                Modifier.size(48.dp)
+                                    .graphicsLayer { scaleX = pop.value; scaleY = pop.value }
+                                    .novaHalo(composerAccent, alpha = if (armed) NovaDepth.haloAlpha else 0f)
+                                    .clip(CircleShape)
+                                    .background(
+                                        if (armed) Brush.linearGradient(NovaGradients.cta(composerAccent))
+                                        else androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.surfaceContainerHighest),
+                                    )
+                                    .clickable(enabled = armed, onClickLabel = sendLabel, onClick = doSend),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    sendIcon,
+                                    sendLabel,
+                                    tint = if (armed) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(22.dp),
+                                )
+                            }
+                        } else FilledIconButton(
+                            onClick = doSend,
+                            enabled = armed,
+                            modifier = Modifier.size(48.dp),
+                            colors = IconButtonDefaults.filledIconButtonColors(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary,
+                            ),
+                        ) {
+                            Icon(sendIcon, sendLabel)
+                        }
                     }
                 }
             }
         }
+    }
+    if (nova) {
+        // transparent backdrop so the pill card visibly floats above the canvas
+        Box(Modifier.fillMaxWidth().background(Color.Transparent)) { composerContent() }
+    } else {
+        Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 3.dp) { composerContent() }
     }
     pendingImageEdit?.let { selected ->
         ImageEditorDialog(
@@ -2200,15 +3062,32 @@ private fun Composer(
             filename = selected.name,
             type = selected.type,
             onDismiss = { pendingImageEdit = null },
-            onSend = { edited ->
+            onSend = { edited, caption ->
                 pendingImageEdit = null
-                dispatchAttachment(edited.bytes, edited.filename, edited.type)
+                dispatchAttachment(edited.bytes, edited.filename, edited.type, caption = caption)
             },
         )
     }
     if (showAttachmentOptions) {
+
+        LaunchedEffect(Unit) {
+            if (recentMedia.isEmpty()) {
+                val items = queryRecentMedia(context)
+                if (items.isNotEmpty()) {
+                    recentMedia.clear()
+                    recentMedia.addAll(items)
+                }
+            }
+        }
         AttachmentOptionsSheet(
             isSpace = isSpace,
+            recent = recentMedia,
+            onPickRecent = { uri ->
+                showAttachmentOptions = false
+                // images route through the pre-send editor; videos send directly —
+
+                consumeAttachment(uri)
+            },
             onAction = { action ->
                 showAttachmentOptions = false
                 when (action) {
@@ -2521,6 +3400,36 @@ private data class SelectedAttachment(
 )
 
 private class AttachmentTooLargeException : IllegalArgumentException()
+
+private suspend fun queryRecentMedia(context: Context, limit: Int = 30): List<RecentMediaItem> =
+    withContext(Dispatchers.IO) {
+        runCatching {
+            val collection = android.provider.MediaStore.Files.getContentUri("external")
+            val projection = arrayOf(
+                android.provider.MediaStore.Files.FileColumns._ID,
+                android.provider.MediaStore.Files.FileColumns.MEDIA_TYPE,
+            )
+            val mediaImage = android.provider.MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE
+            val mediaVideo = android.provider.MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO
+            val selection =
+                "${android.provider.MediaStore.Files.FileColumns.MEDIA_TYPE} = ? OR " +
+                    "${android.provider.MediaStore.Files.FileColumns.MEDIA_TYPE} = ?"
+            val args = arrayOf(mediaImage.toString(), mediaVideo.toString())
+            val sort = "${android.provider.MediaStore.Files.FileColumns.DATE_MODIFIED} DESC"
+            val results = ArrayList<RecentMediaItem>(limit)
+            context.contentResolver.query(collection, projection, selection, args, sort)?.use { cursor ->
+                val idCol = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Files.FileColumns._ID)
+                val typeCol = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Files.FileColumns.MEDIA_TYPE)
+                while (cursor.moveToNext() && results.size < limit) {
+                    val id = cursor.getLong(idCol)
+                    val isVideo = cursor.getInt(typeCol) == mediaVideo
+                    val uri = android.content.ContentUris.withAppendedId(collection, id)
+                    results.add(RecentMediaItem(uri, isVideo))
+                }
+            }
+            results as List<RecentMediaItem>
+        }.getOrDefault(emptyList())
+    }
 
 private suspend fun readAttachment(context: Context, uri: Uri): SelectedAttachment = withContext(Dispatchers.IO) {
     val resolver = context.contentResolver
