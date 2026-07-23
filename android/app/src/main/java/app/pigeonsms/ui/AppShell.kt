@@ -91,6 +91,7 @@ import app.pigeonsms.ui.settings.SettingsScreen
 import app.pigeonsms.ui.settings.NestSettingsScreen
 import app.pigeonsms.ui.settings.NotificationSettingsScreen
 import app.pigeonsms.ui.forum.ForumScreen
+import app.pigeonsms.ui.spaces.NestChannelsScreen
 import app.pigeonsms.ui.spaces.SpacesScreen
 import app.pigeonsms.ui.util.Avatar
 
@@ -211,12 +212,33 @@ fun AppShell(session: LocalSession) {
                 }
             }
             composable("spaces") {
-                SpacesScreen(app) { ch, name, kind ->
-                    if (kind == "forum") {
-                        nav.navigate("forum/$ch/${enc(name)}")
-                    } else {
-                        nav.navigate("chat/$ch/${enc(name)}?space=true")
-                    }
+                SpacesScreen(
+                    app,
+                    onOpenNest = { spaceId -> nav.navigate("nest/$spaceId") },
+                    onOpenChannel = { ch, name, kind ->
+                        if (kind == "forum") {
+                            nav.navigate("forum/$ch/${enc(name)}")
+                        } else {
+                            nav.navigate("chat/$ch/${enc(name)}?space=true")
+                        }
+                    },
+                )
+            }
+            composable("nest/{spaceId}") { entry ->
+                val spaceId = entry.arguments?.getString("spaceId") ?: return@composable
+                CompositionLocalProvider(LocalNavAnimatedScope provides this) {
+                    NestChannelsScreen(
+                        app = app,
+                        spaceId = spaceId,
+                        onBack = { nav.popBackStack() },
+                        onOpenChannel = { ch, name, kind ->
+                            if (kind == "forum") {
+                                nav.navigate("forum/$ch/${enc(name)}")
+                            } else {
+                                nav.navigate("chat/$ch/${enc(name)}?space=true")
+                            }
+                        },
+                    )
                 }
             }
             composable("forum/{cid}/{title}") { entry ->
