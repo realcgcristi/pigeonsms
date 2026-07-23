@@ -2,6 +2,7 @@ package app.pigeonsms.ui.forum
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import app.pigeonsms.network.AttachmentDto
 import app.pigeonsms.network.ForumPostDto
 import app.pigeonsms.network.Gateway
 import app.pigeonsms.network.MessageDto
@@ -17,14 +18,18 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
+data class PickedImage(val bytes: ByteArray, val name: String, val type: String)
+
 fun forumPostTitle(metadata: JsonElement?): String = runCatching {
     metadata?.jsonObject?.get("title")?.jsonPrimitive?.content
 }.getOrNull()?.takeIf { it.isNotBlank() } ?: "untitled post"
 
 class ForumViewModel(
     private val api: PigeonApi,
+    private val social: app.pigeonsms.data.SocialRepository,
     gateway: Gateway,
     private val channelId: String,
+    initialTitle: String = "",
 ) : ViewModel() {
 
     data class ThreadState(
@@ -46,15 +51,27 @@ class ForumViewModel(
 
         val openPostId: String? = null,
         val thread: ThreadState = ThreadState(),
+
+        val title: String = "",
+
+        val isOwner: Boolean = false,
+
+        val selfId: String? = null,
+
+        val spaceId: String? = null,
+        val renaming: Boolean = false,
+
+        val openPostPinned: Boolean = false,
     )
 
     private val json = Json { ignoreUnknownKeys = true }
-    private val _ui = MutableStateFlow(ForumUiState())
+    private val _ui = MutableStateFlow(ForumUiState(title = initialTitle))
     val ui: StateFlow<ForumUiState> = _ui
     private var listJob: Job? = null
 
     init {
         refresh()
+        resolveRole()
         viewModelScope.launch {
             gateway.events.collect { ev ->
                 if (ev.t == "message.delete") {
@@ -132,17 +149,20 @@ class ForumViewModel(
 
     fun clearCreateError() = _ui.update { it.copy(createError = null) }
 
-    fun createPost(title: String, content: String, onDone: () -> Unit) {
+    fun createPost(title: String, content: String, image: PickedImage? = null, onDone: () -> Unit) {
         val cleanTitle = title.trim().take(160)
         val cleanContent = content.trim().take(4000)
         when {
             _ui.value.creating -> return
             cleanTitle.isEmpty() -> { _ui.update { it.copy(createError = "give your post a title") }; return }
-            cleanContent.isEmpty() -> { _ui.update { it.copy(createError = "write something first") }; return }
+            cleanContent.isEmpty() && image == null -> { _ui.update { it.copy(createError = "write something first") }; return }
         }
         _ui.update { it.copy(creating = true, createError = null) }
         viewModelScope.launch {
-            runCatching { api.createForumPost(channelId, cleanTitle, cleanContent, UUID.randomUUID().toString()) }
+            runCatching {
+                val attachment = image?.let { social.uploadFile(it.bytes, it.name, it.type) }
+                api.createForumPost(channelId, cleanTitle, cleanContent, UUID.randomUUID().toString(), attachment)
+            }
                 .onSuccess { message ->
                     _ui.update { it.copy(creating = false) }
                     refresh(silent = true)
@@ -156,7 +176,12 @@ class ForumViewModel(
     }
 
     fun openPost(postId: String) {
-        _ui.update { it.copy(openPostId = postId, thread = ThreadState(loading = true)) }
+        _ui.update { it.copy(openPostId = postId, thread = ThreadState(loading = true), openPostPinned = false) }
+
+        viewModelScope.launch {
+            val pinned = runCatching { api.pins(channelId).any { it.id == postId } }.getOrDefault(false)
+            _ui.update { if (it.openPostId == postId) it.copy(openPostPinned = pinned) else it }
+        }
         viewModelScope.launch {
             runCatching { api.forumThread(channelId, postId) }
                 .onSuccess { thread ->
@@ -176,15 +201,18 @@ class ForumViewModel(
         }
     }
 
-    fun closePost() = _ui.update { it.copy(openPostId = null, thread = ThreadState()) }
+    fun closePost() = _ui.update { it.copy(openPostId = null, thread = ThreadState(), openPostPinned = false) }
 
-    fun sendReply(content: String, onSent: () -> Unit) {
+    fun sendReply(content: String, image: PickedImage? = null, onSent: () -> Unit) {
         val postId = _ui.value.openPostId ?: return
         val clean = content.trim().take(4000)
-        if (clean.isEmpty() || _ui.value.thread.sending) return
+        if ((clean.isEmpty() && image == null) || _ui.value.thread.sending) return
         _ui.update { it.copy(thread = it.thread.copy(sending = true, sendError = null)) }
         viewModelScope.launch {
-            runCatching { api.createForumReply(channelId, postId, clean, UUID.randomUUID().toString()) }
+            runCatching {
+                val attachment = image?.let { social.uploadFile(it.bytes, it.name, it.type) }
+                api.createForumReply(channelId, postId, clean, UUID.randomUUID().toString(), attachment = attachment)
+            }
                 .onSuccess { message ->
                     _ui.update { state ->
                         if (state.openPostId != postId) state.copy(thread = state.thread.copy(sending = false))
@@ -207,6 +235,86 @@ class ForumViewModel(
                     _ui.update {
                         it.copy(thread = it.thread.copy(sending = false, sendError = userMessage(error, "couldn't send the reply")))
                     }
+                }
+        }
+    }
+
+    private fun resolveRole() {
+        viewModelScope.launch {
+            val self = runCatching { api.me().id }.getOrNull()
+            val space = runCatching { api.spaces() }.getOrNull()
+                ?.firstOrNull { s -> s.channels.any { it.id == channelId } }
+            _ui.update {
+                it.copy(
+                    selfId = self ?: it.selfId,
+                    spaceId = space?.id ?: it.spaceId,
+                    isOwner = space?.role == "owner" || (space != null && self != null && space.owner_id == self),
+                )
+            }
+        }
+    }
+
+    fun canDelete(authorId: String): Boolean {
+        val s = _ui.value
+        return s.isOwner || (s.selfId != null && s.selfId == authorId)
+    }
+
+    fun renameChannel(name: String, onDone: () -> Unit) {
+        val spaceId = _ui.value.spaceId ?: return
+
+        val clean = name.trim().lowercase()
+            .replace(Regex("[^a-z0-9-]"), "-")
+            .replace(Regex("-+"), "-")
+            .trim('-')
+            .take(32)
+        if (clean.length < 2 || _ui.value.renaming) {
+            _ui.update { it.copy(error = "channel name needs at least 2 letters or numbers") }
+            return
+        }
+        _ui.update { it.copy(renaming = true) }
+        viewModelScope.launch {
+            runCatching { social.renameChannel(spaceId, channelId, clean) }
+                .onSuccess {
+                    _ui.update { it.copy(renaming = false, title = clean) }
+                    onDone()
+                }
+                .onFailure { error ->
+                    _ui.update { it.copy(renaming = false, error = userMessage(error, "couldn't rename channel")) }
+                }
+        }
+    }
+
+    fun deletePost(id: String) {
+        viewModelScope.launch {
+            runCatching { api.deleteMessage(id) }
+                .onSuccess {
+                    _ui.update { s ->
+                        s.copy(
+                            posts = s.posts.filterNot { it.id == id },
+                            openPostId = s.openPostId?.takeUnless { it == id },
+                            thread = if (s.openPostId == id) ThreadState()
+                            else s.thread.copy(replies = s.thread.replies.filterNot { it.id == id }),
+                        )
+                    }
+                    refresh(silent = true)
+                }
+                .onFailure { error ->
+                    _ui.update { it.copy(error = userMessage(error, "couldn't delete")) }
+                }
+        }
+    }
+
+    fun togglePin(id: String) {
+        val pinned = _ui.value.openPostPinned
+        viewModelScope.launch {
+            runCatching { if (pinned) api.unpin(id) else api.pin(id) }
+                .onSuccess {
+                    _ui.update { s ->
+                        if (s.openPostId == id) s.copy(openPostPinned = !pinned) else s
+                    }
+                }
+                .onFailure { error ->
+                    _ui.update { it.copy(error = userMessage(error, if (pinned) "couldn't unpin" else "couldn't pin")) }
                 }
         }
     }

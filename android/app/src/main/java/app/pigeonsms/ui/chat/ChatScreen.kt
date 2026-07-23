@@ -60,7 +60,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Reply
 import androidx.compose.material.icons.outlined.AddReaction
@@ -81,6 +80,7 @@ import androidx.compose.material.icons.outlined.Call
 import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Send
+import androidx.compose.material.icons.rounded.Send
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -2999,7 +2999,7 @@ private fun Composer(
                             sendTick++
                             onSend(submitted)
                         }
-                        val sendIcon = if (ui.editing != null) Icons.Outlined.Done else Icons.AutoMirrored.Filled.Send
+                        val sendIcon = if (ui.editing != null) Icons.Outlined.Done else Icons.Rounded.Send
                         val sendLabel = if (ui.editing != null) "save edit" else "send message"
                         if (nova) {
 

@@ -1,6 +1,9 @@
 package app.pigeonsms.ui.forum
 
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FiniteAnimationSpec
@@ -10,8 +13,10 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,6 +27,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -37,12 +43,20 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Forum
+import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AlertDialogDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -100,6 +114,7 @@ import app.pigeonsms.ui.util.ErrorState
 import app.pigeonsms.ui.util.LoadingState
 import app.pigeonsms.ui.util.clickableScale
 import app.pigeonsms.ui.util.smartTime
+import kotlinx.coroutines.launch
 
 @Composable
 fun ForumScreen(
@@ -109,10 +124,13 @@ fun ForumScreen(
     onOpenProfile: (String) -> Unit,
 ) {
     val vm: ForumViewModel = pigeonVm(key = "forum-$channelId") { c, _ ->
-        ForumViewModel(c.api, c.gateway, channelId)
+        ForumViewModel(c.api, c.socialRepository, c.gateway, channelId, title)
     }
     val ui by vm.ui.collectAsState()
     var composeOpen by rememberSaveable(channelId) { mutableStateOf(false) }
+    var renameOpen by rememberSaveable(channelId) { mutableStateOf(false) }
+
+    val liveTitle = ui.title.takeIf { it.isNotBlank() } ?: title
 
     BackHandler(enabled = ui.openPostId != null) { vm.closePost() }
 
@@ -125,21 +143,28 @@ fun ForumScreen(
                 val n = ui.posts.size
                 if (n == 0) "forum" else if (n == 1) "1 post" else "$n posts"
             }
+
+            // inside a thread) and only to the space owner.
+            val onRename: (() -> Unit)? = if (ui.isOwner && ui.openPostId == null) {
+                { renameOpen = true }
+            } else null
             if (galaxy) {
                 NovaForumHeader(
-                    title = title,
+                    title = liveTitle,
                     subtitle = headerSubtitle,
                     onBack = { if (ui.openPostId != null) vm.closePost() else onBack() },
+                    onRename = onRename,
                 )
             } else {
                 ForumHeader(
-                    title = title,
+                    title = liveTitle,
                     subtitle = if (ui.openPostId != null) {
                         ui.thread.post?.let { forumPostTitle(it.metadata) } ?: "post"
                     } else {
                         "forum"
                     },
                     onBack = { if (ui.openPostId != null) vm.closePost() else onBack() },
+                    onRename = onRename,
                 )
             }
 
@@ -168,14 +193,21 @@ fun ForumScreen(
                         onOpen = { vm.openPost(it.id) },
                         onOpenProfile = onOpenProfile,
                         onNewPost = { vm.clearCreateError(); composeOpen = true },
+                        canDelete = vm::canDelete,
+                        onDelete = vm::deletePost,
                     )
                 } else {
                     ThreadView(
                         thread = ui.thread,
+                        isOwner = ui.isOwner,
+                        pinned = ui.openPostPinned,
                         avatarUrl = vm::mediaUrl,
                         onRetry = { vm.openPost(openPostId) },
                         onOpenProfile = onOpenProfile,
-                        onSend = { text, done -> vm.sendReply(text, done) },
+                        onSend = { text, image, done -> vm.sendReply(text, image, done) },
+                        canDelete = vm::canDelete,
+                        onDelete = vm::deletePost,
+                        onTogglePin = { vm.togglePin(openPostId) },
                     )
                 }
             }
@@ -218,13 +250,119 @@ fun ForumScreen(
             creating = ui.creating,
             error = ui.createError,
             onDismiss = { if (!ui.creating) { composeOpen = false; vm.clearCreateError() } },
-            onCreate = { postTitle, body -> vm.createPost(postTitle, body) { composeOpen = false } },
+            onCreate = { postTitle, body, image -> vm.createPost(postTitle, body, image) { composeOpen = false } },
+        )
+    }
+
+    if (renameOpen) {
+        RenameChannelDialog(
+            current = liveTitle,
+            busy = ui.renaming,
+            onDismiss = { if (!ui.renaming) renameOpen = false },
+            onRename = { name -> vm.renameChannel(name) { renameOpen = false } },
         )
     }
 }
 
+private suspend fun readPickedImage(context: android.content.Context, uri: android.net.Uri): PickedImage? =
+    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        runCatching {
+            val resolver = context.contentResolver
+            val type = resolver.getType(uri)?.takeIf { it.startsWith("image/") } ?: "image/jpeg"
+            var name = "image"
+            resolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+                if (c.moveToFirst()) {
+                    val i = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                    if (i >= 0) name = c.getString(i) ?: name
+                }
+            }
+            val bytes = resolver.openInputStream(uri)?.use { it.readBytes() } ?: return@runCatching null
+            if (bytes.size > 25 * 1024 * 1024) return@runCatching null
+            PickedImage(bytes, name.take(128), type.take(64))
+        }.getOrNull()
+    }
+
 @Composable
-private fun ForumHeader(title: String, subtitle: String, onBack: () -> Unit) {
+private fun ForumAttachmentImage(attachment: app.pigeonsms.network.AttachmentDto?, avatarUrl: (String?) -> String?) {
+    if (attachment == null || attachment.type?.startsWith("image/") != true) return
+    val url = avatarUrl(attachment.key) ?: return
+    coil.compose.AsyncImage(
+        model = url,
+        contentDescription = attachment.name ?: "image attachment",
+        contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+        modifier = Modifier
+            .padding(top = Spacing.s)
+            .widthIn(max = 320.dp)
+            .fillMaxWidth()
+            .clip(Corners.card)
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+    )
+}
+
+@Composable
+private fun PickedImagePreview(image: PickedImage, onClear: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(top = Spacing.s),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        coil.compose.AsyncImage(
+            model = image.bytes,
+            contentDescription = "selected image",
+            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+            modifier = Modifier.size(56.dp).clip(Corners.chip).background(MaterialTheme.colorScheme.surfaceContainerHigh),
+        )
+        Text(
+            image.name,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f).padding(start = Spacing.s),
+        )
+        IconButton(onClick = onClear) {
+            Icon(Icons.Outlined.Close, "remove image", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun RenameChannelDialog(current: String, busy: Boolean, onDismiss: () -> Unit, onRename: (String) -> Unit) {
+    val galaxy = LocalUiSkin.current == UiSkin.Galaxy
+    var name by rememberSaveable { mutableStateOf(current) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = if (galaxy) NovaCorners.card else AlertDialogDefaults.shape,
+        title = { Text("rename channel") },
+        text = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it.take(100) },
+                label = { Text("channel name") },
+                enabled = !busy,
+                singleLine = true,
+                shape = if (galaxy) NovaCorners.input else Corners.input,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        },
+        confirmButton = {
+            Button(
+                onClick = { onRename(name) },
+                enabled = !busy && name.isNotBlank() && name.trim() != current,
+            ) {
+                if (busy) {
+                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    Text("saving...", Modifier.padding(start = Spacing.s))
+                } else {
+                    Text("rename")
+                }
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss, enabled = !busy) { Text("cancel") } },
+    )
+}
+
+@Composable
+private fun ForumHeader(title: String, subtitle: String, onBack: () -> Unit, onRename: (() -> Unit)? = null) {
     Row(
         Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = Spacing.s, vertical = Spacing.s),
         verticalAlignment = Alignment.CenterVertically,
@@ -255,11 +393,29 @@ private fun ForumHeader(title: String, subtitle: String, onBack: () -> Unit) {
                 overflow = TextOverflow.Ellipsis,
             )
         }
+        if (onRename != null) ForumOverflowMenu(onRename)
     }
 }
 
 @Composable
-private fun NovaForumHeader(title: String, subtitle: String, onBack: () -> Unit) {
+private fun ForumOverflowMenu(onRename: () -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { open = true }) {
+            Icon(Icons.Outlined.MoreVert, "channel options", tint = MaterialTheme.colorScheme.onSurface)
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text("rename channel") },
+                leadingIcon = { Icon(Icons.Outlined.Edit, null) },
+                onClick = { open = false; onRename() },
+            )
+        }
+    }
+}
+
+@Composable
+private fun NovaForumHeader(title: String, subtitle: String, onBack: () -> Unit, onRename: (() -> Unit)? = null) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -292,6 +448,11 @@ private fun NovaForumHeader(title: String, subtitle: String, onBack: () -> Unit)
                 modifier = Modifier.padding(top = Spacing.xxs),
             )
         }
+        if (onRename != null) {
+            NovaIconBadgeButton(onClick = onRename, size = 44.dp) {
+                Icon(Icons.Outlined.Edit, "rename channel", Modifier.size(20.dp))
+            }
+        }
     }
 }
 
@@ -304,6 +465,8 @@ private fun PostList(
     onOpen: (ForumPostDto) -> Unit,
     onOpenProfile: (String) -> Unit,
     onNewPost: () -> Unit,
+    canDelete: (String) -> Boolean,
+    onDelete: (String) -> Unit,
 ) {
     val skin = LocalUiSkin.current
     val galaxy = skin == UiSkin.Galaxy
@@ -344,10 +507,12 @@ private fun PostList(
                 verticalArrangement = Arrangement.spacedBy(Spacing.m),
             ) {
                 itemsIndexed(ui.posts, key = { _, p -> p.id }) { index, post ->
+                    val deletable = canDelete(post.author.id)
+                    val onDeleteThis: (() -> Unit)? = if (deletable) { { onDelete(post.id) } } else null
                     when (skin) {
-                        UiSkin.Galaxy -> NovaPostCard(post, avatarUrl, modifier = Modifier.itemAppear(index), onOpen = { onOpen(post) }, onOpenProfile = onOpenProfile)
-                        UiSkin.Nova -> ExpNovaPostCard(post, avatarUrl, modifier = Modifier.itemAppear(index), onOpen = { onOpen(post) }, onOpenProfile = onOpenProfile)
-                        UiSkin.Classic -> PostCard(post, avatarUrl, modifier = Modifier.itemAppear(index), onOpen = { onOpen(post) }, onOpenProfile = onOpenProfile)
+                        UiSkin.Galaxy -> NovaPostCard(post, avatarUrl, modifier = Modifier.itemAppear(index), onOpen = { onOpen(post) }, onOpenProfile = onOpenProfile, onDelete = onDeleteThis)
+                        UiSkin.Nova -> ExpNovaPostCard(post, avatarUrl, modifier = Modifier.itemAppear(index), onOpen = { onOpen(post) }, onOpenProfile = onOpenProfile, onDelete = onDeleteThis)
+                        UiSkin.Classic -> PostCard(post, avatarUrl, modifier = Modifier.itemAppear(index), onOpen = { onOpen(post) }, onOpenProfile = onOpenProfile, onDelete = onDeleteThis)
                     }
                 }
             }
@@ -384,6 +549,37 @@ private fun AuthorLine(author: ApiUser, timestamp: Long, avatarUrl: (String?) ->
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun PostCardBox(
+    onOpen: () -> Unit,
+    onDelete: (() -> Unit)?,
+    content: @Composable (clickMod: Modifier) -> Unit,
+) {
+
+    // so the child never installs its own competing gesture.
+    if (onDelete == null) {
+        content(Modifier.clickableScale(pressedScale = 0.98f, onClick = onOpen))
+        return
+    }
+    var menuOpen by remember { mutableStateOf(false) }
+    Box {
+        content(
+            Modifier.combinedClickable(
+                onClick = onOpen,
+                onLongClick = { menuOpen = true },
+            ),
+        )
+        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+            DropdownMenuItem(
+                text = { Text("delete post") },
+                leadingIcon = { Icon(Icons.Outlined.Delete, null) },
+                onClick = { menuOpen = false; onDelete!!() },
+            )
+        }
+    }
+}
+
 @Composable
 private fun PostCard(
     post: ForumPostDto,
@@ -391,12 +587,13 @@ private fun PostCard(
     modifier: Modifier = Modifier,
     onOpen: () -> Unit,
     onOpenProfile: (String) -> Unit,
-) {
+    onDelete: (() -> Unit)? = null,
+) = PostCardBox(onOpen, onDelete) { clickMod ->
     Column(
         modifier
             .fillMaxWidth()
             .then(forumCard())
-            .clickableScale(pressedScale = 0.98f, onClick = onOpen)
+            .then(clickMod)
             .padding(Spacing.l),
     ) {
         Text(
@@ -416,6 +613,7 @@ private fun PostCard(
                 modifier = Modifier.padding(top = Spacing.xs),
             )
         }
+        ForumAttachmentImage(post.attachment, avatarUrl)
         Row(
             Modifier.fillMaxWidth().padding(top = Spacing.m),
             verticalAlignment = Alignment.CenterVertically,
@@ -449,10 +647,15 @@ private fun PostCard(
 @Composable
 private fun ThreadView(
     thread: ForumViewModel.ThreadState,
+    isOwner: Boolean,
+    pinned: Boolean,
     avatarUrl: (String?) -> String?,
     onRetry: () -> Unit,
     onOpenProfile: (String) -> Unit,
-    onSend: (String, () -> Unit) -> Unit,
+    onSend: (String, PickedImage?, () -> Unit) -> Unit,
+    canDelete: (String) -> Boolean,
+    onDelete: (String) -> Unit,
+    onTogglePin: () -> Unit,
 ) {
     when {
         thread.loading -> { LoadingState("loading post"); return }
@@ -479,42 +682,57 @@ private fun ThreadView(
             verticalArrangement = Arrangement.spacedBy(Spacing.s),
         ) {
             item(key = post.id) {
-                if (galaxy) {
-                    NovaThreadHero(post, thread.replies.size, avatarUrl, onOpenProfile)
-                } else if (nova) {
-                    ExpNovaThreadHero(post, thread.replies.size, avatarUrl, onOpenProfile)
-                } else {
-                    Column(Modifier.fillMaxWidth().then(forumCard()).padding(Spacing.l)) {
-                        Text(
-                            forumPostTitle(post.metadata),
-                            style = MaterialTheme.typography.titleLarge,
-                            color = MaterialTheme.colorScheme.onSurface,
-                        )
-                        Box(Modifier.padding(top = Spacing.xs)) {
-                            AuthorLine(post.author, post.created_at, avatarUrl, onOpenProfile)
-                        }
-                        if (post.content.isNotBlank()) {
+                Column {
+                    if (galaxy) {
+                        NovaThreadHero(post, thread.replies.size, avatarUrl, onOpenProfile)
+                    } else if (nova) {
+                        ExpNovaThreadHero(post, thread.replies.size, avatarUrl, onOpenProfile)
+                    } else {
+                        Column(Modifier.fillMaxWidth().then(forumCard()).padding(Spacing.l)) {
                             Text(
-                                post.content,
-                                style = MaterialTheme.typography.bodyLarge,
+                                forumPostTitle(post.metadata),
+                                style = MaterialTheme.typography.titleLarge,
                                 color = MaterialTheme.colorScheme.onSurface,
+                            )
+                            Box(Modifier.padding(top = Spacing.xs)) {
+                                AuthorLine(post.author, post.created_at, avatarUrl, onOpenProfile)
+                            }
+                            if (post.content.isNotBlank()) {
+                                Text(
+                                    post.content,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.padding(top = Spacing.m),
+                                )
+                            }
+                            ForumAttachmentImage(post.attachment, avatarUrl)
+                            Text(
+                                if (thread.replies.size == 1) "1 reply" else "${thread.replies.size} replies",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.padding(top = Spacing.m),
                             )
                         }
-                        Text(
-                            if (thread.replies.size == 1) "1 reply" else "${thread.replies.size} replies",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(top = Spacing.m),
-                        )
                     }
+
+                    ThreadPostActions(
+                        pinned = pinned,
+                        canPin = isOwner,
+                        canDelete = canDelete(post.author.id),
+                        onTogglePin = onTogglePin,
+                        onDelete = { onDelete(post.id) },
+                    )
                 }
             }
             items(thread.replies, key = { it.id }) { reply ->
-                when (skin) {
-                    UiSkin.Galaxy -> NovaReplyRow(reply, avatarUrl, onOpenProfile)
-                    UiSkin.Nova -> ExpNovaReplyRow(reply, avatarUrl, onOpenProfile)
-                    UiSkin.Classic -> ReplyRow(reply, avatarUrl, onOpenProfile)
+                val onDeleteReply: (() -> Unit)? =
+                    if (!reply.deleted && canDelete(reply.author.id)) { { onDelete(reply.id) } } else null
+                ReplyRowMenu(onDeleteReply) {
+                    when (skin) {
+                        UiSkin.Galaxy -> NovaReplyRow(reply, avatarUrl, onOpenProfile)
+                        UiSkin.Nova -> ExpNovaReplyRow(reply, avatarUrl, onOpenProfile)
+                        UiSkin.Classic -> ReplyRow(reply, avatarUrl, onOpenProfile)
+                    }
                 }
             }
         }
@@ -531,7 +749,26 @@ private fun ThreadView(
                 modifier = Modifier.padding(horizontal = Spacing.l),
             )
         }
-        val armed = draft.isNotBlank() && !thread.sending
+        val context = androidx.compose.ui.platform.LocalContext.current
+        val scope = androidx.compose.runtime.rememberCoroutineScope()
+        var replyImage by remember(post.id) { mutableStateOf<PickedImage?>(null) }
+        val replyPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+            if (uri != null) scope.launch { replyImage = readPickedImage(context, uri) }
+        }
+        val armed = (draft.isNotBlank() || replyImage != null) && !thread.sending
+        val submit: () -> Unit = {
+            if (armed) {
+                val img = replyImage
+                onSend(draft, img) { draft = ""; replyImage = null }
+            }
+        }
+
+        replyImage?.let { img ->
+            PickedImagePreview(
+                image = img,
+                onClear = { replyImage = null },
+            )
+        }
         val composerMod = if (galaxy) {
             Modifier
                 .fillMaxWidth()
@@ -551,6 +788,12 @@ private fun ThreadView(
             composerMod,
             verticalAlignment = Alignment.Bottom,
         ) {
+            IconButton(
+                onClick = { replyPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                enabled = !thread.sending,
+            ) {
+                Icon(Icons.Outlined.Image, "attach image", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             OutlinedTextField(
                 value = draft,
                 onValueChange = { draft = it.take(4000) },
@@ -583,7 +826,7 @@ private fun ThreadView(
                                 .clip(sendShape)
                                 .background(MaterialTheme.colorScheme.surfaceContainerHigh)
                         )
-                        .clickableScale(pressedScale = 0.9f, onClick = { if (armed) onSend(draft) { draft = "" } }),
+                        .clickableScale(pressedScale = 0.9f, onClick = submit),
                     contentAlignment = Alignment.Center,
                 ) {
                     if (thread.sending) {
@@ -599,8 +842,8 @@ private fun ThreadView(
                 }
             } else {
                 IconButton(
-                    onClick = { onSend(draft) { draft = "" } },
-                    enabled = draft.isNotBlank() && !thread.sending,
+                    onClick = submit,
+                    enabled = armed,
                     modifier = Modifier.padding(start = Spacing.xs),
                 ) {
                     if (thread.sending) {
@@ -609,11 +852,67 @@ private fun ThreadView(
                         Icon(
                             Icons.AutoMirrored.Rounded.Send,
                             "send reply",
-                            tint = if (draft.isNotBlank()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            tint = if (armed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun ThreadPostActions(
+    pinned: Boolean,
+    canPin: Boolean,
+    canDelete: Boolean,
+    onTogglePin: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    if (!canPin && !canDelete) return
+    Row(
+        Modifier.fillMaxWidth().padding(top = Spacing.xs, start = Spacing.s, end = Spacing.s),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
+    ) {
+        if (canPin) {
+            TextButton(onClick = onTogglePin) {
+                Icon(
+                    if (pinned) Icons.Outlined.PushPin else Icons.Outlined.PushPin,
+                    null,
+                    Modifier.size(18.dp),
+                    tint = if (pinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    if (pinned) "unpin" else "pin",
+                    Modifier.padding(start = Spacing.xs),
+                    color = if (pinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        Spacer(Modifier.weight(1f))
+        if (canDelete) {
+            TextButton(onClick = onDelete) {
+                Icon(Icons.Outlined.Delete, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.error)
+                Text("delete", Modifier.padding(start = Spacing.xs), color = MaterialTheme.colorScheme.error)
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun ReplyRowMenu(onDelete: (() -> Unit)?, content: @Composable () -> Unit) {
+    if (onDelete == null) { content(); return }
+    var open by remember { mutableStateOf(false) }
+    Box(Modifier.combinedClickable(onClick = {}, onLongClick = { open = true })) {
+        content()
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text("delete reply") },
+                leadingIcon = { Icon(Icons.Outlined.Delete, null) },
+                onClick = { open = false; onDelete() },
+            )
         }
     }
 }
@@ -633,6 +932,7 @@ private fun ReplyRow(reply: MessageDto, avatarUrl: (String?) -> String?, onOpenP
             color = if (reply.deleted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.padding(top = Spacing.xs),
         )
+        if (!reply.deleted) ForumAttachmentImage(reply.attachment, avatarUrl)
     }
 }
 
@@ -641,12 +941,18 @@ private fun NewPostDialog(
     creating: Boolean,
     error: String?,
     onDismiss: () -> Unit,
-    onCreate: (title: String, body: String) -> Unit,
+    onCreate: (title: String, body: String, image: PickedImage?) -> Unit,
 ) {
     val galaxy = LocalUiSkin.current == UiSkin.Galaxy
     val inputShape = if (galaxy) NovaCorners.input else Corners.input
     var postTitle by rememberSaveable { mutableStateOf("") }
     var body by rememberSaveable { mutableStateOf("") }
+    var image by remember { mutableStateOf<PickedImage?>(null) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) scope.launch { image = readPickedImage(context, uri) }
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         shape = if (galaxy) NovaCorners.card else AlertDialogDefaults.shape,
@@ -674,6 +980,18 @@ private fun NewPostDialog(
                     maxLines = 8,
                     modifier = Modifier.fillMaxWidth().padding(top = Spacing.s).heightIn(min = 96.dp),
                 )
+                if (image == null) {
+                    TextButton(
+                        onClick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                        enabled = !creating,
+                        modifier = Modifier.padding(top = Spacing.xs),
+                    ) {
+                        Icon(Icons.Outlined.Image, null, Modifier.size(18.dp))
+                        Text("add image", Modifier.padding(start = Spacing.xs))
+                    }
+                } else {
+                    PickedImagePreview(image = image!!, onClear = { image = null })
+                }
                 AnimatedVisibility(
                     visible = error != null,
                     enter = fadeIn(PigeonMotion.snappy()),
@@ -689,11 +1007,11 @@ private fun NewPostDialog(
             }
         },
         confirmButton = {
-            val canPost = !creating && postTitle.isNotBlank() && body.isNotBlank()
+            val canPost = !creating && postTitle.isNotBlank() && (body.isNotBlank() || image != null)
             if (galaxy) {
                 NovaPillButton(
                     text = if (creating) "posting..." else "post",
-                    onClick = { if (canPost) onCreate(postTitle, body) },
+                    onClick = { if (canPost) onCreate(postTitle, body, image) },
                     armed = canPost,
                     height = 48.dp,
                     modifier = Modifier.width(150.dp),
@@ -703,8 +1021,8 @@ private fun NewPostDialog(
                 )
             } else {
                 Button(
-                    onClick = { onCreate(postTitle, body) },
-                    enabled = !creating && postTitle.isNotBlank() && body.isNotBlank(),
+                    onClick = { onCreate(postTitle, body, image) },
+                    enabled = canPost,
                 ) {
                     if (creating) {
                         CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
@@ -730,7 +1048,8 @@ private fun NovaPostCard(
     modifier: Modifier = Modifier,
     onOpen: () -> Unit,
     onOpenProfile: (String) -> Unit,
-) {
+    onDelete: (() -> Unit)? = null,
+) = PostCardBox(onOpen, onDelete) { clickMod ->
     val accent = MaterialTheme.colorScheme.primary
     val cyan = MaterialTheme.colorScheme.secondary
 
@@ -740,7 +1059,7 @@ private fun NovaPostCard(
         modifier
             .fillMaxWidth()
             .novaElevation(NovaCorners.card, MaterialTheme.colorScheme.surfaceContainer, accent, accented = hot)
-            .clickableScale(pressedScale = 0.98f, onClick = onOpen)
+            .then(clickMod)
             .padding(Spacing.l),
     ) {
 
@@ -782,6 +1101,7 @@ private fun NovaPostCard(
                     modifier = Modifier.padding(top = Spacing.xs),
                 )
             }
+            ForumAttachmentImage(post.attachment, avatarUrl)
 
             Row(
                 Modifier.fillMaxWidth().padding(top = Spacing.m),
@@ -873,6 +1193,9 @@ private fun NovaThreadHero(
                 modifier = Modifier.padding(horizontal = Spacing.l, vertical = Spacing.m),
             )
         }
+        Box(Modifier.padding(horizontal = Spacing.l)) {
+            ForumAttachmentImage(post.attachment, avatarUrl)
+        }
         Row(
             Modifier.fillMaxWidth().padding(horizontal = Spacing.l).padding(bottom = Spacing.l),
             verticalAlignment = Alignment.CenterVertically,
@@ -943,6 +1266,7 @@ private fun NovaReplyRow(reply: MessageDto, avatarUrl: (String?) -> String?, onO
                 color = if (reply.deleted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.padding(top = Spacing.xxs),
             )
+            if (!reply.deleted) ForumAttachmentImage(reply.attachment, avatarUrl)
         }
     }
 }
@@ -958,13 +1282,14 @@ private fun ExpNovaPostCard(
     modifier: Modifier = Modifier,
     onOpen: () -> Unit,
     onOpenProfile: (String) -> Unit,
-) {
+    onDelete: (() -> Unit)? = null,
+) = PostCardBox(onOpen, onDelete) { clickMod ->
     Row(
         modifier
             .fillMaxWidth()
             .clip(Corners.card)
             .background(MaterialTheme.colorScheme.surfaceContainer)
-            .clickableScale(pressedScale = 0.98f, onClick = onOpen)
+            .then(clickMod)
             .padding(Spacing.l),
     ) {
 
@@ -1006,6 +1331,7 @@ private fun ExpNovaPostCard(
                     modifier = Modifier.padding(top = Spacing.xs),
                 )
             }
+            ForumAttachmentImage(post.attachment, avatarUrl)
 
             Row(
                 Modifier.fillMaxWidth().padding(top = Spacing.m),
@@ -1094,6 +1420,9 @@ private fun ExpNovaThreadHero(
                 modifier = Modifier.padding(horizontal = Spacing.l, vertical = Spacing.m),
             )
         }
+        Box(Modifier.padding(horizontal = Spacing.l)) {
+            ForumAttachmentImage(post.attachment, avatarUrl)
+        }
         Row(
             Modifier.fillMaxWidth().padding(horizontal = Spacing.l).padding(bottom = Spacing.l),
             verticalAlignment = Alignment.CenterVertically,
@@ -1158,6 +1487,7 @@ private fun ExpNovaReplyRow(reply: MessageDto, avatarUrl: (String?) -> String?, 
                 color = if (reply.deleted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.padding(top = Spacing.xxs),
             )
+            if (!reply.deleted) ForumAttachmentImage(reply.attachment, avatarUrl)
         }
     }
 }

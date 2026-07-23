@@ -16,11 +16,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
-import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.rounded.AudioFile
-import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.Description
+import androidx.compose.material.icons.rounded.Event
 import androidx.compose.material.icons.rounded.HowToVote
+import androidx.compose.material.icons.rounded.PhotoCamera
 import androidx.compose.material.icons.rounded.PhotoLibrary
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.Icon
@@ -115,12 +115,12 @@ fun AttachmentOptionsSheet(
             }
             val actions = buildList {
                 add(AttachmentAction.PhotosVideos to (Icons.Rounded.PhotoLibrary to "Photos & videos"))
-                add(AttachmentAction.Camera to (Icons.Outlined.PhotoCamera to "Camera"))
+                add(AttachmentAction.Camera to (Icons.Rounded.PhotoCamera to "Camera"))
                 add(AttachmentAction.Documents to (Icons.Rounded.Description to "Document"))
                 add(AttachmentAction.Audio to (Icons.Rounded.AudioFile to "Audio"))
                 if (isSpace) {
                     add(AttachmentAction.Poll to (Icons.Rounded.HowToVote to "Poll"))
-                    add(AttachmentAction.Event to (Icons.Rounded.CalendarMonth to "Event"))
+                    add(AttachmentAction.Event to (Icons.Rounded.Event to "Event"))
                 }
             }
             actions.chunked(3).forEach { row ->
