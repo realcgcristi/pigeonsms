@@ -13,8 +13,8 @@ android {
         applicationId = "app.pigeonsms"
         minSdk = 26
         targetSdk = 36
-        versionCode = 30
-        versionName = "2.3.0"
+        versionCode = 33
+        versionName = "2.4.0"
 
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
