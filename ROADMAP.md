@@ -10,7 +10,7 @@ shipped and iterating: dms, nests with text/voice/forum channels, forum tags + l
 
 - **fix calls.** the #1 priority. get voice/video actually working: reliable native mic/camera capture across devices, and stand up a **TURN server** (coturn) so media traverses symmetric/cellular NAT. the signaling + UI are already done. this is the thing i most want help with.
 - **desktop client.** a proper desktop app — leaning toward tauri (rust shell + web UI) so it's light and cross-platform (win/mac/linux), sharing the same backend. maybe a plain web client first as a stepping stone.
-- **end-to-end encryption** for DMs (and maybe small nests). privacy is the whole point, so real e2ee is the natural next step. big undertaking — needs a key exchange + device management story.
+- ~~**end-to-end encryption** for DMs~~ — **done, shipped in v2.8.0.** X25519 identity keys per device, a double-ratchet DM message stream, sealed per-device key envelopes, and a password-derived encrypted key backup for multi-device. it's experimental and off-by-default while it hardens, but the full key exchange + device management story is built. e2ee is off the roadmap.
 
 ## v3 — smaller wants
 

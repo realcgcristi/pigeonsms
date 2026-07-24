@@ -134,8 +134,9 @@ if you find something broken, fair, open an issue and i'll probably fix it
 
 the short version (full thing in [ROADMAP.md](ROADMAP.md)):
 
-- **v3 big rocks** — fix calls for real (reliable native mic/camera capture + a TURN server so media traverses NAT), a **desktop client** (thinking tauri, shared backend), and **end-to-end encryption** for DMs since privacy is the whole point.
-- **smaller v3 wants** — a web client, proper server-side search across a nest, better forum threading, richer per-nest roles, scheduled messages, gifs/stickers, data export, an accessibility pass, and one-command self-host.
+- **done in v2.8.0** — **end-to-end encryption for DMs** is shipped and off the roadmap: X25519 device keys, a double-ratchet message stream, and a password-derived key backup. it's experimental and ships off-by-default while it hardens, but the crypto is fully wired end to end. v2.8.0 also shipped server-side nest search, scheduled messages, and an accessibility pass.
+- **v3 big rocks** — fix calls for real (reliable native mic/camera capture + a TURN server so media traverses NAT) and a **desktop client** (thinking tauri, shared backend). with e2ee out of the way, v3 is all about calls + desktop.
+- **smaller v3 wants** — a web client, better forum threading, richer per-nest roles, gifs/stickers, data export, and one-command self-host.
 - **someday** — federation between self-hosted instances, a small bot/automation api.
 
 calls are the #1 priority and the thing i most want help with (see [CONTRIBUTING.md](CONTRIBUTING.md)).
