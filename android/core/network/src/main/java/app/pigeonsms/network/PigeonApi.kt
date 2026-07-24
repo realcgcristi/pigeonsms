@@ -34,6 +34,7 @@ const val PIGEON_WS = "wss://api.pigeonsms.aldi.best/gateway"
 
 class PigeonApiException(val code: String, override val message: String) : Exception(message)
 
+/** Query values (search text, filenames) can hold spaces/&/# — encode or the URL breaks. */
 private fun q(value: String): String = java.net.URLEncoder.encode(value, "UTF-8")
 
 class PigeonApi(
@@ -101,6 +102,11 @@ class PigeonApi(
     suspend fun deleteAccount(password: String) { client.delete("$baseUrl/auth/me") {
         auth(); contentType(ContentType.Application.Json); setBody(buildJsonObject { put("password", password) })
     }.unwrap<OkResponse>() }
+    /** Trusted-user only (admin / a_arond / andrei); server 403s otherwise. count = codes to mint, uses = max uses each. */
+    suspend fun generateInvites(count: Int, uses: Int) = client.post("$baseUrl/auth/invites") {
+        auth(); contentType(ContentType.Application.Json)
+        setBody(buildJsonObject { put("count", count); put("uses", uses) })
+    }.unwrap<GenerateInvitesResponse>().invites
 
     // --- friends ---
     suspend fun friends() = client.get("$baseUrl/friends") { auth() }.unwrap<FriendsResponse>()
@@ -130,6 +136,10 @@ class PigeonApi(
 
     suspend fun messages(channelId: String, before: Long? = null) = messagesPage(channelId, before).messages
 
+    /**
+     * The channel's global last_seq (forum replies included) — cheap probe used to
+     * clear forum unread badges. Best-effort like markRead: 0 when unavailable.
+     */
     suspend fun channelLastSeq(channelId: String): Long = runCatching {
         client.get("$baseUrl/channels/$channelId/messages?limit=1") { auth() }
             .unwrap<MessagesResponse>().cursor?.channel_last_seq
@@ -145,6 +155,11 @@ class PigeonApi(
             })
         }.unwrap<MessageResponse>().message
 
+    /**
+     * Poll message: kind="poll" + poll {question, options[2..10], anonymous}.
+     * The server is single-choice only (multiple_choice: true is rejected) and
+     * uses the question as content when content is blank.
+     */
     suspend fun sendPoll(channelId: String, question: String, options: List<String>, anonymous: Boolean, nonce: String) =
         client.post("$baseUrl/channels/$channelId/messages") {
             auth(); contentType(ContentType.Application.Json)
@@ -158,6 +173,7 @@ class PigeonApi(
             })
         }.unwrap<MessageResponse>().message
 
+    /** Event message: kind="event" + metadata {title, starts_at, ends_at?, location?, description?} (epoch ms). */
     suspend fun sendEvent(
         channelId: String,
         title: String,
@@ -179,6 +195,7 @@ class PigeonApi(
         })
     }.unwrap<MessageResponse>().message
 
+    /** One choice per user; voting again moves the vote. */
     suspend fun votePoll(messageId: String, optionId: String) =
         client.put("$baseUrl/messages/$messageId/poll/votes/$optionId") { auth() }.unwrap<PollVoteResponse>()
     suspend fun retractPollVote(messageId: String) =
@@ -196,7 +213,7 @@ class PigeonApi(
     suspend fun unpin(id: String) { client.delete("$baseUrl/messages/$id/pin") { auth() }.unwrap<OkResponse>() }
     suspend fun likeMessage(id: String) = client.put("$baseUrl/messages/$id/like") { auth() }.unwrap<LikeMutationResponse>()
     suspend fun unlikeMessage(id: String) = client.delete("$baseUrl/messages/$id/like") { auth() }.unwrap<LikeMutationResponse>()
-
+    /** Toggle "mark" (e.g. answer/resolved). 400 not_markable when the channel has no mark tag. */
     suspend fun markMessage(id: String) = client.put("$baseUrl/messages/$id/marked") { auth() }.unwrap<MarkMutationResponse>()
     suspend fun unmarkMessage(id: String) = client.delete("$baseUrl/messages/$id/marked") { auth() }.unwrap<MarkMutationResponse>()
     suspend fun pins(channelId: String) = client.get("$baseUrl/channels/$channelId/pins") { auth() }.unwrap<MessagesResponse>().messages
@@ -233,7 +250,7 @@ class PigeonApi(
 
     // --- spaces ---
     suspend fun spaces() = client.get("$baseUrl/spaces") { auth() }.unwrap<SpacesResponse>().spaces
-
+    /** Without a nonce the server's legacy name-match silently returns an existing same-name space. */
     suspend fun createSpace(name: String, nonce: String) = client.post("$baseUrl/spaces") {
         auth(); contentType(ContentType.Application.Json); setBody(buildJsonObject { put("name", name); put("nonce", nonce) })
     }.unwrap<CreateSpaceResponse>().space
@@ -241,11 +258,11 @@ class PigeonApi(
     suspend fun createChannel(spaceId: String, name: String, kind: String = "text") = client.post("$baseUrl/spaces/$spaceId/channels") {
         auth(); contentType(ContentType.Application.Json); setBody(buildJsonObject { put("name", name); put("kind", kind) })
     }.unwrap<CreateChannelResponse>().channel
-
+    /** Owner-only rename. Fanout `channel.update {id,space_id,name,topic,kind}`. */
     suspend fun renameChannel(spaceId: String, channelId: String, name: String) = client.patch("$baseUrl/spaces/$spaceId/channels/$channelId") {
         auth(); contentType(ContentType.Application.Json); setBody(buildJsonObject { put("name", name) })
     }.unwrap<CreateChannelResponse>().channel
-
+    /** Owner-only delete. Fanout `channel.delete {id,space_id}`. */
     suspend fun deleteChannel(spaceId: String, channelId: String) { client.delete("$baseUrl/spaces/$spaceId/channels/$channelId") { auth() }.unwrap<OkResponse>() }
     suspend fun spaceInvite(spaceId: String) = client.post("$baseUrl/spaces/$spaceId/invites") {
         auth(); contentType(ContentType.Application.Json); setBody(buildJsonObject { })
@@ -273,6 +290,7 @@ class PigeonApi(
             "$baseUrl/channels/$channelId/forum/posts?sort=${q(sort)}${if (tag != null) "&tag=${q(tag)}" else ""}",
         ) { auth() }.unwrap<ForumPostsResponse>().posts
 
+    /** Owner-only tag definition. mark_label, when set, turns the tag into a "mark" (e.g. resolved). */
     suspend fun createForumTag(channelId: String, name: String, markLabel: String? = null) =
         client.post("$baseUrl/channels/$channelId/forum/tags") {
             auth(); contentType(ContentType.Application.Json)
@@ -286,6 +304,7 @@ class PigeonApi(
         client.get("$baseUrl/channels/$channelId/forum/posts/$postId${if (after != null) "?after=$after" else ""}") { auth() }
             .unwrap<ForumThreadResponse>()
 
+    /** Creates a kind="forum_post" message; the title lands in metadata.title. tag is a tag id. */
     suspend fun createForumPost(
         channelId: String,
         title: String,
@@ -303,6 +322,7 @@ class PigeonApi(
         })
     }.unwrap<MessageResponse>().message
 
+    /** Creates a kind="forum_reply" in the post's thread; replyTo targets a message inside that thread. */
     suspend fun createForumReply(channelId: String, postId: String, content: String, nonce: String, replyTo: String? = null, attachment: AttachmentDto? = null) =
         client.post("$baseUrl/channels/$channelId/forum/posts/$postId/replies") {
             auth(); contentType(ContentType.Application.Json)

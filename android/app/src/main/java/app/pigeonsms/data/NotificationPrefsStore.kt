@@ -2,6 +2,12 @@ package app.pigeonsms.data
 
 import android.content.Context
 
+/** Small, synchronous local mirror of notification controls.
+ *
+ * The server owns the same scopes (global, space, channel and user). Keeping a
+ * device copy lets FCM/background delivery and the settings UI agree even
+ * while the app is offline; the API sync can be added without changing callers.
+ */
 data class NotificationPrefs(
     val mode: String = "all", // all | mentions | mute
     val sound: Boolean = true,

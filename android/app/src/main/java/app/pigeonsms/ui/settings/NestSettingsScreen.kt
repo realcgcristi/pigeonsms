@@ -66,6 +66,14 @@ import app.pigeonsms.ui.spaces.SpaceAction
 import app.pigeonsms.ui.spaces.SpacesViewModel
 import coil.compose.AsyncImage
 
+/**
+ * Central "bird nests" management page in the settings style. Lists every nest the
+ * user is in; for OWNED nests each channel can be renamed or deleted inline, and
+ * non-owned nests get a "leave nest" action. Reuses the settings primitives
+ * (GroupCard / Group / SettingsSubHeader) and the spaces data + actions the app
+ * already uses (AppViewModel.home.spaces + SpacesViewModel). 3-skin aware via those
+ * helpers.
+ */
 @Composable
 fun NestSettingsScreen(app: AppViewModel, onBack: () -> Unit) {
     val vm: SpacesViewModel = pigeonVm { c, _ -> SpacesViewModel(c.socialRepository, c.api) }
@@ -247,6 +255,7 @@ fun NestSettingsScreen(app: AppViewModel, onBack: () -> Unit) {
     }
 }
 
+/** Small round nest icon: uploaded image or a monogram fallback. */
 @Composable
 private fun NestIcon(space: SpaceDto, iconUrl: String?) {
     Box(Modifier.size(40.dp).clip(CircleShape), contentAlignment = Alignment.Center) {
@@ -265,6 +274,7 @@ private fun NestIcon(space: SpaceDto, iconUrl: String?) {
     }
 }
 
+/** A single channel row inside a nest's GroupCard. Owners see rename + delete. */
 @Composable
 private fun ChannelManageRow(
     channel: ChannelDto,
@@ -305,6 +315,7 @@ private fun ChannelManageRow(
     }
 }
 
+/** Inline busy/label for dialog confirm buttons — mirrors the spaces screen. */
 @Composable
 private fun ActionLabel(working: Boolean, label: String) {
     if (working) {

@@ -4,15 +4,22 @@ import android.content.Intent
 import android.os.SystemClock
 import java.util.concurrent.atomic.AtomicInteger
 
+/** Actions handled by [NotificationActionReceiver]. */
 const val NOTIFICATION_ACTION_QUICK_REPLY = "app.pigeonsms.action.QUICK_REPLY"
 const val NOTIFICATION_ACTION_MARK_READ = "app.pigeonsms.action.MARK_READ"
 const val ACTION_QUICK_REPLY = NOTIFICATION_ACTION_QUICK_REPLY
 const val ACTION_MARK_READ = NOTIFICATION_ACTION_MARK_READ
 
+/** The key used by Android's inline reply field. */
 const val KEY_TEXT_REPLY = "app.pigeonsms.notification.reply"
 const val NOTIFICATION_REMOTE_INPUT_KEY = KEY_TEXT_REPLY
 const val REMOTE_INPUT_KEY = KEY_TEXT_REPLY
 
+/*
+ * Keep these keys stable. They are also used by the FCM data payload, which
+ * means a notification built by an older server can still be opened by a
+ * newer client (and vice versa).
+ */
 const val EXTRA_NOTIFICATION_ID = "notification_id"
 const val EXTRA_CHANNEL_ID = "channel_id"
 const val EXTRA_CHANNEL_NAME = "channel_name"
@@ -26,6 +33,13 @@ const val EXTRA_SENDER_USERNAME = "sender_username"
 const val EXTRA_SENDER_DISPLAY_NAME = "sender_display_name"
 const val EXTRA_NOTIFICATION_TITLE = "title"
 
+/**
+ * The information needed to open a message notification in the channel.
+ *
+ * Names are deliberately optional: early push payloads only carried IDs, and
+ * opening those notifications should continue to work. The title is retained
+ * as a fallback for old producers that did not send the individual fields.
+ */
 data class NotificationTarget(
     val channelId: String,
     val channelName: String? = null,
@@ -38,11 +52,12 @@ data class NotificationTarget(
     val senderDisplayName: String? = null,
     val title: String? = null,
 ) {
-
+    /** Best title for the channel route when a push omitted channel_name. */
     val chatTitle: String
         get() = channelName.clean() ?: senderDisplayName.clean() ?: senderUsername.clean() ?: "chat"
 }
 
+/** Parsed FCM fields shared by notification rendering and action intents. */
 data class NotificationMetadata(
     val title: String? = null,
     val body: String? = null,
@@ -74,7 +89,10 @@ data class NotificationMetadata(
     }
 
     companion object {
-
+        /**
+         * Parse both snake_case API fields and the camelCase names used by a
+         * few older clients. Unknown fields are ignored by design.
+         */
         fun from(data: Map<String, String>): NotificationMetadata {
             fun value(vararg keys: String): String? = keys.firstNotNullOfOrNull { key -> data[key].clean() }
             val seq = value(EXTRA_MESSAGE_SEQ, "message_seq", "seq")?.toLongOrNull()
@@ -96,6 +114,14 @@ data class NotificationMetadata(
     }
 }
 
+/**
+ * Format the title used by both native and in-app message notifications.
+ *
+ * Group messages use `[Space] • #Channel • @Sender`; direct messages fall
+ * back to `@Sender`. Prefixes are normalized so callers may pass either raw
+ * names or already-decorated names. Missing fields never produce dangling
+ * separators.
+ */
 fun formatNotificationTitle(
     spaceName: String? = null,
     channelName: String? = null,
@@ -106,6 +132,7 @@ fun formatNotificationTitle(
     var channel = channelName.clean()
     var sender = senderUsername.clean()
 
+    // Old payloads put the entire title in one field. Recover its components
     // when it already looks like a group title, then normalize the brackets.
     val fallback = fallbackTitle.clean()
     if ((space == null || channel == null || sender == null) && fallback != null) {
@@ -128,6 +155,7 @@ fun formatNotificationTitle(
     }
 }
 
+/** Convenience overload for an FCM map. */
 fun formatNotificationTitle(data: Map<String, String>, fallbackTitle: String? = null): String {
     val metadata = NotificationMetadata.from(data)
     return formatNotificationTitle(
@@ -138,6 +166,7 @@ fun formatNotificationTitle(data: Map<String, String>, fallbackTitle: String? = 
     )
 }
 
+/** Convenience overload for callers that already parsed the push payload. */
 fun formatNotificationTitle(metadata: NotificationMetadata): String = formatNotificationTitle(
     spaceName = metadata.spaceName,
     channelName = metadata.channelName,
@@ -145,12 +174,14 @@ fun formatNotificationTitle(metadata: NotificationMetadata): String = formatNoti
     fallbackTitle = metadata.title,
 )
 
+/** Alias kept explicit for callers that want to document the group use case. */
 fun formatGroupNotificationTitle(
     spaceName: String?,
     channelName: String?,
     senderUsername: String?,
 ): String = formatNotificationTitle(spaceName, channelName, senderUsername)
 
+/** Generate a process-local ID that cannot collapse two incoming pushes. */
 private val notificationIdCounter = AtomicInteger(
     (SystemClock.elapsedRealtime() and 0x3FFFFFFF).toInt().coerceAtLeast(1),
 )
@@ -164,6 +195,7 @@ fun nextNotificationId(): Int {
     return id
 }
 
+/** Extract a notification target from a content-intent or deep-link URI. */
 fun Intent.notificationTargetOrNull(): NotificationTarget? {
     fun string(vararg keys: String): String? {
         for (key in keys) {
@@ -197,6 +229,7 @@ fun Intent.notificationTargetOrNull(): NotificationTarget? {
     )
 }
 
+/** Put all known metadata on an action/content intent without null extras. */
 fun Intent.putNotificationTarget(target: NotificationTarget, notificationId: Int? = null): Intent = apply {
     putExtra(EXTRA_CHANNEL_ID, target.channelId)
     target.channelName?.let { putExtra(EXTRA_CHANNEL_NAME, it) }

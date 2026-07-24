@@ -69,6 +69,17 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 
+/*
+ * Poll + event creation dialogs and in-chat renderers. Self-contained: everything
+ * public here is wired into ChatScreen by the caller.
+ *
+ * Server contract (backend/src/lib/messageFeatures.ts):
+ *  - polls: 2–10 unique options, single choice only (multiple_choice is rejected),
+ *    optional anonymous flag. Votes move; tapping your own option retracts.
+ *  - events: title + starts_at (epoch ms) required, ends_at >= starts_at,
+ *    optional location/description. Spaces only.
+ */
+
 private val pollEventJson = Json { ignoreUnknownKeys = true }
 
 private const val POLL_MAX_OPTIONS = 10
@@ -253,6 +264,7 @@ fun CreateEventDialog(
     )
 }
 
+/** Date + time chips; each opens the matching M3 picker. Emits epoch millis (local zone). */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DateTimeRow(label: String, value: Long, onChange: (Long) -> Unit) {
@@ -334,6 +346,11 @@ private fun DateTimeRow(label: String, value: Long, onChange: (Long) -> Unit) {
 
 // --- in-chat renderers ------------------------------------------------------
 
+/**
+ * Poll bubble body. [pollJson] is MessageEntity.pollJson (serialized PollDto).
+ * Renders the question itself — skip the normal content line for kind == "poll".
+ * onVote(optionId) casts/moves the vote; onVote(null) retracts (tap on own choice).
+ */
 @Composable
 fun PollMessageContent(
     pollJson: String?,
@@ -423,6 +440,10 @@ fun PollMessageContent(
     }
 }
 
+/**
+ * Event bubble body: calendar-card look — date block + title + time range.
+ * [metadataJson] is MessageEntity.metadataJson for kind == "event".
+ */
 @Composable
 fun EventMessageContent(
     metadataJson: String?,
@@ -493,6 +514,7 @@ private fun nextFullHour(): Long = Calendar.getInstance().apply {
     set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
 }.timeInMillis
 
+/** The M3 DatePicker thinks in UTC days; feed it the local calendar date at UTC midnight. */
 private fun localDateAsUtcMillis(millis: Long): Long {
     val local = Calendar.getInstance().apply { timeInMillis = millis }
     return Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {

@@ -60,6 +60,7 @@ import coil.ImageLoader
 import coil.compose.AsyncImage
 import coil.decode.VideoFrameDecoder
 
+/** One image or video in the media timeline for a conversation. */
 data class ConversationMedia(
     val messageId: String,
     val url: String,
@@ -69,8 +70,13 @@ data class ConversationMedia(
 
 fun String.isConversationVideo(): Boolean = startsWith("video/", ignoreCase = true)
 
+/** Inline embeds cap out here so a portrait video never dominates the chat column. */
 private val INLINE_VIDEO_MAX_HEIGHT = 320.dp
 
+/**
+ * The app-wide Coil loader (PigeonApp) doesn't decode video; this shared loader
+ * adds [VideoFrameDecoder] so thumbnails/posters can show the first frame.
+ */
 internal object VideoFrames {
     @Volatile private var loader: ImageLoader? = null
     fun loader(context: Context): ImageLoader = loader ?: synchronized(this) {
@@ -82,6 +88,10 @@ internal object VideoFrames {
     }
 }
 
+/**
+ * One ExoPlayer per composed video, released with the composition. Reports the
+ * real video aspect ratio so callers can size their frame to the media.
+ */
 @Composable
 private fun rememberConversationPlayer(
     url: String,
@@ -144,6 +154,11 @@ private fun ConversationPlayerSurface(
     )
 }
 
+/**
+ * Inline video embed: poster frame + play button, tapping swaps in an ExoPlayer.
+ * The frame follows the media aspect ratio (capped at [INLINE_VIDEO_MAX_HEIGHT])
+ * and the player is released as soon as the message scrolls out of composition.
+ */
 @Composable
 fun EmbeddedVideo(
     url: String,
@@ -222,6 +237,7 @@ fun EmbeddedVideo(
     }
 }
 
+/** Fullscreen swipeable image/video viewer for the current conversation. */
 @Composable
 fun ConversationMediaViewer(
     items: List<ConversationMedia>,
@@ -244,7 +260,7 @@ fun ConversationMediaViewer(
             ) { page ->
                 val item = items[page]
                 if (item.type.isConversationVideo()) {
-
+                    // settledPage: a page being dragged past never starts playback, and a
                     // small drag on the current page doesn't tear down the running player
                     FullscreenVideo(item, active = pager.settledPage == page)
                 } else {
@@ -284,6 +300,11 @@ fun ConversationMediaViewer(
     }
 }
 
+/**
+ * Video page in the fullscreen pager. The ExoPlayer only exists while this page
+ * is the settled one — swiping away disposes (and therefore pauses + releases)
+ * it; inactive pages show the poster frame instead.
+ */
 @Composable
 private fun FullscreenVideo(item: ConversationMedia, active: Boolean) {
     val context = LocalContext.current

@@ -43,6 +43,7 @@ data class HomeState(
     val spacesError: String? = null,
 )
 
+/** Owns the gateway connection and the home-level social snapshot. */
 class AppViewModel(
     private val gateway: Gateway,
     private val social: SocialRepository,
@@ -58,6 +59,7 @@ class AppViewModel(
     private val _typingEvents = MutableSharedFlow<Pair<String, String>>(extraBufferCapacity = 16)
     val typingEvents: SharedFlow<Pair<String, String>> = _typingEvents
 
+    /** In-app heads-up for a new message in a channel you're not looking at. */
     data class IncomingPing(val channelId: String, val title: String, val preview: String)
     private val _pings = MutableSharedFlow<IncomingPing>(extraBufferCapacity = 8)
     val pings: SharedFlow<IncomingPing> = _pings
@@ -66,23 +68,33 @@ class AppViewModel(
     private var spacesJob: Job? = null
     private var spacesRefreshPending = false
 
+    /** Set by whichever ChatScreen is open, so its channel's events refresh Room. */
     var activeChannel: String? = null
 
     init {
         gateway.start()
         viewModelScope.launch {
-
-            // are not replayed by the gateway, so re-sync the open channel.
+            // Backfill after a websocket outage: events missed while offline
+            // are not replayed by the gateway, so re-sync the open channel and
+            // do a full home refresh (dms + friends + spaces).
             var wasDown = false
+            var hasConnected = false
             gateway.status.collect { status ->
                 when {
-                    status != GatewayStatus.Connected -> wasDown = true
+                    status != GatewayStatus.Connected -> {
+                        // Only treat this as "was down" once we've actually seen a
+                        // Connected before — otherwise the very first Connecting/
+                        // Disconnected at startup would trigger a spurious extra
+                        // refresh on top of the init refresh() below.
+                        if (hasConnected) wasDown = true
+                    }
                     wasDown -> {
                         wasDown = false
                         activeChannel?.let { runCatching { chat.sync(it) } }
-                        refreshDms()
+                        refresh()
                     }
                 }
+                if (status == GatewayStatus.Connected) hasConnected = true
             }
         }
         viewModelScope.launch {
@@ -95,9 +107,11 @@ class AppViewModel(
                             if (dto.channel_id != activeChannel) {
                                 refreshDms()
                                 if (ev.t != "message.edit" && dto.author.id != selfId) {
-
+                                    // Gateway payloads from newer servers may
+                                    // include display names directly. Older
                                     // payloads can still be resolved from the
-
+                                    // cached Spaces snapshot, then gracefully
+                                    // fall back to a DM-style sender title.
                                     val eventData = ev.d.jsonObject
                                     val location = _home.value.spaces.asSequence()
                                         .mapNotNull { space ->
@@ -153,7 +167,7 @@ class AppViewModel(
                     "super_pin.set" -> {
                         val event = runCatching { json.decodeFromJsonElement(SuperPinSetEventDto.serializer(), ev.d) }.getOrNull()
                         if (event != null) {
-                            chat.applyEvent(event.message)
+                            chat.applyEvent(event.message) // keep Room's copy of the banner message current
                             chat.applyPinEvent(PinEvent.SuperPinSet(event.channel_id, event.message))
                         }
                     }
@@ -209,6 +223,7 @@ class AppViewModel(
     suspend fun activateSession(userId: String, identity: String) {
         if (selfId == userId && sessionIdentity == identity) return
 
+        // A session switch must not retain the previous account's cached
         // read markers, refresh jobs, or websocket identity.
         dmsJob?.cancelAndJoin()
         friendsJob?.cancelAndJoin()

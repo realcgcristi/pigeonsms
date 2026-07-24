@@ -13,14 +13,15 @@ android {
         applicationId = "app.pigeonsms"
         minSdk = 26
         targetSdk = 36
-        versionCode = 39
-        versionName = "2.6.0"
-
+        versionCode = 40
+        versionName = "2.7.0"
+        // Native WebRTC ships .so for every ABI; ship only the common phone ABIs
+        // to keep the APK from ballooning (~47MB → ~20MB).
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
 
     signingConfigs {
-
+        // Project-local copy of the original debug keystore so builds from any
         // machine keep the same signature as installed releases.
         create("pigeon") {
             storeFile = rootProject.file("pigeon-debug.keystore")
@@ -77,9 +78,10 @@ dependencies {
     implementation(libs.paging.compose)
     implementation(libs.work.runtime)
     implementation(libs.firebase.messaging)
-
+    // Native WebRTC (org.webrtc.*) — replaces the WebView getUserMedia path,
+    // which fails with NotReadableError on some devices' mic capture.
     implementation(libs.webrtc)
-
+    // Ktor websocket client for call signaling (app module needs its own copy).
     implementation(libs.ktor.client.core)
     implementation(libs.ktor.client.okhttp)
     implementation(libs.ktor.client.websockets)
@@ -87,6 +89,8 @@ dependencies {
     debugImplementation(libs.compose.ui.tooling)
 }
 
+// Push goes live only when the Firebase config is present — the build (and the
+// FCM code paths, which check FirebaseApp.getApps) degrade gracefully without it.
 if (file("google-services.json").exists()) {
     apply(plugin = "com.google.gms.google-services")
 }

@@ -13,10 +13,12 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+/** One row in the composer's @mention autocomplete popup. */
 data class MentionCandidate(
     val id: String,
     val username: String,
@@ -36,7 +38,7 @@ data class ChatUiState(
     val searchOpen: Boolean = false,
     val searchResults: List<MessageDto> = emptyList(),
     val searching: Boolean = false,
-
+    /** Conversation-info screen: offline Room LIKE search over cached messages. */
     val localSearchResults: List<MessageEntity> = emptyList(),
     val localSearching: Boolean = false,
     val pinsOpen: Boolean = false,
@@ -47,15 +49,19 @@ data class ChatUiState(
     val busyMessageIds: Set<String> = emptySet(),
     val error: String? = null,
     val isAdmin: Boolean = false,
-
+    /** Highest seq any other member has read — drives the "seen" marker. */
     val peerReadSeq: Long = 0,
-
+    /** DM peer's last-online epoch millis (null for group channels or unknown) — drives conversation-info presence. */
     val peerLastOnline: Long? = null,
-
+    /** @mention autocomplete: space members (space channels) or the DM peer. */
     val mentionCandidates: List<MentionCandidate> = emptyList(),
     /** @everyone is space-admin-only server side — only offer it when it would succeed. */
     val canMentionEveryone: Boolean = false,
-
+    /**
+     * Roster for this channel (space members, or the DM peer) used by the
+     * "seen by" info action. Loaded eagerly for spaces; [channelMemberCount]
+     * gates showing the action to small nests only. -1 = unknown/not loaded.
+     */
     val channelMembers: List<MentionCandidate> = emptyList(),
     val channelMemberCount: Int = -1,
 )
@@ -73,8 +79,13 @@ class ChatViewModel(
     val messages: StateFlow<List<MessageEntity>> =
         repo.stream(channelId).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    /** Every cached image/video attachment in this conversation, newest first.
+     *  Deduped by id, mirroring [ChatRepository.stream] — otherwise a media message
+     *  can appear twice during the pending->sent window (local optimistic row +
+     *  server-confirmed row before the outbox reconciles them). */
     val media: StateFlow<List<MessageEntity>> =
-        messageDao.mediaStream(channelId).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        messageDao.mediaStream(channelId).map { list -> list.distinctBy { it.id } }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private val _ui = MutableStateFlow(ChatUiState(isAdmin = isAdmin))
     val ui: StateFlow<ChatUiState> = _ui
@@ -92,7 +103,7 @@ class ChatViewModel(
         refreshPins(showLoading = false)
         refreshSuperPin()
         viewModelScope.launch {
-
+            // eager DM-peer presence for the conversation-info header
             runCatching { social?.dms()?.firstOrNull { it.channel_id == channelId }?.peer?.last_online }
                 .getOrNull()?.let { last -> _ui.update { it.copy(peerLastOnline = last) } }
         }
@@ -105,7 +116,7 @@ class ChatViewModel(
             }
         }
         viewModelScope.launch {
-
+            // Other members' pin/super-pin changes arrive over the gateway;
             // apply them so the pins tab and banner don't go stale.
             repo.pinEvents.collect { event ->
                 if (event.channelId != channelId) return@collect
@@ -322,6 +333,7 @@ class ChatViewModel(
         }
     }
 
+    /** Debounced Room LIKE search over the locally cached history (conversation info screen). */
     fun localSearch(query: String) {
         localSearchJob?.cancel()
         val q = query.trim()
@@ -420,6 +432,13 @@ class ChatViewModel(
         }
     }
 
+    /**
+     * Lazily fetch @mention candidates the first time the user types "@".
+     * Space channels: members of the space that owns this channel (spaces list →
+     * spaceId lookup, since only the channel id is routed here). DMs: the peer.
+     * Intentionally NOT the Room message cache — cached authorName is
+     * display_name ?: username, and the backend only accepts real usernames.
+     */
     fun loadMentionCandidates() {
         val social = social ?: return
         if (mentionsLoaded || mentionJob?.isActive == true) return
@@ -471,6 +490,12 @@ class ChatViewModel(
 
     fun markRead(seq: Long) = viewModelScope.launch { runCatching { repo.markRead(channelId, seq) } }
 
+    /**
+     * Load the channel roster for the "seen by" action. Spaces → the owning
+     * space's members; DMs → the single peer. Runs once eagerly from init;
+     * on failure leaves [ChatUiState.channelMemberCount] at -1 so the info
+     * action falls back to "show for space channels generally".
+     */
     private fun loadChannelRoster() {
         val social = social ?: return
         viewModelScope.launch {
@@ -503,6 +528,12 @@ class ChatViewModel(
         }
     }
 
+    /**
+     * Members who have read [message] — derived from the read map
+     * (channelId → userId → last-read seq): a member has seen the message when
+     * their last-read seq >= the message's seq. Self is excluded. Ordered as the
+     * roster is. Empty when no roster/read data is available yet.
+     */
     fun seenBy(message: MessageEntity): List<MentionCandidate> {
         if (message.seq <= 0L) return emptyList()
         val channelReads = repo.reads.value[channelId] ?: emptyMap()

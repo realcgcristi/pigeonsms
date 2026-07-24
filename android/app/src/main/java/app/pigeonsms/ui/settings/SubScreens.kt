@@ -55,10 +55,11 @@ private fun rel(ms: Long) = DateUtils.getRelativeTimeSpanString(ms, System.curre
 @Composable
 private fun SubHeader(title: String, onBack: () -> Unit) = SettingsSubHeader(title, onBack)
 
+/** Nova gives sub-screen list items a bolder card: rounder corners + hairline outline. */
 @Composable
 private fun Modifier.rowCard(): Modifier {
     return if (LocalExperimentalRedesign.current) {
-
+        // list-safe Nova depth: lifted-top gradient + lit rim, no per-row shadow
         this.fillMaxWidth().novaSurface(NovaCorners.card, MaterialTheme.colorScheme.surfaceContainer, MaterialTheme.colorScheme.primary)
     } else {
         this.fillMaxWidth().clip(Corners.group).background(MaterialTheme.colorScheme.surfaceContainer)
@@ -99,11 +100,11 @@ fun HistoryScreen(onBack: () -> Unit) {
     Column(Modifier.fillMaxSize().padding(horizontal = Spacing.l)) {
         SubHeader("login history", onBack)
         LazyColumn(verticalArrangement = Arrangement.spacedBy(Spacing.s)) {
-
+            // HistoryEntry has no id — created_at plus position is stable for a loaded list
             itemsIndexed(ui.history, key = { i, h -> "${h.created_at}-$i" }) { _, h ->
                 Box(Modifier.rowCard()) {
                     Row(Modifier.padding(Spacing.l), verticalAlignment = Alignment.CenterVertically) {
-
+                        // Nova speaks presence in cyan; classic keeps Mint
                         val okColor = if (LocalExperimentalRedesign.current) NovaColors.Cyan else PigeonColors.Mint
                         Box(Modifier.size(10.dp).background(if (h.success == 1) okColor else PigeonColors.Danger, CircleShape))
                         Column(Modifier.padding(start = Spacing.m)) {
@@ -151,7 +152,7 @@ fun SecurityScreen(onBack: () -> Unit) {
 
 @Composable
 fun BlockedScreen(onBack: () -> Unit) {
-
+    // tiny local state instead of a dedicated VM: load list, allow unblock
     val social = (androidx.compose.ui.platform.LocalContext.current.applicationContext as app.pigeonsms.PigeonApp).container.socialRepository
     var blocked by remember { mutableStateOf<List<app.pigeonsms.network.BlockedUserDto>?>(null) }
     val scope = androidx.compose.runtime.rememberCoroutineScope()

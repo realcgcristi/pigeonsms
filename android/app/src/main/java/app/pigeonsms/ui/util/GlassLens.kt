@@ -23,6 +23,12 @@ import androidx.compose.ui.graphics.asComposeRenderEffect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 
+/**
+ * One process-wide accelerometer listener, ref-counted. Every glass surface reads
+ * the same tilt state instead of registering its own sensor callback (which drains
+ * battery and multiplies work). The listener is live only while ≥1 glass surface
+ * is on screen.
+ */
 private object TiltHub {
     val state = mutableStateOf(Offset.Zero)
     private var manager: SensorManager? = null
@@ -62,6 +68,11 @@ private object TiltHub {
     }
 }
 
+/**
+ * Device tilt as a normalized [-1,1] offset, smoothed. Feeds the moving specular
+ * highlight so glass reacts to how you hold the phone. Shares a single sensor
+ * listener across all callers. Returns (0,0) when there's no accelerometer.
+ */
 @Composable
 fun rememberTilt(): State<Offset> {
     val context = LocalContext.current
@@ -72,6 +83,8 @@ fun rememberTilt(): State<Offset> {
     return TiltHub.state
 }
 
+// AGSL: refract + bevel + a tilt-driven specular hotspot over the layer content.
+// The edges magnify/brighten (glass lens); the hotspot sweeps with device tilt.
 private const val LENS_AGSL = """
 uniform float2 size;
 uniform float2 tilt;
@@ -99,6 +112,11 @@ half4 main(float2 coord) {
 }
 """
 
+/**
+ * Liquid Glass lens: real refraction + rim light + tilt-tracked specular, run as
+ * a GPU RenderEffect on the layer content. 120fps — driven inside graphicsLayer,
+ * so tilt changes redraw without recomposing. Just clips below API 33.
+ */
 fun Modifier.liquidLens(shape: Shape, tilt: State<Offset>): Modifier =
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
         this.clip(shape)

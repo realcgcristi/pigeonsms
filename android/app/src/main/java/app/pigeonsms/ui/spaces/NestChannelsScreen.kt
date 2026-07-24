@@ -101,6 +101,20 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/**
+ * Dedicated screen for a single bird nest — its channel list plus the owner
+ * actions (invite, change icon, add channel, demolish/leave, per-channel
+ * rename/delete). Reached by tapping a nest row in [SpacesScreen] when there is
+ * more than one nest. Reuses the same [SpacesViewModel] callbacks so all nest
+ * management works identically to the old inline card. Styled for all three
+ * skins (classic / nova / galaxy) via [LocalUiSkin].
+ */
+/**
+ * @param embedded when true this is the single-nest inline view rendered directly
+ *   inside the bird-nests tab (no back button; the header shows a create/join "+"
+ *   via [onCreateOrJoin]). When false it's a pushed navigation destination with a
+ *   back button.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NestChannelsScreen(
@@ -158,7 +172,8 @@ fun NestChannelsScreen(
         vm.consumeCreatedChannel()
         onOpenChannel(channel.id, channel.name, channel.kind)
     }
-
+    // If the nest vanished (demolished or left) while pushed as its own screen,
+    // pop back to the nest list. Embedded (single-nest) view stays put — the tab
     // itself re-renders its empty/list state once home.spaces updates.
     LaunchedEffect(space == null, home.spacesLoading, embedded) {
         if (!embedded && space == null && !home.spacesLoading) onBack()
@@ -188,7 +203,7 @@ fun NestChannelsScreen(
     } else null
 
     Column(Modifier.fillMaxSize()) {
-
+        // Header: back (or create/join "+" when embedded) + nest identity + actions.
         NestHeader(
             space = space,
             iconUrl = space?.let { app.mediaUrl(it.icon_key) },
@@ -485,6 +500,7 @@ fun NestChannelsScreen(
     }
 }
 
+/** Owner-only channel row actions surfaced via each channel's overflow menu. */
 data class NestChannelMenuActions(
     val onRename: () -> Unit,
     val onDelete: () -> Unit,
@@ -512,6 +528,7 @@ private fun NestChannelOverflowMenu(actions: NestChannelMenuActions, tint: Color
     }
 }
 
+/** Header band: back button, nest icon + name + meta, and the nest-level actions. */
 @Composable
 private fun NestHeader(
     space: SpaceDto?,
@@ -533,7 +550,7 @@ private fun NestHeader(
             .padding(start = Spacing.s, end = Spacing.l, top = Spacing.s, bottom = Spacing.s),
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-
+            // Pushed screen gets a back arrow; the embedded single-nest view has
             // nowhere to go back to, so it leads with the nest icon directly.
             if (!embedded) {
                 IconButton(onClick = onBack) {
@@ -542,7 +559,7 @@ private fun NestHeader(
             } else {
                 Spacer(Modifier.width(Spacing.xs))
             }
-
+            // Nest icon.
             Box(
                 Modifier
                     .size(44.dp)
@@ -607,7 +624,7 @@ private fun NestHeader(
                 }
             }
         }
-
+        // Nest actions row.
         Row(
             Modifier.fillMaxWidth().padding(top = Spacing.xs, start = Spacing.xs),
             horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
@@ -663,6 +680,11 @@ private fun NestActionChip(
     }
 }
 
+/**
+ * A single channel row. Classic uses the calm tinted-wash style; the expressive
+ * skins (nova/galaxy) get the filled accent / glow treatment. Same tap + owner
+ * overflow behavior as the old inline lists.
+ */
 @Composable
 private fun NestChannelRow(
     channel: ChannelDto,

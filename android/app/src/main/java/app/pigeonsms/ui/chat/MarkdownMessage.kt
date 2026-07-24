@@ -38,6 +38,7 @@ private sealed interface MarkdownBlock {
     data class Table(val rows: List<List<String>>) : MarkdownBlock
 }
 
+/** Lightweight message Markdown renderer, including practical pipe tables. */
 @Composable
 fun MarkdownMessage(
     value: String,
@@ -158,7 +159,7 @@ private fun parseMarkdownBlocks(value: String): List<MarkdownBlock> {
             }
             index + 1 < lines.size && looksLikeTableHeader(line, lines[index + 1]) -> {
                 val rows = mutableListOf(splitTableRow(line))
-                index += 2
+                index += 2 // skip Markdown's delimiter row
                 while (index < lines.size && lines[index].contains('|') && lines[index].isNotBlank()) {
                     rows += splitTableRow(lines[index++])
                 }
@@ -223,9 +224,9 @@ private fun inlineMarkdown(value: String, color: Color, linkColor: Color): Annot
                 pop()
             }
             raw.startsWith('@') -> {
-
+                // Mentions must stay legible on every bubble surface: on classic
                 // self bubbles the background is itself `primary`, so a primary
-
+                // foreground washes out. Use the bubble's own content colour for
                 // the glyph (guaranteed contrast against its bubble) over a
                 // primary-tinted chip so it still reads as an accented mention.
                 withStyle(

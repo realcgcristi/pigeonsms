@@ -267,15 +267,15 @@ fun ChatScreen(
     }
     var mediaViewerIndex by remember(channelId) { mutableStateOf<Int?>(null) }
     var infoOpen by remember(channelId) { mutableStateOf(false) }
-
+    // Feature 7: "seen by" — the message whose reader list is being shown.
     var seenByMessage by remember(channelId) { mutableStateOf<MessageEntity?>(null) }
-
+    // Feature 8: multi-select. Non-empty set = selection mode is active.
     val selectedIds = remember(channelId) { mutableStateListOf<String>() }
     val selectionMode = selectedIds.isNotEmpty()
     val clipboardManager = LocalClipboardManager.current
     val multiSelectContext = LocalContext.current
     // "seen by" is offered for space channels; restricted to small nests
-
+    // (<= 20 members). Count unknown (-1) → still offer it for spaces generally.
     val seenByEligible = isSpace && (ui.channelMemberCount in 1..20 || ui.channelMemberCount < 0)
     val listState = rememberLazyListState()
     val replyNavigationScope = rememberCoroutineScope()
@@ -296,7 +296,7 @@ fun ChatScreen(
         .collectAsState(initial = app.pigeonsms.data.ThemePrefs())
     val chatHaze = remember { HazeState() }
     // messages scroll under the frosted top bar, so pad the list past it
-
+    // (Nova's header is taller, so its inset is a touch larger)
     val novaChrome = LocalExperimentalRedesign.current
     val barInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + (if (novaChrome) 72.dp else 64.dp)
     var unseenWhileUp by remember(channelId) { mutableStateOf(0) }
@@ -321,7 +321,7 @@ fun ChatScreen(
         when {
             !positioned -> listState.scrollToItem(lastIndex)
             nearBottom || vm.isOwn(messages.last()) -> listState.animateScrollToItem(lastIndex)
-
+            // scrolled up + someone else's message → count it for the FAB badge
             else -> if (messages.size > prevMsgCount && !vm.isOwn(messages.last())) {
                 unseenWhileUp += messages.size - prevMsgCount
             }
@@ -404,9 +404,9 @@ fun ChatScreen(
         Modifier.fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
             .then(
-
+                // Nova's aurora mesh: iris + cyan blobs breathing over the Void so
                 // the message canvas has real layered depth instead of a flat fill.
-
+                // Only when no custom/preset wallpaper is chosen (a picture wins).
                 if (novaAurora) Modifier.novaAuroraBackground(
                     accent = MaterialTheme.colorScheme.primary,
                     animate = true,
@@ -415,7 +415,7 @@ fun ChatScreen(
     ) {
         ChatWallpaper(appearance.wallpaper)
         Column(
-
+            // Single combined inset: nav-bar height when the keyboard is closed,
             // keyboard height when open — never both stacked (that dead space was
             // pushing messages under the composer).
             Modifier.fillMaxSize()
@@ -504,10 +504,10 @@ fun ChatScreen(
                             onVote = { optionId -> vm.votePoll(message, optionId) },
                             seen = message.id == lastOwnId && ui.peerReadSeq >= message.seq,
                             groupedBelow = groupedBelow,
-
+                            // Feature 7: seen-by action (small space/nest channels only)
                             showSeenBy = seenByEligible && !message.deleted && message.seq > 0,
                             onSeenBy = { seenByMessage = message },
-
+                            // Feature 8: multi-select
                             selectionMode = selectionMode,
                             selected = message.id in selectedIds,
                             onEnterSelection = {
@@ -524,7 +524,7 @@ fun ChatScreen(
             }
             }
             Column(Modifier.align(Alignment.TopCenter)) {
-
+                // Feature 8: when messages are selected, the top bar becomes a
                 // contextual action bar (count + mass copy/delete + exit).
                 if (selectionMode) {
                     SelectionActionBar(
@@ -532,7 +532,7 @@ fun ChatScreen(
                         hazeState = chatHaze,
                         onClose = { selectedIds.clear() },
                         onCopy = {
-
+                            // Copy in chronological order, formatted "<user>: <message>".
                             val ordered = messages
                                 .filter { it.id in selectedIds && !it.deleted && it.content.isNotBlank() }
                                 .joinToString("\n") { "${it.authorName}: ${it.content}" }
@@ -543,7 +543,7 @@ fun ChatScreen(
                             selectedIds.clear()
                         },
                         onDelete = {
-
+                            // Mass-delete only the ones the delete action would accept
                             // (own messages, or any when admin; not already deleted).
                             messages.filter {
                                 it.id in selectedIds && !it.deleted && it.state == "SENT" &&
@@ -572,7 +572,7 @@ fun ChatScreen(
                     ErrorBanner(message = ui.error.orEmpty(), onRetry = vm::refresh, onDismiss = vm::clearError)
                 }
             }
-
+            // NOVA: the jump-to-latest control springs in with a scale overshoot
             // instead of a bare fade, so it draws the eye when it arrives.
             val fabScaleSpec = NovaMotion.emphasized<Float>()
             androidx.compose.animation.AnimatedVisibility(
@@ -593,7 +593,7 @@ fun ChatScreen(
                             modifier = Modifier.align(Alignment.TopEnd),
                             containerColor = MaterialTheme.colorScheme.error,
                         ) {
-
+                            // the count users watch tick — sliding digits on Nova
                             if (novaChrome) NovaAnimatedCount(
                                 unseenWhileUp,
                                 style = MaterialTheme.typography.labelSmall,
@@ -895,6 +895,13 @@ private fun ChatTopBar(
     }
 }
 
+/**
+ * NOVA header — a taller, more expressive chat header. The avatar is enlarged and
+ * carries a soft iris ring; the title and a "presence" subline are stacked; the
+ * call + overflow actions live inside a rounded pill action-cluster so they read
+ * as one control rather than loose icon buttons. Every callback is the same as the
+ * classic bar (tap avatar/title → info, call dropdown, overflow menu).
+ */
 @Composable
 private fun NovaChatTopBar(
     title: String,
@@ -1068,7 +1075,7 @@ private fun ErrorBanner(message: String, onRetry: () -> Unit, onDismiss: () -> U
         }
     }
     if (LocalExperimentalRedesign.current) {
-
+        // NOVA: a floating error card that matches the lit-rim material system —
         // a soft drop shadow + accented rim rather than a full-bleed error bar.
         Box(Modifier.fillMaxWidth().padding(horizontal = Spacing.m, vertical = Spacing.s)) {
             Row(
@@ -1105,6 +1112,11 @@ private fun ErrorBanner(message: String, onRetry: () -> Unit, onDismiss: () -> U
     }
 }
 
+/**
+ * Pinned-messages banner. Cycles through [pins] with up/down chevrons (wrapping);
+ * tapping the body jumps to the shown message; long-pressing opens a small menu to
+ * delete (unpin) the one currently shown. Hidden by the caller when [pins] is empty.
+ */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SuperPinBanner(
@@ -1169,7 +1181,7 @@ private fun SuperPinBanner(
 @Composable
 private fun EmptyChatState(modifier: Modifier = Modifier) {
     if (LocalExperimentalRedesign.current) {
-
+        // NOVA: an accent-washed glyph disc with a slow breathing halo so an empty
         // thread reads as an intentional, inviting canvas — not a broken screen.
         val pulse = rememberNovaPulse(periodMillis = 3400)
         val accent = MaterialTheme.colorScheme.primary
@@ -1224,6 +1236,11 @@ private fun EmptyChatState(modifier: Modifier = Modifier) {
     }
 }
 
+/**
+ * NOVA first-load skeleton — shimmer bubbles laid out like the real thread
+ * (alternating sides, varied widths) so opening a chat resolves gracefully into
+ * content instead of a lone spinner. Nova-only; classic keeps the spinner.
+ */
 @Composable
 private fun NovaChatSkeleton(modifier: Modifier = Modifier) {
     // width fractions + side, hand-tuned to feel like an organic conversation
@@ -1257,7 +1274,7 @@ private fun NovaChatSkeleton(modifier: Modifier = Modifier) {
 @Composable
 private fun DaySeparator(label: String) {
     if (LocalExperimentalRedesign.current) {
-
+        // Nova: a single centered floating pill, no dividers
         Box(Modifier.fillMaxWidth().padding(vertical = Spacing.m), contentAlignment = Alignment.Center) {
             Text(
                 label,
@@ -1349,7 +1366,8 @@ private fun MessageBubble(
         !message.deleted && message.attachmentType?.startsWith("image/") == true
     }
     val wasEdited = !message.deleted && (message.editedAt != null || revisions.isNotEmpty())
-
+    // Capture the nullable relation once so callbacks don't rely on a smart cast
+    // across a composable lambda (MessageEntity lives in a separate module).
     val replyId = message.replyTo
     val highlightColor by animateColorAsState(
         if (highlighted) MaterialTheme.colorScheme.primary.copy(alpha = 0.18f) else Color.Transparent,
@@ -1360,9 +1378,9 @@ private fun MessageBubble(
     // corners tighten between messages of the same run; the tail only shows on the last one
     val tight = if (nova) 9.dp else 7.dp
     val bubbleShape = if (nova) {
-
+        // NOVA bubbles are boldly asymmetric: a large soft body with one sharp
         // "beak" corner on the sending side (bottom-end for self, bottom-start for
-
+        // others) that only appears on the last message of a run. Grouped messages
         // in the middle of a run tighten toward the sender so the run reads as a
         // single column of connected tiles.
         val big = 24.dp
@@ -1398,6 +1416,7 @@ private fun MessageBubble(
         )
     }
 
+    // Feature 8: selected rows get an accent wash; in selection mode the whole
     // row toggles selection and the per-message gestures/menu are suppressed.
     val selectionTint by animateColorAsState(
         if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.16f) else Color.Transparent,
@@ -1464,7 +1483,8 @@ private fun MessageBubble(
             horizontalArrangement = if (self) Arrangement.End else Arrangement.Start,
             verticalAlignment = Alignment.Bottom,
         ) {
-
+            // Feature 8: leading check when selecting (own rows keep it on the
+            // sending side by virtue of the End arrangement pushing content right).
             if (selectionMode) {
                 Box(
                     Modifier.padding(bottom = Spacing.xs).size(24.dp)
@@ -1519,7 +1539,7 @@ private fun MessageBubble(
             ) {
                 if (!grouped && !self) {
                     if (nova) {
-
+                        // NOVA: author name sits in a small tinted capsule with the
                         // time trailing it — a distinct "chip header" over the tile.
                         Row(
                             Modifier.padding(start = Spacing.xs, bottom = Spacing.xs),
@@ -1570,9 +1590,10 @@ private fun MessageBubble(
                 }
 
                 if (imageKey != null) {
-
+                    // The whole media tile is clipped to the bubble shape. A reply
                     // banner above the media is capped to the media's own max width
-
+                    // (320.dp, matching AttachmentView) and padded off the edges so
+                    // it sits INSIDE the clip, directly above the media, and can never
                     // bleed full-width over the media or neighbouring bubbles.
                     Column(
                         modifier = Modifier.clip(bubbleShape)
@@ -1705,7 +1726,7 @@ private fun MessageBubble(
                 )
 
                 if (!message.deleted) {
-
+                    // NOVA tucks the reaction cluster up onto the bubble's lower edge
                     // (overlapping) so it reads as attached to the tile, rather than a
                     // separate row floating below it.
                     Row(
@@ -1872,7 +1893,7 @@ private fun MessageMeta(message: MessageEntity, showSentTime: Boolean, onRetry: 
                 )
                 if (seen) {
                     if (nova) {
-
+                        // NOVA: a small filled "double-tick" dot + label chip
                         Box(Modifier.size(6.dp).clip(CircleShape).background(MaterialTheme.colorScheme.secondary))
                         Text("seen", color = MaterialTheme.colorScheme.secondary, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, maxLines = 1)
                     } else {
@@ -1894,7 +1915,8 @@ private fun ReactionChip(reaction: ReactionDto, enabled: Boolean, onClick: () ->
         tween(180),
         label = "reactionContainer",
     )
-
+    // NOVA: a freshly-added reaction springs into existence (bouncy overshoot)
+    // keyed on the emoji so re-composition doesn't replay it. Classic pops in flat.
     var appeared by remember(reaction.emoji) { mutableStateOf(!nova) }
     LaunchedEffect(reaction.emoji) { appeared = true }
     val appearSpec = NovaMotion.pop<Float>()
@@ -2019,6 +2041,13 @@ private fun ReactionPickerDialog(
 private fun bubbleContentColor(self: Boolean): Color =
     if (self) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
 
+/**
+ * Bubble fill. Classic is untouched (flat primary→primaryContainer for self, a
+ * plain tonal surface for others). NOVA gives outgoing bubbles a *diagonal*
+ * iris→cyan-shifted-deep gradient so they read dimensional instead of two-close-
+ * violets, tops both bubbles with a faint rim-light, and hands the other side a
+ * hairline rim so both bubbles belong to the same lit material system.
+ */
 @Composable
 private fun selfBubbleFill(self: Boolean, nova: Boolean, shape: androidx.compose.ui.graphics.Shape): Modifier {
     if (!nova) {
@@ -2054,6 +2083,8 @@ private fun selfBubbleFill(self: Boolean, nova: Boolean, shape: androidx.compose
     }
 }
 
+/** iMessage-style context overlay: dimmed backdrop, the bubble lifted center-stage,
+ *  reactions floating above it and actions below. */
 @Composable
 private fun MessageMenu(
     message: MessageEntity,
@@ -2202,6 +2233,12 @@ private fun MessageMenu(
     }
 }
 
+/**
+ * Feature 8 contextual action bar. Replaces the chat top bar while messages are
+ * selected: shows the count and offers mass copy / mass delete, plus a close
+ * affordance that exits selection mode. Uses the same frosted-glass treatment as
+ * the normal top bar so it reads as a mode switch, not a separate surface.
+ */
 @Composable
 private fun SelectionActionBar(
     count: Int,
@@ -2246,6 +2283,11 @@ private fun SelectionActionBar(
     }
 }
 
+/**
+ * Feature 7 "seen by" dialog. Lists the members whose last-read seq has reached
+ * this message (derived by [ChatViewModel.seenBy] from the read map + roster).
+ * Shows each reader's avatar + name; tapping a reader opens their profile.
+ */
 @Composable
 private fun SeenByDialog(
     readers: List<MentionCandidate>,
@@ -2333,6 +2375,16 @@ private fun MenuRow(
     }
 }
 
+/**
+ * Owns the single voice-message [android.media.MediaPlayer] for the whole screen.
+ *
+ * The player is hoisted here (not into the voice composable) so playback survives
+ * the composable being scrolled off-screen / disposed: we do NOT release on dispose.
+ * Exactly one voice plays at a time — starting a different url releases the previous
+ * player. Pausing retains the playback position (MediaPlayer keeps its position while
+ * paused), and completion resets position to 0 but keeps the player prepared so it can
+ * replay. Composables are thin views that poll this singleton to reflect live state.
+ */
 private object ActiveVoice {
     private var player: android.media.MediaPlayer? = null
     private var activeUrl: String? = null
@@ -2349,6 +2401,7 @@ private object ActiveVoice {
     fun durationMs(url: String): Int =
         if (isPrepared(url)) runCatching { (player?.duration ?: 0).coerceAtLeast(0) }.getOrDefault(0) else 0
 
+    /** Release whatever is currently loaded (stops any other playing voice). */
     private fun releaseCurrent() {
         val p = player
         player = null
@@ -2361,6 +2414,7 @@ private object ActiveVoice {
         runCatching { p?.release() }
     }
 
+    /** Toggle play/pause for [url]. Pausing retains position; a new url preempts the old. */
     fun toggle(url: String, desiredSpeed: Float) {
         val p = player
         if (activeUrl == url && p != null && prepared) {
@@ -2375,7 +2429,7 @@ private object ActiveVoice {
             }
             return
         }
-
+        // Different (or first) voice: tear down the previous one, then prepare this url.
         releaseCurrent()
         speed = desiredSpeed
         val fresh = android.media.MediaPlayer()
@@ -2425,9 +2479,10 @@ private fun AttachmentView(name: String?, type: String?, url: String, self: Bool
     } else if (type?.startsWith("video/") == true) {
         EmbeddedVideo(url, name, onFullscreen = onOpenMedia)
     } else if (type?.startsWith("audio/") == true) {
-
+        // The MediaPlayer is owned by [ActiveVoice], not by this composable, so
+        // scrolling this bubble off-screen (disposal) does NOT stop playback. This
         // composable is a thin view: it polls the singleton for live state and drives
-
+        // it via toggle/seek/setSpeed. `speed` is the only piece of purely-local UI
         // intent; it is mirrored back from the singleton when this url is active.
         var playing by remember(url) { mutableStateOf(ActiveVoice.isPlaying(url)) }
         var prepared by remember(url) { mutableStateOf(ActiveVoice.isPrepared(url)) }
@@ -2436,7 +2491,8 @@ private fun AttachmentView(name: String?, type: String?, url: String, self: Bool
         var speed by remember(url) { mutableStateOf(ActiveVoice.speedOf(url)) }
         val amps = remember(url) { pseudoWaveform(url) }
         val content = bubbleContentColor(self)
-
+        // Poll the hoisted player so this view reflects its current state whether we
+        // started it, another composable did, or it was pre-empted / completed. Runs
         // while composed; no player is released on dispose.
         LaunchedEffect(url) {
             while (isActive) {
@@ -2555,9 +2611,9 @@ private fun Composer(
     var text by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue("")) }
     var readingAttachment by remember { mutableStateOf(false) }
     var showAttachmentOptions by remember { mutableStateOf(false) }
-
+    // Recent device gallery items surfaced inside the attachment sheet.
     val recentMedia = remember { mutableStateListOf<RecentMediaItem>() }
-
+    // An image currently sitting on the clipboard, if any — drives a "paste image" affordance.
     var clipboardImageUri by remember { mutableStateOf<Uri?>(null) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -2565,7 +2621,7 @@ private fun Composer(
     val keyboardController = LocalSoftwareKeyboardController.current
     var pendingSentText by remember { mutableStateOf<String?>(null) }
     var keepKeyboardAfterSend by remember { mutableStateOf(false) }
-
+    // Image awaiting the pre-send editor; dismissing the editor cancels the send.
     var pendingImageEdit by remember { mutableStateOf<SelectedAttachment?>(null) }
     // caption == null → reuse the live composer text (gallery/document/video path);
     // a non-null caption comes from the pre-send image editor and overrides it.
@@ -2583,7 +2639,7 @@ private fun Composer(
                 readingAttachment = true
                 runCatching { readAttachment(context, uri) }
                     .onSuccess { selected ->
-
+                        // Still bitmaps go through the editor; GIF/SVG (and video/audio/docs)
                         // are sent raw so animation/vector data isn't destroyed.
                         if (selected.type.startsWith("image/") &&
                             !selected.type.equals("image/gif", ignoreCase = true) &&
@@ -2604,7 +2660,7 @@ private fun Composer(
             }
         }
     }
-
+    // Inspect the clipboard for an image (a content:// item, or an image/* mime type)
     // and surface a paste affordance when one is present.
     fun refreshClipboardImage() {
         clipboardImageUri = runCatching {
@@ -2619,7 +2675,7 @@ private fun Composer(
             if (resolvedImage) uri else null
         }.getOrNull()
     }
-
+    // Read the pasted clipboard image and route it through the same pre-send editor.
     fun pasteClipboardImage() {
         val uri = clipboardImageUri ?: return
         clipboardImageUri = null
@@ -2628,7 +2684,7 @@ private fun Composer(
     val attachmentLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> consumeAttachment(uri) }
     val photoLauncher = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri -> consumeAttachment(uri) }
     val audioLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri -> consumeAttachment(uri) }
-
+    // Quick camera capture: TakePicture writes into a cacheDir file exposed via FileProvider,
     // then the still routes through the same pre-send image editor as gallery picks.
     var pendingCameraUri by remember { mutableStateOf<Uri?>(null) }
     val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
@@ -2779,7 +2835,7 @@ private fun Composer(
     }
 
     // ---- @mention autocomplete -------------------------------------------
-
+    // Token under the cursor ("@" + partial word), matching the backend parser:
     // '@' must be at start or after a non-[a-z0-9_.] char.
     val mentionToken = remember(text) { activeMentionToken(text) }
     // fetch candidates lazily, the first time an "@" context appears
@@ -2813,9 +2869,10 @@ private fun Composer(
     }
 
     val nova = LocalExperimentalRedesign.current
-
+    // NOVA composer floats as a raised rounded card over the canvas: a real
+    // accent-tinted drop shadow + lit rim (novaElevation) instead of a flat 1dp
     // ring, and the rim lights up when the field is focused so it "wakes up".
-
+    // Classic stays a full-bleed tonal Surface, byte-for-byte unchanged.
     var composerFocused by remember { mutableStateOf(false) }
     // a short-lived "sent" tick drives a celebratory pop on the send button
     var sendTick by remember { mutableStateOf(0) }
@@ -2928,7 +2985,7 @@ private fun Composer(
                         )
                     }
                 }
-
+                // Paste-image affordance: appears only while an image sits on the clipboard.
                 if (clipboardImageUri != null && ui.editing == null) {
                     IconButton(
                         onClick = { pasteClipboardImage() },
@@ -3002,7 +3059,7 @@ private fun Composer(
                         val sendIcon = if (ui.editing != null) Icons.Outlined.Done else Icons.Rounded.Send
                         val sendLabel = if (ui.editing != null) "save edit" else "send message"
                         if (nova) {
-
+                            // NOVA send: an iris→cyan gradient disc that "pops" (spring
                             // overshoot then settle) each time a message leaves, so
                             // sending feels physical rather than a silent state change.
                             val reduced = LocalReducedMotion.current
@@ -3069,7 +3126,7 @@ private fun Composer(
         )
     }
     if (showAttachmentOptions) {
-
+        // Load the device's recent gallery items the first time the sheet opens.
         LaunchedEffect(Unit) {
             if (recentMedia.isEmpty()) {
                 val items = queryRecentMedia(context)
@@ -3085,7 +3142,7 @@ private fun Composer(
             onPickRecent = { uri ->
                 showAttachmentOptions = false
                 // images route through the pre-send editor; videos send directly —
-
+                // consumeAttachment already applies exactly that split.
                 consumeAttachment(uri)
             },
             onAction = { action ->
@@ -3104,6 +3161,13 @@ private fun Composer(
     }
 }
 
+/**
+ * "@" + partial-word under a collapsed cursor, or null when there's no active
+ * mention context. Mirrors the backend token rule
+ * (`(^|[^a-z0-9_.])@([a-z0-9_.]{3,20}|everyone)\b`): the "@" must sit at the
+ * start of the text or after a non-username character.
+ * Returns (index of '@') to (partial word typed after it, may be empty).
+ */
 private fun activeMentionToken(value: TextFieldValue): Pair<Int, String>? {
     if (!value.selection.collapsed) return null
     val cursor = value.selection.end
@@ -3118,6 +3182,7 @@ private fun activeMentionToken(value: TextFieldValue): Pair<Int, String>? {
 
 private fun isMentionWordChar(c: Char) = c.isLetterOrDigit() || c == '_' || c == '.'
 
+/** Glass panel of mention candidates above the composer input — max ~5 rows visible. */
 @Composable
 private fun MentionSuggestions(
     suggestions: List<MentionCandidate>,
@@ -3401,6 +3466,10 @@ private data class SelectedAttachment(
 
 private class AttachmentTooLargeException : IllegalArgumentException()
 
+/**
+ * Newest-first device gallery items (images + videos) for the attachment sheet strip.
+ * Queried off the main thread; failures (e.g. missing media permission) yield an empty list.
+ */
 private suspend fun queryRecentMedia(context: Context, limit: Int = 30): List<RecentMediaItem> =
     withContext(Dispatchers.IO) {
         runCatching {
@@ -3469,6 +3538,7 @@ private suspend fun readAttachment(context: Context, uri: Uri): SelectedAttachme
     )
 }
 
+/** Draws the per-chat wallpaper behind the message layer (gradient preset or picked image). */
 @Composable
 private fun ChatWallpaper(key: String?) {
     when {
@@ -3491,6 +3561,7 @@ private fun ChatWallpaper(key: String?) {
     }
 }
 
+/** Re-themes the chat with a per-chat accent override; bubbles follow colorScheme.primary. */
 @Composable
 private fun ChatAccent(key: String?, content: @Composable () -> Unit) {
     if (key == null) {
@@ -3625,6 +3696,7 @@ private fun ChatAppearanceSheet(
     }
 }
 
+/** Fullscreen image viewer (tap anywhere to close). */
 @Composable
 private fun ImageLightbox(url: String, name: String?, onDismiss: () -> Unit) {
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
@@ -3642,6 +3714,7 @@ private fun ImageLightbox(url: String, name: String?, onDismiss: () -> Unit) {
     }
 }
 
+/** WhatsApp-group-style stable per-person name color, hashed from the user id. */
 private val authorPalette = listOf(
     Color(0xFFFF9D76), Color(0xFFB8A7F5), Color(0xFF7FD8A4), Color(0xFF76BEFF),
     Color(0xFFFF8FB0), Color(0xFFFFC46B), Color(0xFF6FE0D2), Color(0xFFE79BFF),
@@ -3649,6 +3722,7 @@ private val authorPalette = listOf(
 private fun authorColor(id: String): Color =
     authorPalette[(id.hashCode() and Int.MAX_VALUE) % authorPalette.size]
 
+/** True for short, symbol-only messages so they render oversized (jumbomoji). */
 private fun isEmojiOnly(text: String): Boolean {
     val trimmed = text.trim()
     if (trimmed.isEmpty() || trimmed.length > 12) return false
@@ -3665,6 +3739,7 @@ private val urlRegex = Regex("""https?://[^\s]+""")
 private fun firstUrlIn(text: String): String? =
     urlRegex.find(text)?.value?.trimEnd('.', ',', ')', '!', '?')
 
+/** Link card under a message: best-effort OG <title>, tap to open in the browser. */
 @Composable
 private fun LinkPreviewCard(url: String, self: Boolean) {
     val context = LocalContext.current

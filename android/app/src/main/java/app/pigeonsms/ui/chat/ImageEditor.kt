@@ -95,6 +95,7 @@ data class EditedImage(
 
 private enum class EditorTool { Move, Draw, Blur }
 
+/** Pixelation downscale factor and stroke width (fraction of the shorter image edge) for the blur tool. */
 private const val BLUR_PIXELATION = 16
 private const val BLUR_STROKE_FRACTION = 0.12f
 
@@ -108,6 +109,10 @@ private enum class CropPreset(val label: String, val ratio: Float?) {
 private data class EditStroke(val points: List<Offset>, val blur: Boolean = false)
 private data class EditOverlay(val value: String, val x: Float, val y: Float, val emoji: Boolean)
 
+/**
+ * WhatsApp-style pre-send editor. Drawing and overlays are stored in normalized
+ * image coordinates, so output remains sharp regardless of preview size.
+ */
 @Composable
 fun ImageEditorDialog(
     originalBytes: ByteArray,
@@ -440,6 +445,11 @@ private fun decodeBitmap(bytes: ByteArray, maxDimension: Int): Bitmap? {
     return decoded.copy(Bitmap.Config.ARGB_8888, false)
 }
 
+/**
+ * BitmapFactory (the API<28 decode path) ignores EXIF orientation, so camera JPEGs
+ * came out sideways on Android 8; ImageDecoder on 28+ applies it automatically.
+ * Uses the framework ExifInterface — the androidx artifact isn't a dependency.
+ */
 private fun applyExifOrientation(bytes: ByteArray, bitmap: Bitmap): Bitmap {
     val orientation = runCatching {
         @Suppress("DEPRECATION")
@@ -523,6 +533,7 @@ private fun applyMarkup(source: Bitmap, strokes: List<EditStroke>, overlays: Lis
     return output
 }
 
+/** Heavy mosaic pixelation: average-downscale ~16x, then nearest-neighbor upscale back. Cheap on all API levels. */
 private fun pixelate(source: Bitmap): Bitmap {
     val down = Bitmap.createScaledBitmap(
         source,
@@ -533,6 +544,7 @@ private fun pixelate(source: Bitmap): Bitmap {
     return Bitmap.createScaledBitmap(down, source.width, source.height, false)
 }
 
+/** Stroke paint whose shader paints the pixelated bitmap stretched to the target canvas, so strokes reveal a blurred copy. */
 private fun blurStrokePaint(pixelated: Bitmap, targetWidth: Float, targetHeight: Float, strokeWidth: Float): Paint =
     Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
@@ -584,6 +596,7 @@ private fun renderEditedImage(
     return EditedImage(output.toByteArray(), "$baseName.$extension", if (png) "image/png" else "image/jpeg", sendOriginal)
 }
 
+/** Build the stored 1:1 default variant while callers retain/upload the original bytes separately. */
 suspend fun squareImageVariant(bytes: ByteArray): ByteArray = withContext(Dispatchers.Default) {
     val decoded = requireNotNull(decodeBitmap(bytes, 2_048)) { "unsupported image" }
     val square = transformBitmap(decoded, 0, 1f)

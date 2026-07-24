@@ -113,7 +113,7 @@ class MainActivity : ComponentActivity() {
                         when (val a = auth) {
                             AuthState.Loading -> Splash()
                             // key on the auth state so the onboarding graph is fresh each logout —
-
+                            // fixes the retained-VM bug (landed on signup step + stale fields)
                             AuthState.LoggedOut -> OnboardingScreen()
                             is AuthState.LoggedIn -> AppShell(session = a.session)
                         }
@@ -133,22 +133,25 @@ class MainActivity : ComponentActivity() {
         (application as? PigeonApp)?.publishNotificationIntent(intent)
     }
 
+    /** Ask the platform for the highest available refresh rate (120Hz where present). */
     private fun requestHighRefreshRate() {
         if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.R) return
         val best = display?.supportedModes?.maxByOrNull { it.refreshRate } ?: return
         window.attributes = window.attributes.apply {
             preferredDisplayModeId = best.modeId
-
+            // some OEMs ignore modeId but honor preferredRefreshRate — set both
             preferredRefreshRate = best.refreshRate
         }
     }
 
+    // OEMs drop the high-rate request when the window loses/regains focus — re-assert it.
     override fun onResume() {
         super.onResume()
         requestHighRefreshRate()
     }
 }
 
+/** Shown once after a crash so the actual stack trace is recoverable (Samsung hides it). */
 @Composable
 private fun CrashScreen(trace: String, onDismiss: () -> Unit) {
     val clipboard = LocalClipboardManager.current
@@ -205,6 +208,7 @@ private fun Splash() {
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background))
 }
 
+/** App-wide wallpaper drawn behind every screen (screens/Scaffold are transparent over it). */
 @Composable
 private fun AppWallpaper(key: String?, dim: Float) {
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {

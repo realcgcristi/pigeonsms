@@ -13,6 +13,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 
+/** Manual DI. Single graph; Hilt would be ceremony at this size. */
 class AppContainer(context: Context) {
     private val appScope = CoroutineScope(SupervisorJob())
     val sessionStore = SessionStore(context)

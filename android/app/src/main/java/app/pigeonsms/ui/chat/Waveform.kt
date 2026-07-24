@@ -12,6 +12,12 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlin.math.max
 
+/**
+ * Deterministic pseudo-waveform derived from a stable seed (an attachment url).
+ * We don't decode the audio, so this guarantees a given voice message always
+ * draws the same bar pattern on every device — enough to read as "a waveform"
+ * and to fill left→right as it plays.
+ */
 fun pseudoWaveform(seed: String, bars: Int = 42): List<Float> {
     var h = (seed.hashCode().toLong() and 0xffffffffL) xor 2654435769L
     val out = ArrayList<Float>(bars)
@@ -23,6 +29,11 @@ fun pseudoWaveform(seed: String, bars: Int = 42): List<Float> {
     return out
 }
 
+/**
+ * Bar waveform. Bars whose center falls left of [progress] paint [playedColor];
+ * the rest paint [unplayedColor] — so playback "fills" gray→bright as it plays,
+ * and the recorder can pass progress=1f to keep every live bar lit.
+ */
 @Composable
 fun Waveform(
     amps: List<Float>,

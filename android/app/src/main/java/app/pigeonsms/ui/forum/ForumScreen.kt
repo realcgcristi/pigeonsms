@@ -126,6 +126,11 @@ import app.pigeonsms.ui.util.clickableScale
 import app.pigeonsms.ui.util.smartTime
 import kotlinx.coroutines.launch
 
+/**
+ * Discord-style forum channel: a browsable list of titled posts, each opening
+ * into a thread of replies. List and detail live in one destination so the
+ * thread can slide over the list and back-navigation stays cheap.
+ */
 @Composable
 fun ForumScreen(
     channelId: String,
@@ -140,11 +145,15 @@ fun ForumScreen(
     var composeOpen by rememberSaveable(channelId) { mutableStateOf(false) }
     var renameOpen by rememberSaveable(channelId) { mutableStateOf(false) }
     var tagDialogOpen by rememberSaveable(channelId) { mutableStateOf(false) }
-
+    // Live title reflects owner renames; falls back to the nav-arg title.
     val liveTitle = ui.title.takeIf { it.isNotBlank() } ?: title
 
+    // Back inside a thread returns to the post list, not out of the forum.
     BackHandler(enabled = ui.openPostId != null) { vm.closePost() }
 
+    // Galaxy keeps the flat-Nova-primitive treatment (loud header, pill FAB, glass
+    // composer). Nova renders the ported second-experiment structural layout, which
+    // reuses the classic chrome (header/FAB/composer) around restructured cards.
     val galaxy = LocalUiSkin.current == UiSkin.Galaxy
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
@@ -154,7 +163,7 @@ fun ForumScreen(
                 val n = ui.posts.size
                 if (n == 0) "forum" else if (n == 1) "1 post" else "$n posts"
             }
-
+            // Rename is a channel-level action, so only offer it on the post list (not
             // inside a thread) and only to the space owner.
             val onRename: (() -> Unit)? = if (ui.isOwner && ui.openPostId == null) {
                 { renameOpen = true }
@@ -178,7 +187,7 @@ fun ForumScreen(
                     onRename = onRename,
                 )
             }
-
+            // transitionSpec isn't composable — resolve the springs here.
             val fadeSpec: FiniteAnimationSpec<Float> = PigeonMotion.snappy()
             val slideSpec: FiniteAnimationSpec<IntOffset> = PigeonMotion.snappy()
             AnimatedContent(
@@ -299,6 +308,11 @@ fun ForumScreen(
     }
 }
 
+/**
+ * Reads the bytes of a picked image off the main thread so the VM can upload them.
+ * Self-contained (the chat module's reader is private) — caps at 25 MB and resolves
+ * a sensible filename + mime.
+ */
 private suspend fun readPickedImage(context: android.content.Context, uri: android.net.Uri): PickedImage? =
     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         runCatching {
@@ -317,6 +331,7 @@ private suspend fun readPickedImage(context: android.content.Context, uri: andro
         }.getOrNull()
     }
 
+/** Small inline image-attachment renderer: guards on image types and loads via coil. */
 @Composable
 private fun ForumAttachmentImage(attachment: app.pigeonsms.network.AttachmentDto?, avatarUrl: (String?) -> String?) {
     if (attachment == null || attachment.type?.startsWith("image/") != true) return
@@ -334,6 +349,7 @@ private fun ForumAttachmentImage(attachment: app.pigeonsms.network.AttachmentDto
     )
 }
 
+/** A compose-composer image thumbnail preview with a remove button. */
 @Composable
 private fun PickedImagePreview(image: PickedImage, onClear: () -> Unit) {
     Row(
@@ -432,6 +448,7 @@ private fun ForumHeader(title: String, subtitle: String, onBack: () -> Unit, onR
     }
 }
 
+/** Owner-only header overflow: currently just "rename channel". */
 @Composable
 private fun ForumOverflowMenu(onRename: () -> Unit) {
     var open by remember { mutableStateOf(false) }
@@ -449,6 +466,8 @@ private fun ForumOverflowMenu(onRename: () -> Unit) {
     }
 }
 
+/** Nova forum header: a rounded back badge + loud display title with a stat
+ *  subline, matching the shared [NovaHero] rhythm on other tabs. */
 @Composable
 private fun NovaForumHeader(title: String, subtitle: String, onBack: () -> Unit, onRename: (() -> Unit)? = null) {
     Row(
@@ -526,7 +545,8 @@ private fun PostList(
                 }
             }
         }
-
+        // Tag filter row: "all" + each channel tag, plus an owner-only "+ tag" chip to
+        // define new tags. Shown whenever tags exist or the user can create them.
         if (ui.tags.isNotEmpty() || ui.isOwner) {
             TagFilterRow(
                 tags = ui.tags,
@@ -559,7 +579,7 @@ private fun PostList(
                     val deletable = canDelete(post.author.id)
                     val onDeleteThis: (() -> Unit)? = if (deletable) { { onDelete(post.id) } } else null
                     // "new since last visit": post seq is past the read watermark we
-
+                    // captured on first load. Guard newSinceSeq > 0 so a fresh channel
                     // (baseline 0) doesn't light every post.
                     val isNew = ui.newSinceSeq > 0 && post.seq > ui.newSinceSeq
                     when (skin) {
@@ -573,14 +593,19 @@ private fun PostList(
     }
 }
 
+/** Post/reply surface: always a calm tonal card. Glass is reserved for floating
+ *  layers (the FAB, sheets) — content cards stay quiet and cheap to draw. */
 @Composable
 private fun forumCard(): Modifier =
     Modifier.clip(Corners.card).background(MaterialTheme.colorScheme.surfaceContainer)
 
 // ---------------------------------------------------------------------------
-
+// Shared forum chrome: tag filter row, tag/new/mark chips, like button, and the
+// lightweight @mention autocomplete used by both composers. Skin-aware where it
+// matters; otherwise plain MaterialTheme tones so all three skins stay coherent.
 // ---------------------------------------------------------------------------
 
+/** Horizontal filter row: "all" + each tag, and an owner "+ tag" affordance. */
 @Composable
 private fun TagFilterRow(
     tags: List<ForumTagDto>,
@@ -631,6 +656,7 @@ private fun TagFilterRow(
     }
 }
 
+/** Small tag chip rendered on a post card (tonal pill; a check hints markable tags). */
 @Composable
 private fun ForumTagChip(tag: ForumTagDto, marked: Boolean = false) {
     val accent = MaterialTheme.colorScheme.primary
@@ -679,6 +705,7 @@ private fun NewBadge() {
     }
 }
 
+/** Compact like toggle + count for a post card. Any member can tap it. */
 @Composable
 private fun ForumLikeButton(liked: Boolean, count: Int, onClick: () -> Unit) {
     Row(
@@ -705,6 +732,10 @@ private fun ForumLikeButton(liked: Boolean, count: Int, onClick: () -> Unit) {
     }
 }
 
+/**
+ * "@" + partial-word under a collapsed cursor, or null. Mirrors the chat composer's
+ * token rule so server-side mention resolution matches. Returns (index of '@', partial).
+ */
 private fun forumMentionToken(value: TextFieldValue): Pair<Int, String>? {
     if (!value.selection.collapsed) return null
     val cursor = value.selection.end
@@ -719,6 +750,7 @@ private fun forumMentionToken(value: TextFieldValue): Pair<Int, String>? {
 
 private fun forumMentionWordChar(c: Char) = c.isLetterOrDigit() || c == '_' || c == '.'
 
+/** Replace the active @token in [value] with @username + trailing space. */
 private fun forumInsertMention(value: TextFieldValue, username: String): TextFieldValue {
     val token = forumMentionToken(value) ?: return value
     val start = token.first
@@ -729,6 +761,7 @@ private fun forumInsertMention(value: TextFieldValue, username: String): TextFie
     return TextFieldValue(newText, TextRange(caret))
 }
 
+/** Suggestion panel above a forum composer, filtered by the active @token. */
 @Composable
 private fun ForumMentionSuggestions(
     suggestions: List<ForumMentionCandidate>,
@@ -804,6 +837,8 @@ private fun AuthorLine(author: ApiUser, timestamp: Long, avatarUrl: (String?) ->
     }
 }
 
+/** Long-press affordance shared by every post-card skin: shows a "delete post"
+ *  dropdown anchored at the card. No-op wrapper when [onDelete] is null. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun PostCardBox(
@@ -811,7 +846,9 @@ private fun PostCardBox(
     onDelete: (() -> Unit)?,
     content: @Composable (clickMod: Modifier) -> Unit,
 ) {
-
+    // When deletable, the whole card is a combinedClickable (tap opens, long-press
+    // shows the delete menu) and hosts the anchored dropdown. Otherwise it's the
+    // usual press-scale open-click. Either way the card root gets one click modifier
     // so the child never installs its own competing gesture.
     if (onDelete == null) {
         content(Modifier.clickableScale(pressedScale = 0.98f, onClick = onOpen))
@@ -853,7 +890,7 @@ private fun PostCard(
             .then(clickMod)
             .padding(Spacing.l),
     ) {
-
+        // Meta chips: pinned, new, and the post's tag (with mark state).
         ForumCardBadges(post, isNew)
         Text(
             forumPostTitle(post.metadata),
@@ -897,6 +934,8 @@ private fun PostCard(
     }
 }
 
+/** Shared badge strip at the top of a post card: pinned marker, "new" accent, and
+ *  the tag chip (rendered in its marked form when the post is marked). */
 @Composable
 private fun ForumCardBadges(post: ForumPostDto, isNew: Boolean) {
     if (!post.pinned && !isNew && post.tag == null) return
@@ -991,13 +1030,14 @@ private fun ThreadView(
                             )
                         }
                     }
-
+                    // Owner-facing pin/unpin, OP/owner "mark as <label>", and author/owner delete.
                     ThreadPostActions(
                         pinned = pinned,
                         marked = marked,
                         markLabel = markLabel,
                         canPin = isOwner,
-
+                        // Only markable when the post's tag defines a mark_label AND the
+                        // user is OP or owner.
                         canMark = canMark && markLabel != null,
                         canDelete = canDelete(post.author.id),
                         onTogglePin = onTogglePin,
@@ -1061,7 +1101,7 @@ private fun ThreadView(
                 onPick = { username -> draft = forumInsertMention(draft, username) },
             )
         }
-
+        // Selected-image preview strip above the composer row.
         replyImage?.let { img ->
             PickedImagePreview(
                 image = img,
@@ -1111,7 +1151,7 @@ private fun ThreadView(
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
             )
             if (galaxy) {
-
+                // Send button ignites with the CTA gradient once the draft is armed.
                 val sendShape = CircleShape
                 Box(
                     Modifier
@@ -1160,6 +1200,7 @@ private fun ThreadView(
     }
 }
 
+/** Owner/author action strip under the thread hero: pin/unpin + mark + delete. */
 @Composable
 private fun ThreadPostActions(
     pinned: Boolean,
@@ -1193,7 +1234,7 @@ private fun ThreadPostActions(
                 )
             }
         }
-
+        // "mark as <label>" — only when the post's tag is markable and the user is OP/owner.
         if (canMark && markLabel != null) {
             TextButton(onClick = onToggleMark) {
                 Icon(
@@ -1219,6 +1260,7 @@ private fun ThreadPostActions(
     }
 }
 
+/** Wraps a reply row with a long-press "delete reply" menu (author or owner). */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ReplyRowMenu(onDelete: (() -> Unit)?, content: @Composable () -> Unit) {
@@ -1306,7 +1348,7 @@ private fun NewPostDialog(
                 OutlinedTextField(
                     value = body,
                     onValueChange = { if (it.text.length <= 4000) body = it },
-
+                    // Content is optional now — a title alone is a valid post.
                     label = { Text("description (optional)") },
                     enabled = !creating,
                     shape = inputShape,
@@ -1321,7 +1363,7 @@ private fun NewPostDialog(
                         onPick = { username -> body = forumInsertMention(body, username) },
                     )
                 }
-
+                // Tag picker: a row of selectable chips (tap again to clear).
                 if (tags.isNotEmpty()) {
                     LazyRow(
                         Modifier.fillMaxWidth().padding(top = Spacing.s),
@@ -1368,7 +1410,7 @@ private fun NewPostDialog(
             }
         },
         confirmButton = {
-
+            // Title alone is enough — content and image are optional.
             val canPost = !creating && postTitle.isNotBlank()
             if (galaxy) {
                 NovaPillButton(
@@ -1399,6 +1441,11 @@ private fun NewPostDialog(
     )
 }
 
+/**
+ * Owner-only tag creation. A name field plus a "can be marked as ___" toggle that
+ * reveals a label field — when set, posts carrying the tag become markable (e.g.
+ * "completed", "fixed"). Calls createForumTag(name, markLabel or null).
+ */
 @Composable
 private fun CreateTagDialog(
     busy: Boolean,
@@ -1484,7 +1531,8 @@ private fun CreateTagDialog(
 }
 
 // ---------------------------------------------------------------------------
-
+// Nova (experimental redesign) — restructured post cards + thread hero.
+// Same data/callbacks as the classic variants; only structure differs.
 // ---------------------------------------------------------------------------
 
 @Composable
@@ -1500,7 +1548,8 @@ private fun NovaPostCard(
 ) = PostCardBox(onOpen, onDelete) { clickMod ->
     val accent = MaterialTheme.colorScheme.primary
     val cyan = MaterialTheme.colorScheme.secondary
-
+    // Cards with replies light their rim + rail with the accent — the busy posts
+    // read as "hot" without an intrusive full outline. New/unseen posts also light.
     val hot = post.reply_count > 0 || isNew
     Row(
         modifier
@@ -1509,7 +1558,8 @@ private fun NovaPostCard(
             .then(clickMod)
             .padding(Spacing.l),
     ) {
-
+        // Left accent rail with reply count — an iris→cyan gradient pill that is
+        // the card's signature accent moment. A soft halo lifts the count off it.
         Column(
             Modifier
                 .width(52.dp)
@@ -1529,7 +1579,7 @@ private fun NovaPostCard(
         }
         Column(Modifier.weight(1f).padding(start = Spacing.m)) {
             ForumCardBadges(post, isNew)
-
+            // Prominent title.
             Text(
                 forumPostTitle(post.metadata),
                 style = MaterialTheme.typography.titleLarge,
@@ -1550,7 +1600,7 @@ private fun NovaPostCard(
                 )
             }
             ForumAttachmentImage(post.attachment, avatarUrl)
-
+            // Author + meta row, distinct layout: avatar chip, then time metadata trailing.
             Row(
                 Modifier.fillMaxWidth().padding(top = Spacing.m),
                 verticalAlignment = Alignment.CenterVertically,
@@ -1598,7 +1648,7 @@ private fun NovaThreadHero(
             .novaElevation(NovaCorners.card, MaterialTheme.colorScheme.surfaceContainer, accent, accented = true, glow = true)
             .clip(NovaCorners.card),
     ) {
-
+        // Accent hero-wash band with the title — an iris→cyan bath, not a flat tint.
         Column(
             Modifier
                 .fillMaxWidth()
@@ -1674,7 +1724,7 @@ private fun NovaThreadHero(
 
 @Composable
 private fun NovaReplyRow(reply: MessageDto, avatarUrl: (String?) -> String?, onOpenProfile: (String) -> Unit) {
-
+    // Chat-like: avatar in a gutter, bubble beside it — distinct from classic full-width card.
     Row(
         Modifier.fillMaxWidth().padding(start = Spacing.s, end = Spacing.s),
         verticalAlignment = Alignment.Top,
@@ -1721,7 +1771,10 @@ private fun NovaReplyRow(reply: MessageDto, avatarUrl: (String?) -> String?, onO
 }
 
 // ---------------------------------------------------------------------------
-
+// Nova skin — the SECOND-EXPERIMENT ("-exp") structural layout, ported here and
+// renamed to Exp* so it stands apart from the Galaxy variants above. Same data
+// and callbacks; it leans on flat MaterialTheme tones + Corners rather than the
+// Nova primitives (novaElevation/novaHalo/NovaGradients) Galaxy uses.
 // ---------------------------------------------------------------------------
 
 @Composable
@@ -1743,7 +1796,7 @@ private fun ExpNovaPostCard(
             .then(clickMod)
             .padding(Spacing.l),
     ) {
-
+        // Left accent rail with reply count — the pill leads the card.
         Column(
             Modifier
                 .width(52.dp)
@@ -1763,7 +1816,7 @@ private fun ExpNovaPostCard(
         }
         Column(Modifier.weight(1f).padding(start = Spacing.m)) {
             ForumCardBadges(post, isNew)
-
+            // Prominent title.
             Text(
                 forumPostTitle(post.metadata),
                 style = MaterialTheme.typography.titleLarge,
@@ -1784,7 +1837,7 @@ private fun ExpNovaPostCard(
                 )
             }
             ForumAttachmentImage(post.attachment, avatarUrl)
-
+            // Author + meta row, distinct layout: avatar chip, then time metadata trailing.
             Row(
                 Modifier.fillMaxWidth().padding(top = Spacing.m),
                 verticalAlignment = Alignment.CenterVertically,
@@ -1830,7 +1883,7 @@ private fun ExpNovaThreadHero(
             .clip(Corners.card)
             .background(MaterialTheme.colorScheme.surfaceContainer),
     ) {
-
+        // Accent header band with the title.
         Column(
             Modifier
                 .fillMaxWidth()
@@ -1899,7 +1952,7 @@ private fun ExpNovaThreadHero(
 
 @Composable
 private fun ExpNovaReplyRow(reply: MessageDto, avatarUrl: (String?) -> String?, onOpenProfile: (String) -> Unit) {
-
+    // Chat-like: avatar in a gutter, bubble beside it — distinct from classic full-width card.
     Row(
         Modifier.fillMaxWidth().padding(start = Spacing.s, end = Spacing.s),
         verticalAlignment = Alignment.Top,

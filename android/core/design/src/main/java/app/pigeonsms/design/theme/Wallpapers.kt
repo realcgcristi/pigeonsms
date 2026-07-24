@@ -12,6 +12,11 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 
+/**
+ * Built-in per-chat wallpaper presets. Each is a soft multi-stop gradient tuned
+ * to sit behind message bubbles without fighting them. `null`/"none" = plain
+ * theme background; "custom:<uri>" is handled separately (a picked image).
+ */
 data class Wallpaper(val key: String, val label: String, val stops: List<Color>)
 
 val PigeonWallpapers = listOf(
@@ -29,6 +34,10 @@ fun wallpaperByKey(key: String?): Wallpaper? =
     if (key == null || key.startsWith("custom:")) null
     else PigeonWallpapers.firstOrNull { it.key == key }?.takeIf { it.key != "none" }
 
+/**
+ * A slowly-drifting gradient brush for the given stops ("living" wallpaper).
+ * Falls back to a static gradient when reduced-motion is on.
+ */
 @Composable
 fun rememberWallpaperBrush(stops: List<Color>): Brush {
     if (stops.isEmpty()) return Brush.linearGradient(listOf(Color.Transparent, Color.Transparent))

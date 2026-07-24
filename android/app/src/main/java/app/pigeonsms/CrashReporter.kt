@@ -5,6 +5,12 @@ import java.io.PrintWriter
 import java.io.StringWriter
 import java.util.Date
 
+/**
+ * Last-ditch crash capture. Samsung/One UI only shows a generic "a bug occurred"
+ * dialog with no trace, so we persist the stack ourselves and surface it on the
+ * next launch (see MainActivity). Installed first thing in Application.onCreate,
+ * so it covers container init + Compose composition crashes.
+ */
 object CrashReporter {
     private const val FILE = "last_crash.txt"
 
@@ -32,6 +38,7 @@ object CrashReporter {
         }
     }
 
+    /** Returns the saved trace once, then clears it. */
     fun consume(context: Context): String? {
         val file = context.applicationContext.filesDir.resolve(FILE)
         if (!file.exists()) return null

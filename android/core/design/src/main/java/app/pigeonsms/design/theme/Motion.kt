@@ -6,6 +6,13 @@ import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.runtime.Composable
 
+/**
+ * Motion language: springs by default, snapping when reduced motion is enabled.
+ * Three personalities:
+ *  - snappy: taps, selection, small state changes
+ *  - smooth: layout shifts, screen-level transitions
+ *  - bouncy: celebratory moments (reactions, sends)
+ */
 object PigeonMotion {
     @Composable
     fun <T> snappy(): FiniteAnimationSpec<T> = if (LocalReducedMotion.current) snap()

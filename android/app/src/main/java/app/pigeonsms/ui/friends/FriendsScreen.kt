@@ -114,7 +114,8 @@ fun FriendsScreen(app: AppViewModel, onOpenChat: (String, String) -> Unit, onOpe
 
     val nothingYet = home.friends.isEmpty() && home.incoming.isEmpty() && home.outgoing.isEmpty()
     // 3-way skin dispatch. `nova` here means "not the classic skin" — it drives the
-
+    // shared non-classic chrome (sheet corners, empty CTA, tab flavor). The distinct
+    // Nova vs Galaxy layouts are branched on `skin` explicitly below.
     val skin = LocalUiSkin.current
     val galaxy = skin == UiSkin.Galaxy
     val nova = skin != UiSkin.Classic
@@ -263,6 +264,8 @@ fun FriendsScreen(app: AppViewModel, onOpenChat: (String, String) -> Unit, onOpe
     }
 }
 
+// --- Classic ---------------------------------------------------------------------
+
 @Composable
 private fun FriendsTab(
     app: AppViewModel,
@@ -331,6 +334,8 @@ private fun RequestsTab(
     }
 }
 
+/** Calm segmented tabs: plain track, sliding pill indicator on a smooth spring —
+ *  no glass on structural chrome. [badgeCount] marks the second tab. */
 @Composable
 private fun PillTabs(
     options: List<String>,
@@ -424,8 +429,13 @@ private fun FriendRow(
     }
 }
 
+// --- NOVA ------------------------------------------------------------------------
+// Distinct structure: a hero header with an inline stat line + add action, a
+// count-bearing segmented control, and friend/request CARDS (big 56dp avatar,
+// bold name, action row) instead of thin rows. Requests get a prominent
 // accept/decline action pair on a tinted card.
 
+/** Bold segmented control with per-segment counts and a bouncy sliding indicator. */
 @Composable
 private fun NovaSegmentedTabs(
     friendsLabel: String,
@@ -511,6 +521,8 @@ private fun NovaSegmentedTabs(
     }
 }
 
+/** Soft accent glow shadow under the active-tab indicator so the selection reads
+ *  as a lit halo rather than a paint chip. */
 private fun Modifier.androidx_tabGlow(accent: androidx.compose.ui.graphics.Color): Modifier =
     this.shadow(
         elevation = NovaDepth.raisedElevation,
@@ -634,6 +646,11 @@ private fun NovaRequestsTab(
     }
 }
 
+/** Expressive friend card: lifted-top gradient surface with a lit hairline rim
+ *  (accented cyan when online), a 56dp avatar wrapped in a breathing cyan
+ *  presence ring + soft halo, bold two-line identity, and a prominent action row
+ *  underneath. Depth comes from [novaSurface]; the list-level shadow is skipped
+ *  per-row for scroll perf, the lit rim + halo carry the elevation cue instead. */
 @Composable
 private fun NovaFriendCard(
     f: FriendDto,
@@ -685,6 +702,9 @@ private fun NovaFriendCard(
     }
 }
 
+/** A 56dp avatar wrapped, when [online], in a soft cyan halo + a gently breathing
+ *  presence ring — the "living presence" cue. Reduced-motion-safe: the pulse
+ *  helper returns a constant so the ring is simply steady. */
 @Composable
 private fun NovaAvatarWithPresence(
     name: String,
@@ -716,8 +736,14 @@ private fun NovaAvatarWithPresence(
     }
 }
 
+// --- NOVA (ported from the -exp 2nd experiment) ----------------------------------
+// The ACTUAL 2nd-experiment layout, distinct from Galaxy: flatter surfaces, a
 // status-bar-padded hero header, a solid-primary segmented indicator (no gradient
+// glow), and friend/request CARDS on plain filled surfaces with a mint presence
+// ring. Renamed with an `Exp` prefix so it does not clash with the Galaxy `Nova*`
+// composables above; adapted to exp3's flat Nova primitives / MaterialTheme.
 
+/** Hero header: big display title with a live stat line and a rounded add button. */
 @Composable
 private fun ExpFriendsHeader(
     friendCount: Int,
@@ -764,6 +790,7 @@ private fun ExpFriendsHeader(
     }
 }
 
+/** Bold segmented control with per-segment counts and a bouncy sliding indicator. */
 @Composable
 private fun ExpSegmentedTabs(
     friendsLabel: String,
@@ -941,6 +968,9 @@ private fun ExpRequestsTab(
     }
 }
 
+/** Expressive friend card: rounded filled surface, 56dp avatar with a cyan
+ *  presence ring, bold two-line identity, and an action row underneath the
+ *  identity block so buttons are prominent and full-width-ish. */
 @Composable
 private fun ExpFriendCard(
     f: FriendDto,

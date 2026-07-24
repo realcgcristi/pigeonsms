@@ -66,6 +66,8 @@ fun ScreenHeader(title: String, subtitle: String? = null, action: (@Composable (
     }
 }
 
+/** @param action optional CTA rendered centered under the empty caption (e.g.
+ *  "start a chat"), so an empty state can offer the action its copy names. */
 @Composable
 fun Empty(
     title: String,
@@ -88,6 +90,8 @@ fun Empty(
     }
 }
 
+/** First-load state. On the Nova path this is a card-skeleton list (matching the
+ *  loaded UI); classic/glass keep the calm centered spinner. */
 @Composable
 fun LoadingState(label: String) {
     if (app.pigeonsms.design.theme.LocalExperimentalRedesign.current) {
@@ -104,6 +108,9 @@ fun LoadingState(label: String) {
     }
 }
 
+/** Error twin of [app.pigeonsms.design.components.EmptyState]: same icon-disc +
+ *  title + caption layout and gentle settle-in, but washed in the error tone,
+ *  with a retry action underneath. */
 @Composable
 fun ErrorState(message: String, onRetry: () -> Unit) {
     val reduced = LocalReducedMotion.current
@@ -125,7 +132,7 @@ fun ErrorState(message: String, onRetry: () -> Unit) {
             ),
         )
     } else if (experimental) {
-
+        // Nova: mirror EmptyState's washed disc, in the error tone
         Brush.verticalGradient(listOf(tone.copy(alpha = 0.26f), tone.copy(alpha = 0.12f)))
     } else {
         Brush.verticalGradient(

@@ -55,10 +55,25 @@ import app.pigeonsms.design.theme.heroAppear
 import app.pigeonsms.design.theme.novaElevation
 import app.pigeonsms.design.theme.novaSurface
 
-// ---------------------------------------------------------------------------
+/**
+ * NOVA COMPONENTS — drop-in, richly-styled primitives for the experimental
+ * redesign. All are self-contained and Nova-styled by construction (no flag
+ * branch inside): use them only on the Nova path. Names are distinct from any
+ * screen-local composables so imports never clash.
+ */
 
 // ---------------------------------------------------------------------------
+// NovaPanel — the canonical elevated Nova card container.
+// ---------------------------------------------------------------------------
 
+/**
+ * The everyday Nova container: soft accent-tinted drop shadow + lifted-top
+ * gradient fill + lit hairline rim (via [novaElevation]). Use for cards, hero
+ * bodies, grouped sections — anything that should float over the aurora.
+ *
+ * @param accented lights the rim with the accent (unread / active state).
+ * @param glow tints the drop shadow with the accent — for floating/hero cards.
+ */
 @Composable
 fun NovaPanel(
     modifier: Modifier = Modifier,
@@ -80,9 +95,19 @@ fun NovaPanel(
 }
 
 // ---------------------------------------------------------------------------
-
+// NovaHero — the unified top-of-screen header (title + stat + trailing action).
 // ---------------------------------------------------------------------------
 
+/**
+ * The shared Nova screen header so every tab inherits the same hero rhythm: a
+ * loud display title, an optional stat subline, and an optional trailing rounded
+ * icon-badge action. Title fades + rises in via [heroAppear]. Drop this in place
+ * of classic ScreenHeader on the Nova path.
+ *
+ * @param subtitle a short stat line (e.g. "12 chats · 3 unread"); rendered in
+ *   the accent when [accentSubtitle] is set.
+ * @param action optional trailing composable, typically a [NovaIconBadgeButton].
+ */
 @Composable
 fun NovaHero(
     title: String,
@@ -119,6 +144,8 @@ fun NovaHero(
     }
 }
 
+/** Rounded-square accent icon-badge button — the trailing affordance for
+ *  [NovaHero] (add friend, new post, etc.). Presses with a spring. */
 @Composable
 fun NovaIconBadgeButton(
     onClick: () -> Unit,
@@ -146,9 +173,14 @@ fun NovaIconBadgeButton(
 }
 
 // ---------------------------------------------------------------------------
-
+// NovaTag — pill chip with an optional accent-filled selected state.
 // ---------------------------------------------------------------------------
 
+/**
+ * Nova pill chip. Neutral tinted by default; [selected] fills it with the
+ * accent-gradient CTA wash and flips the content to on-accent ink. Use for
+ * filters, sort toggles, role/pronoun chips — one consistent chip everywhere.
+ */
 @Composable
 fun NovaTag(
     modifier: Modifier = Modifier,
@@ -162,7 +194,7 @@ fun NovaTag(
     val base = if (selected) {
         Modifier
             .clip(shape)
-
+            // Galaxy fills with the iris→cyan CTA gradient; Nova (flat) uses a
             // clean solid accent — no gradient slab.
             .then(
                 if (galaxy) Modifier.background(Brush.horizontalGradient(NovaGradients.cta(accent)))
@@ -189,9 +221,15 @@ fun NovaTag(
 }
 
 // ---------------------------------------------------------------------------
-
+// NovaPillButton — the primary gradient CTA with press physics.
 // ---------------------------------------------------------------------------
 
+/**
+ * Primary Nova CTA: a full-width iris→cyan gradient pill with a soft accent
+ * glow-shadow and a spring press-scale. When [armed] is false (e.g. disabled /
+ * empty input) it dims to a flat neutral fill. Use for onboarding CTAs, send
+ * confirmations, "create" actions.
+ */
 @Composable
 fun NovaPillButton(
     text: String,
@@ -212,7 +250,7 @@ fun NovaPillButton(
     val galaxy = app.pigeonsms.design.theme.isGalaxySkin()
     val fill = if (armed) {
         Modifier
-
+            // GALAXY: accent glow-shadow + iris→cyan gradient. NOVA (flat): a clean
             // solid accent fill, no glow, no gradient.
             .then(if (galaxy) Modifier.androidx_shadowGlow(shape, accent) else Modifier)
             .clip(shape)
@@ -255,9 +293,11 @@ private fun Modifier.androidx_shadowGlow(shape: androidx.compose.ui.graphics.Sha
     )
 
 // ---------------------------------------------------------------------------
-
+// NovaSectionLabel — the uppercase tracked section header.
 // ---------------------------------------------------------------------------
 
+/** The uppercase, letter-tracked Nova section label ("channels", "details").
+ *  One definition kills the per-screen drift in tracking/alpha/padding. */
 @Composable
 fun NovaSectionLabel(
     text: String,
@@ -275,9 +315,14 @@ fun NovaSectionLabel(
 }
 
 // ---------------------------------------------------------------------------
-
+// NovaAnimatedCount — sliding-digit counter for the numbers users watch tick.
 // ---------------------------------------------------------------------------
 
+/**
+ * Reduced-motion-aware animated counter: digits slide+fade up on increase, down
+ * on decrease. Route unread pills, space badges and reply counts through this so
+ * the numbers users watch actually animate. Snaps under reduced motion.
+ */
 @Composable
 fun NovaAnimatedCount(
     count: Int,

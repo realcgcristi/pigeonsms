@@ -215,6 +215,7 @@ private fun ProfileContentClassic(
                 }
             }
 
+            // status: a frosted accent-tinted pill, Discord custom-status style
             profile.status_text?.takeIf { it.isNotBlank() }?.let {
                 Row(
                     Modifier
@@ -386,6 +387,13 @@ private fun ProfileContentClassic(
     }
 }
 
+/**
+ * NOVA profile — a bold hero identity. A tall full-bleed gradient cover banner
+ * (accent → banner color) with an overlapping big circular avatar centered on
+ * the fold, display name in large display type, handle + status beneath, mutual
+ * nests as an overlapping avatar stack, and expressive tinted cards for the rest.
+ * Structurally distinct from the classic left-aligned hero.
+ */
 @Composable
 private fun ProfileContentNova(
     profile: ProfileDto,
@@ -405,7 +413,7 @@ private fun ProfileContentNova(
     // aurora canvas behind the whole scroll so the space-indigo ground has depth
     Box(Modifier.fillMaxSize().novaAuroraBackground(accent, cyan, animate = true)) {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-
+            // --- HERO: tall gradient cover + overlapping centered avatar ---
             BoxWithConstraints(Modifier.fillMaxWidth()) {
                 val coverHeight = (maxWidth * 0.62f).coerceIn(200.dp, 300.dp)
                 val avatarSize = 132.dp
@@ -466,7 +474,8 @@ private fun ProfileContentNova(
                     ) {
                         Avatar(name, mediaUrl(profile.avatar_key), avatarSize, sharedKey = "avatar-${profile.id}")
                         if (online) {
-
+                            // cyan presence dot with a breathing halo — the Nova
+                            // presence language, not the classic Mint
                             Box(
                                 Modifier.align(Alignment.BottomEnd)
                                     .novaHalo(cyan, alpha = 0.30f + 0.35f * pulse)
@@ -554,6 +563,7 @@ private fun ProfileContentNova(
 
                     Spacer(Modifier.height(Spacing.l))
 
+                    // Sections assemble top-to-bottom with a staggered reveal so the
                     // body feels as designed as the hero.
                     var step = 0
 
@@ -704,6 +714,15 @@ private fun ProfileContentNova(
     }
 }
 
+/**
+ * PORTED (from the -exp 2nd experiment) — the NOVA skin's profile layout. A tall
+ * gradient cover (accent → banner color → surface) with an overlapping centered
+ * avatar, centered display name + handle/pronouns, a bold accent status pill, and
+ * flat bordered cards (about / details / mutual nests / badges). Structurally the
+ * -exp layout, adapted to exp3's flat Nova primitives (NovaCorners, PigeonColors.Mint)
+ * and MaterialTheme. Helpers renamed (PortedNovaCard / PortedNovaDetailRow) to avoid
+ * clashing with exp3's own NovaSection / NovaDetailRow.
+ */
 @Composable
 private fun ProfileContentPorted(
     profile: ProfileDto,
@@ -721,7 +740,7 @@ private fun ProfileContentPorted(
 
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-
+            // --- HERO: tall gradient cover + overlapping centered avatar ---
             BoxWithConstraints(Modifier.fillMaxWidth()) {
                 val coverHeight = (maxWidth * 0.62f).coerceIn(200.dp, 300.dp)
                 val avatarSize = 132.dp
@@ -1003,6 +1022,7 @@ private fun PortedNovaDetailRow(icon: androidx.compose.ui.graphics.vector.ImageV
     }
 }
 
+/** Nova back button: a spring-pressed frosted disc over the cover. */
 @Composable
 private fun NovaBackButton(onBack: () -> Unit, modifier: Modifier = Modifier) {
     val source = remember { MutableInteractionSource() }
@@ -1030,6 +1050,9 @@ private fun NovaBackButton(onBack: () -> Unit, modifier: Modifier = Modifier) {
     }
 }
 
+/** An elevated Nova section card: real accent-tinted shadow + lit rim (via
+ *  [NovaPanel]), an uppercase tracked section label, and a one-shot staggered
+ *  reveal so the profile body assembles top-to-bottom. */
 @Composable
 private fun NovaSection(
     accent: Color,
@@ -1112,6 +1135,12 @@ private fun ProfileStatus(onBack: () -> Unit, message: String, action: String? =
     }
 }
 
+/**
+ * Nova loading / error state. No action → first-load: a shimmering skeleton that
+ * mirrors the real Nova hero (cover band, ringed avatar, name + section cards) so
+ * the screen fills in gracefully instead of a spinner. With an action → error:
+ * an accent-washed disc, message, and a spring "try again" pill over the aurora.
+ */
 @Composable
 private fun ProfileStatusNova(onBack: () -> Unit, message: String, action: String?, onAction: (() -> Unit)?) {
     val accent = MaterialTheme.colorScheme.primary
@@ -1170,6 +1199,8 @@ private fun ProfileStatusNova(onBack: () -> Unit, message: String, action: Strin
     }
 }
 
+/** Shimmering skeleton for the Nova profile first-load: cover band, ringed avatar
+ *  placeholder, name bar and two section cards. Reduced-motion-aware. */
 @Composable
 private fun ProfileSkeleton() {
     val reduced = LocalReducedMotion.current
@@ -1544,7 +1575,7 @@ private fun ProfileHero(
                     .padding(4.dp),
             ) {
                 if (glassOn) {
-
+                    // AGSL lens: refraction + rim light + tilt specular over the avatar
                     val tilt = rememberTilt()
                     Avatar(name, avatarModel, Dimens.avatarHero, modifier = Modifier.liquidLens(CircleShape, tilt), sharedKey = sharedKey)
                 } else {

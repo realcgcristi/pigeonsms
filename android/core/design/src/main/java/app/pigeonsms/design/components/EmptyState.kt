@@ -34,6 +34,9 @@ import app.pigeonsms.design.theme.LocalReducedMotion
 import app.pigeonsms.design.theme.PigeonMotion
 import app.pigeonsms.design.theme.Spacing
 
+/** Cozy placeholder for screens with nothing in them yet. Lowercase by convention.
+ *  The icon sits on a soft accent-washed disc (frosted when Liquid Glass is on)
+ *  and the whole state settles in with a gentle spring — snap under reduced motion. */
 @Composable
 fun EmptyState(
     icon: ImageVector,
@@ -61,7 +64,7 @@ fun EmptyState(
             ),
         )
     } else if (galaxy) {
-
+        // Galaxy: the icon sits in a bright accent-washed disc (glowy)
         Brush.verticalGradient(
             listOf(
                 accent.copy(alpha = 0.28f),
@@ -69,7 +72,7 @@ fun EmptyState(
             ),
         )
     } else if (experimental) {
-
+        // Nova (flat): a quiet flat tinted disc — a whisper of accent, no glow lift.
         Brush.verticalGradient(
             listOf(
                 accent.copy(alpha = 0.12f),
@@ -102,7 +105,7 @@ fun EmptyState(
                 .size(80.dp)
                 .clip(CircleShape)
                 .background(discFill)
-
+                // accent glow bleed: Galaxy/glass only — Nova (flat) has no halo.
                 .then(
                     if (galaxy || glass) Modifier.background(
                         Brush.radialGradient(

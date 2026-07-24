@@ -36,18 +36,45 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 // ---------------------------------------------------------------------------
-
+// Skin split: the same Nova primitives render two looks. Galaxy = the deep,
+// glowy, gradient-mesh treatment (rich shadows, lit rims, aurora). Nova = a
 // flatter, cleaner treatment (minimal glow, flat fills, thin rims, calm nav).
-
+// Non-composable Modifier factories read [LocalUiSkin] via `composed {}`.
 // ---------------------------------------------------------------------------
 
+/** True when the active skin is the deep/glowy Galaxy treatment. Nova (flat)
+ *  and Classic both return false. Read inside `composed {}` or composables. */
 @Composable
 fun isGalaxySkin(): Boolean = LocalUiSkin.current == UiSkin.Galaxy
 
-// ---------------------------------------------------------------------------
+/**
+ * NOVA MATERIAL — the shared depth / motion layer for the experimental redesign.
+ *
+ * Everything here is Nova-only and gated: modifiers are named for the Nova look
+ * and are meant to be applied inside `if (LocalExperimentalRedesign.current)`
+ * branches (or on surfaces that only exist in the Nova path). None of this
+ * touches the classic look.
+ */
 
 // ---------------------------------------------------------------------------
+// Depth: soft ambient shadow + lit hairline rim, tuned from NovaDepth tokens.
+// ---------------------------------------------------------------------------
 
+/**
+ * The signature Nova depth: a soft, accent-tinted drop shadow layered under a
+ * clipped, gradient-filled surface with a lit hairline rim on top. This is the
+ * single biggest jump from "flat recolor" to "premium" — route every Nova card,
+ * bar, composer and space card through it so depth is consistent and tunable in
+ * one place.
+ *
+ * @param shape the surface shape (usually a [NovaCorners] value).
+ * @param tint base surface fill; the top edge is lifted toward white+accent.
+ * @param accent accent used for the rim and (optionally) the shadow spot color.
+ * @param accented when true the rim lights up with the accent (active/unread).
+ * @param glow when true the drop shadow is tinted with the accent (a lit halo);
+ *   otherwise a neutral ambient shadow. Keep glow for floating/hero surfaces.
+ * @param elevation shadow depth; defaults to [NovaDepth.cardElevation].
+ */
 fun Modifier.novaElevation(
     shape: Shape,
     tint: Color,
@@ -57,7 +84,7 @@ fun Modifier.novaElevation(
     elevation: Dp = NovaDepth.cardElevation,
 ): Modifier = composed {
     if (isGalaxySkin()) {
-
+        // GALAXY — deep: soft accent-tinted drop shadow + lifted-top gradient +
         // lit hairline rim.
         this
             .shadow(
@@ -84,7 +111,9 @@ fun Modifier.novaElevation(
                 shape,
             )
     } else {
-
+        // NOVA — flat: NO drop shadow at all (matches the exp2 reference, whose
+        // cards never cast). Just a flat solid `surfaceContainer` fill and a thin
+        // single-color 1dp hairline rim. Reads clean/paper, never lit or floating.
         this
             .clip(shape)
             .background(tint)
@@ -96,6 +125,11 @@ fun Modifier.novaElevation(
     }
 }
 
+/**
+ * Fill-only Nova depth (no drop shadow): the lifted-top gradient + lit rim, for
+ * surfaces that live inside a scrolling list where a real shadow per row would
+ * be wasteful. This is what `glassCard`'s Nova branch uses.
+ */
 fun Modifier.novaSurface(
     shape: Shape,
     tint: Color,
@@ -103,7 +137,7 @@ fun Modifier.novaSurface(
     accented: Boolean = false,
 ): Modifier = composed {
     if (isGalaxySkin()) {
-
+        // GALAXY — lifted-top gradient fill + lit rim.
         this
             .clip(shape)
             .background(
@@ -122,7 +156,7 @@ fun Modifier.novaSurface(
                 shape,
             )
     } else {
-
+        // NOVA — flat solid fill + a thin single-color rim (no gradient lift).
         this
             .clip(shape)
             .background(tint)
@@ -134,6 +168,11 @@ fun Modifier.novaSurface(
     }
 }
 
+/**
+ * Animated accent rim that lights up on a state change (selection, unread,
+ * focus). Border-alpha only — no blur — so it's LazyColumn-safe. Layer it over
+ * a surface that already has a fill; pass [active] to drive the glow.
+ */
 fun Modifier.novaGlow(
     shape: Shape,
     accent: Color,
@@ -142,7 +181,7 @@ fun Modifier.novaGlow(
     activeAlpha: Float = NovaDepth.rimAccent,
 ): Modifier = composed {
     if (!isGalaxySkin()) {
-
+        // NOVA (flat): no animated glow. A thin static hairline that only steps
         // to the (dimmer, flat) accent alpha when active — no bloom, no spring.
         return@composed border(
             1.dp,
@@ -159,16 +198,29 @@ fun Modifier.novaGlow(
 }
 
 // ---------------------------------------------------------------------------
-
+// Aurora background: 2-3 large low-alpha radial blobs over the Void, with an
+// optional slow ambient drift. Draw once behind non-scrolling content.
 // ---------------------------------------------------------------------------
 
+/**
+ * Gradient-mesh / aurora canvas for the Nova app. Draws large, very-low-alpha
+ * radial gradients (iris top-left, cyan bottom-right) over the current fill —
+ * the "space-indigo canvas" the brief calls for. Effectively free: pure draw,
+ * no per-row cost. Apply behind whole screens or non-scrolling heroes.
+ *
+ * @param accent the iris blob color (tracks the active accent).
+ * @param animate slow ambient drift; automatically snaps off under reduced
+ *   motion. Only enable on non-scrolling surfaces (heroes, onboarding, shells).
+ */
 fun Modifier.novaAuroraBackground(
     accent: Color,
     cyan: Color = NovaColors.Cyan,
     animate: Boolean = false,
 ): Modifier = composed {
     val galaxy = isGalaxySkin()
-
+    // NOVA (flat): the aurora is OFF entirely — no radial blobs, no drift, no
+    // deep-space mesh. This is the single biggest Nova↔Galaxy differentiator: the
+    // Nova canvas is a PLAIN SOLID theme background. Paint the flat `surface`
     // fill so callers that use aurora as their only background still get a solid
     // canvas (never transparent) — just with zero animated/glowy space mesh.
     if (!galaxy) return@composed background(androidx.compose.material3.MaterialTheme.colorScheme.surface)
@@ -183,7 +235,7 @@ fun Modifier.novaAuroraBackground(
         )
         v
     } else 0.5f
-
+    // GALAXY only: the full gradient-mesh aurora.
     val irisA = 0.11f
     val cyanA = 0.075f
     drawBehind {
@@ -216,8 +268,12 @@ fun Modifier.novaAuroraBackground(
     }
 }
 
+/** A soft accent halo washed *under* a surface's content — used behind hero
+ *  glyphs, active pills and empty-state icons to make them lift off the fold.
+ *  Cheap radial draw; pair with a clip if you want it contained. */
 fun Modifier.novaHalo(accent: Color, alpha: Float = NovaDepth.haloAlpha, center: Offset? = null): Modifier = composed {
-
+    // NOVA (flat): the accent halo is a no-op — the flat skin has no glow under
+    // glyphs/pills/icons. GALAXY keeps the full radial wash.
     if (!isGalaxySkin()) return@composed this
     val a = alpha
     drawBehind {
@@ -232,25 +288,35 @@ fun Modifier.novaHalo(accent: Color, alpha: Float = NovaDepth.haloAlpha, center:
 }
 
 // ---------------------------------------------------------------------------
-
+// Motion: named entrance / interaction specs so Nova pulls from one physics
 // library instead of every surface improvising tween(160)/spring(0.82).
 // ---------------------------------------------------------------------------
 
+/** Nova's extended motion vocabulary — layered on top of [PigeonMotion].
+ *  All specs snap under reduced motion. */
 object NovaMotion {
-
+    /** Bold overshoot for celebratory pops (send, reaction appear). */
     @Composable
     fun <T> pop(): FiniteAnimationSpec<T> = if (LocalReducedMotion.current) snap()
     else spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessMedium)
 
+    /** Emphasized settle for hero reveals and large layout shifts. */
     @Composable
     fun <T> emphasized(): FiniteAnimationSpec<T> = if (LocalReducedMotion.current) snap()
     else spring(dampingRatio = 0.82f, stiffness = Spring.StiffnessMediumLow)
 
+    /** Quick tactile spring for press / selection states. */
     @Composable
     fun <T> press(): FiniteAnimationSpec<T> = if (LocalReducedMotion.current) snap()
     else spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMediumLow)
 }
 
+/**
+ * One-shot coordinated reveal for Nova hero blocks / big display titles: a fade
+ * + upward rise + faint scale on first composition. Snaps under reduced motion.
+ * Apply to the big title so entering any Nova screen has a designed reveal
+ * instead of static text popping in. Optional [delayMillis] to stagger blocks.
+ */
 fun Modifier.heroAppear(delayMillis: Int = 0): Modifier = composed {
     val reduced = LocalReducedMotion.current
     var shown by remember { mutableStateOf(false) }
@@ -272,6 +338,9 @@ fun Modifier.heroAppear(delayMillis: Int = 0): Modifier = composed {
     }
 }
 
+/** Slow, reduced-motion-aware breathing pulse (0..1) for living presence cues —
+ *  online rings, empty-state glows. Returns a constant mid value when motion is
+ *  reduced so callers can multiply it in without branching. */
 @Composable
 fun rememberNovaPulse(periodMillis: Int = 2600): Float {
     val reduced = LocalReducedMotion.current

@@ -96,6 +96,11 @@ import app.pigeonsms.ui.util.presence
 import app.pigeonsms.ui.util.smartTime
 import coil.compose.AsyncImage
 
+/**
+ * WhatsApp-style "conversation info": every image/video shared in the chat as a
+ * 3-column grid, plus offline message search over the locally cached history.
+ * Presented as a fullscreen dialog on top of the chat.
+ */
 @Composable
 fun ConversationInfoScreen(
     vm: ChatViewModel,
@@ -129,7 +134,7 @@ fun ConversationInfoScreen(
             .background(MaterialTheme.colorScheme.background)
             .let { base ->
                 // aurora mesh behind the whole (non-scrolling) info shell — the
-
+                // "space-indigo canvas" the Nova brief calls for.
                 if (nova) base.novaAuroraBackground(MaterialTheme.colorScheme.primary, animate = true) else base
             }
             .statusBarsPadding()
@@ -169,6 +174,7 @@ fun ConversationInfoScreen(
     }
 }
 
+/** Classic top bar — plain back button + stacked title / subtitle. Unchanged. */
 @Composable
 private fun ClassicInfoTopBar(title: String, onDismiss: () -> Unit) {
     Row(
@@ -196,6 +202,8 @@ private fun ClassicInfoTopBar(title: String, onDismiss: () -> Unit) {
     }
 }
 
+/** Nova top bar — a rounded icon-badge back affordance (lit rim + spring press),
+ *  a louder title, and a cyan-tracked "conversation info" subline. */
 @Composable
 private fun NovaInfoTopBar(title: String, onDismiss: () -> Unit) {
     Row(
@@ -222,6 +230,7 @@ private fun NovaInfoTopBar(title: String, onDismiss: () -> Unit) {
     }
 }
 
+/** Rounded-square Nova back button with a lit rim + spring press. */
 @Composable
 private fun NovaBackBadge(onClick: () -> Unit) {
     val accent = MaterialTheme.colorScheme.primary
@@ -241,6 +250,12 @@ private fun NovaBackBadge(onClick: () -> Unit) {
     }
 }
 
+/**
+ * Centered profile header at the top of the conversation-info screen: large
+ * avatar + conversation name + presence. [model] is the pfp image (null falls
+ * back to the colored-initial avatar); [lastOnline] drives the online line
+ * (null for group channels — the status line is then omitted).
+ */
 @Composable
 private fun ConversationProfileHeader(title: String, model: Any?, lastOnline: Long?) {
     if (LocalExperimentalRedesign.current) {
@@ -273,6 +288,12 @@ private fun ConversationProfileHeader(title: String, model: Any?, lastOnline: Lo
     }
 }
 
+/**
+ * Nova profile header — the hero of this screen. A soft accent halo lifts the
+ * avatar off the fold; when the peer is online a cyan presence ring breathes
+ * around it (reduced-motion aware). The name reveals via [heroAppear] and
+ * presence reads in cyan to reinforce the iris+cyan pair.
+ */
 @Composable
 private fun NovaProfileHeader(title: String, model: Any?, lastOnline: Long?) {
     val accent = MaterialTheme.colorScheme.primary
@@ -405,6 +426,11 @@ private fun InfoTabSelector(selected: InfoTab, onSelect: (InfoTab) -> Unit) {
     }
 }
 
+/**
+ * Nova segmented tab pills. The selected pill fills with the iris→cyan CTA
+ * gradient (dual-accent signature) and casts an accent glow; the unselected pill
+ * is a lit-rim Nova surface. Both press with a spring.
+ */
 @Composable
 private fun NovaInfoTabSelector(selected: InfoTab, onSelect: (InfoTab) -> Unit) {
     val accent = MaterialTheme.colorScheme.primary
@@ -567,6 +593,8 @@ private fun MediaGrid(items: List<ConversationMedia>, onOpen: (Int) -> Unit) {
     }
 }
 
+/** One-shot spring scale-in for a Nova media tile, lightly staggered by grid
+ *  position so the grid assembles instead of popping in flat. */
 @Composable
 private fun Modifier.novaTileAppear(index: Int): Modifier {
     val reduced = LocalReducedMotion.current
@@ -584,6 +612,8 @@ private fun Modifier.novaTileAppear(index: Int): Modifier {
     }
 }
 
+/** Nova empty-media state — accent-washed disc + halo glow so it reads designed,
+ *  not broken. Mirrors the shared EmptyState language with a breathing glow. */
 @Composable
 private fun NovaMediaEmpty() {
     val accent = MaterialTheme.colorScheme.primary
@@ -640,7 +670,7 @@ private fun SearchPane(
 
     Column(Modifier.fillMaxSize().padding(horizontal = Spacing.l)) {
         if (nova) {
-
+            // floating Nova search pill: lit rim + shadow, focus wakes the rim.
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it; onQuery(it) },
@@ -754,6 +784,8 @@ private fun SearchPane(
     }
 }
 
+/** Nova search result card — lit-rim Nova surface with a spring press, an iris
+ *  author name and a cyan timestamp so the dual-accent pair reads on every row. */
 @Composable
 private fun NovaSearchResult(message: MessageEntity, onOpen: (String) -> Unit) {
     val accent = MaterialTheme.colorScheme.primary

@@ -58,10 +58,18 @@ import app.pigeonsms.design.theme.novaGlow
 import app.pigeonsms.design.theme.novaHalo
 import kotlinx.coroutines.launch
 
+/** One launcher icon variant. [key] is both the drawable/color suffix
+ *  (`ic_fg_<key>` / `ic_bg_<key>`) and the manifest activity-alias suffix
+ *  (`app.pigeonsms.Icon_<key>`). [label] is the user-facing display name.
+ *  [author] is the crediting username shown as "made by @<author>". */
 internal data class AppIconVariant(val label: String, val key: String, val author: String = "Andrei")
 
+/** Rounded launcher-icon preview size in the picker rows. */
 private val ICON_PREVIEW = 44.dp
 
+/** The shippable launcher icons, in display order. These are the ONLY aliases
+ *  present in the manifest — never enable/disable a key outside this list or
+ *  PackageManager will throw on the missing component. */
 internal val AppIconVariants = listOf(
     AppIconVariant("Hacker Code", "hackercode", author = "admin"),
     AppIconVariant("Photorealistic", "photorealistic"),
@@ -85,6 +93,7 @@ internal val AppIconVariants = listOf(
     AppIconVariant("Saucy Pigeon", "saucy", author = "a_arond"),
 )
 
+/** Foreground drawable for a variant key. */
 private fun fgRes(key: String): Int = when (key) {
     "photorealistic" -> R.mipmap.ic_fg_photorealistic
     "sunset" -> R.mipmap.ic_fg_sunset
@@ -109,6 +118,7 @@ private fun fgRes(key: String): Int = when (key) {
     else -> R.mipmap.ic_fg_classic
 }
 
+/** Background color resource for a variant key. */
 private fun bgRes(key: String): Int = when (key) {
     "photorealistic" -> R.color.ic_bg_photorealistic
     "sunset" -> R.color.ic_bg_sunset
@@ -133,6 +143,7 @@ private fun bgRes(key: String): Int = when (key) {
     else -> R.color.ic_bg_classic
 }
 
+/** Enable the Icon_<key> alias and disable the other six. */
 internal fun setAppIcon(context: android.content.Context, key: String) {
     val pm = context.packageManager
     AppIconVariants.forEach { v ->
@@ -145,6 +156,8 @@ internal fun setAppIcon(context: android.content.Context, key: String) {
     }
 }
 
+/** The currently enabled alias key; falls back to "default" when none is
+ *  explicitly enabled (fresh install: the default alias is enabled in manifest). */
 internal fun currentAppIcon(context: android.content.Context): String {
     val pm = context.packageManager
     return AppIconVariants.firstOrNull { v ->
@@ -153,6 +166,11 @@ internal fun currentAppIcon(context: android.content.Context): String {
     }?.key ?: "default"
 }
 
+/**
+ * Full-screen, settings-style vertical list of launcher icons. Tapping a row
+ * switches the app's launcher icon. [onOpenUser] receives a user id and opens
+ * that profile — used by the "@Andrei" footer credit (resolved from username).
+ */
 @Composable
 fun AppIconScreen(onBack: () -> Unit, onOpenUser: (String) -> Unit) {
     val context = LocalContext.current
@@ -178,7 +196,7 @@ fun AppIconScreen(onBack: () -> Unit, onOpenUser: (String) -> Unit) {
             AppIconVariants.forEachIndexed { i, v ->
                 if (i > 0) IconRowDivider()
                 val selected = current == v.key
-
+                // Nova: the selected row lights an animated accent rim so picking
                 // an icon reads as a physical state-change, not a static tick.
                 val rowMod = if (nova) {
                     Modifier.novaGlow(NovaCorners.card, accent, active = selected)
@@ -204,7 +222,7 @@ fun AppIconScreen(onBack: () -> Unit, onOpenUser: (String) -> Unit) {
                             .then(if (nova) Modifier.border(1.dp, accent.copy(alpha = if (selected) NovaDepth.rimAccent else NovaDepth.rimBottom), NovaCorners.iconBadge) else Modifier),
                         contentAlignment = Alignment.Center,
                     ) {
-
+                        // Photo/scene icons bake a safe-zone border into their
                         // foreground for the launcher mask; in this flat preview
                         // that reads as a shrunk framed photo, so scale to fill and
                         // let the clip crop the border — matching the launcher look.
@@ -264,6 +282,7 @@ fun AppIconScreen(onBack: () -> Unit, onOpenUser: (String) -> Unit) {
     }
 }
 
+/** Hairline divider inset past the icon preview so it aligns with the labels. */
 @Composable
 private fun IconRowDivider() {
     androidx.compose.material3.HorizontalDivider(
@@ -272,3 +291,4 @@ private fun IconRowDivider() {
         color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
     )
 }
+
