@@ -166,6 +166,13 @@ data class MessagesCursorDto(
 
 @Serializable data class MessagesResponse(val messages: List<MessageDto>, val read: Map<String, Long>? = null, val cursor: MessagesCursorDto? = null)
 @Serializable data class MessageResponse(val message: MessageDto)
+
+/**
+ * POST /channels/:id/messages response. A normal send returns { message: {...} } (201);
+ * a future send_at returns { scheduled: {...} } (202, NO message key). Both fields are
+ * nullable so kotlinx doesn't throw MissingFieldException on the scheduled branch.
+ */
+@Serializable data class SendResponse(val message: MessageDto? = null, val scheduled: ScheduledMessageDto? = null)
 @Serializable data class SuperPinDto(val message: MessageDto, val pinned_by: String, val created_at: Long = 0, val dismissed: Boolean = false)
 @Serializable data class SuperPinResponse(val super_pin: SuperPinDto? = null)
 

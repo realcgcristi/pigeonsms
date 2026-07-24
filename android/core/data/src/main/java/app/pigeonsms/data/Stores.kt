@@ -43,8 +43,9 @@ data class ThemePrefs(
     val reducedMotion: Boolean = false,
     val readReceipts: Boolean = true,
     val invisible: Boolean = false,
-    /** Experimental end-to-end encryption for DMs. DEFAULT ON (owner's personal test build). */
-    val e2ee: Boolean = true,
+    /** Experimental end-to-end encryption for DMs. DEFAULT OFF — the key exchange must
+     *  never sit on the send critical path (regressed sends in 2.8.0). User opt-in only. */
+    val e2ee: Boolean = false,
     val wallpaper: String? = null,
     val wallpaperDim: Float = 0.3f,
     val liquidGlass: Boolean = false,
@@ -85,7 +86,7 @@ class ThemeStore(private val context: Context) {
             reducedMotion = p[K.reducedMotion] ?: false,
             readReceipts = p[K.readReceipts] ?: true,
             invisible = p[K.invisible] ?: false,
-            e2ee = p[K.e2ee] ?: true,
+            e2ee = p[K.e2ee] ?: false,
             wallpaper = p[K.wallpaper],
             wallpaperDim = p[K.wallpaperDim] ?: 0.3f,
             liquidGlass = p[K.liquidGlass] ?: false,

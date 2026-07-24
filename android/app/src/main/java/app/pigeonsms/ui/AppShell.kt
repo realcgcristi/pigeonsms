@@ -335,7 +335,17 @@ fun AppShell(session: LocalSession) {
             composable("search") {
                 SearchScreen(
                     onBack = { nav.popBackStack() },
-                    onOpenChat = { ch, name -> nav.navigate("chat/$ch/${enc(name)}") },
+                    onOpenChat = { ch, name ->
+                        // A space-channel search result must open as a space, not a DM —
+                        // otherwise its messages enter the DM/E2EE path (encryption on a
+                        // space channel, which must NEVER happen). Resolve via the same
+                        // cached home snapshot the ping banner uses.
+                        val isSpaceChannel = home.spaces.any { space ->
+                            space.channels.any { it.id == ch }
+                        }
+                        val suffix = if (isSpaceChannel) "?space=true" else ""
+                        nav.navigate("chat/$ch/${enc(name)}$suffix")
+                    },
                     onOpenProfile = { id -> nav.navigate("profile/$id") },
                 )
             }

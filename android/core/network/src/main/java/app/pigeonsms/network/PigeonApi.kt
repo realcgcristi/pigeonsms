@@ -149,6 +149,10 @@ class PigeonApi(
      * ttl (seconds) makes the message disappearing (server sets expires_at = now + ttl*1000).
      * sendAt (epoch ms) in the future schedules it instead of sending (goes to scheduled_messages).
      * encrypted=true stores base64 ciphertext in content, encrypted=1 server-side (E2EE, flag-off).
+     *
+     * Returns the full [SendResponse]: a normal send carries `message`, a future send_at
+     * carries `scheduled` (HTTP 202, no `message`). Callers must handle the scheduled
+     * case — unwrapping `.message!!` on a scheduled response would NPE / mis-fail.
      */
     suspend fun sendMessage(
         channelId: String,
@@ -159,7 +163,7 @@ class PigeonApi(
         ttl: Long? = null,
         sendAt: Long? = null,
         encrypted: Boolean = false,
-    ) =
+    ): SendResponse =
         client.post("$baseUrl/channels/$channelId/messages") {
             auth(); contentType(ContentType.Application.Json)
             setBody(buildJsonObject {
@@ -170,7 +174,7 @@ class PigeonApi(
                 if (sendAt != null) put("send_at", sendAt)
                 if (encrypted) put("encrypted", 1)
             })
-        }.unwrap<MessageResponse>().message
+        }.unwrap<SendResponse>()
 
     /**
      * Poll message: kind="poll" + poll {question, options[2..10], anonymous}.
