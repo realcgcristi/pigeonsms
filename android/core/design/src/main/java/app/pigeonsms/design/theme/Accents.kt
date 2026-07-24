@@ -3,8 +3,10 @@ package app.pigeonsms.design.theme
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 
+/** Selectable accent identities. Each is a bright + deep + on-color triad. */
 data class Accent(val key: String, val label: String, val bright: Color, val deep: Color, val on: Color)
 
+// Order: the default "main" accent first, then the rest laid out in ROYGBIV
 // rainbow order (red → orange → yellow → green → blue → indigo → violet) so the
 // picker reads like a spectrum instead of a random scatter.
 val PigeonAccents = listOf(

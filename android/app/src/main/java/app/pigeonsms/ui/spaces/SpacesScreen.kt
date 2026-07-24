@@ -91,7 +91,8 @@ fun SpacesScreen(
     val home by app.home.collectAsState()
     val ui by vm.ui.collectAsState()
     val skin = LocalUiSkin.current
-
+    // Galaxy keeps the exp3 expressive layout; Nova uses the ported "-exp" structural
+    // layout; Classic stays classic.
     val galaxy = skin == UiSkin.Galaxy
     val novaSkin = skin == UiSkin.Nova
     var sheetOpen by rememberSaveable { mutableStateOf(false) }
@@ -104,6 +105,8 @@ fun SpacesScreen(
         onOpenChannel(channel.id, channel.name, channel.kind)
     }
 
+    // Single-nest shortcut: skip the list entirely and render that one nest's
+    // channels inline (no intermediate row to click through). Multiple nests get
     // the clean nest-list below and tap through to a dedicated channels screen.
     if (home.spaces.size == 1) {
         NestChannelsScreen(
@@ -183,7 +186,8 @@ fun SpacesScreen(
                 verticalArrangement = Arrangement.spacedBy(Spacing.m),
             ) {
                 itemsIndexed(home.spaces, key = { _, s -> s.id }) { index, space ->
-
+                    // Multi-nest tab is a clean list of nests — no inline channels.
+                    // Tapping a row opens that nest's dedicated channels screen.
                     NestRow(
                         space = space,
                         modifier = Modifier.itemAppear(index),
@@ -224,6 +228,8 @@ fun SpacesScreen(
     CreateJoinNestSheet(vm, app, sheetOpen) { sheetOpen = false }
 }
 
+/** Create-or-join bottom sheet. Shared by the multi-nest list and the single-nest
+ *  embedded view so the "+" affordance works the same everywhere. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun CreateJoinNestSheet(
@@ -301,6 +307,12 @@ private fun CreateJoinNestSheet(
     }
 }
 
+/**
+ * A single nest row in the multi-nest list: icon + name + role + total-unread
+ * pill, tapping opens that nest's channels. No inline channel list. Expressive
+ * skins (galaxy/nova) get the elevated glow treatment; classic stays a calm
+ * tonal card.
+ */
 @Composable
 private fun NestRow(
     space: SpaceDto,
@@ -389,7 +401,7 @@ private fun ActionLabel(working: Boolean, label: String) {
         Text("working...", Modifier.padding(start = Spacing.s))
     } else Text(label)
 }
-
+/** Quiet member-count chip: outline hairline, no fill — metadata, not a button. */
 @Composable
 private fun MemberChip(count: Int) {
     Row(

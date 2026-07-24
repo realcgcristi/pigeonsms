@@ -32,6 +32,7 @@ import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.PersonAdd
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.Notifications
@@ -62,7 +63,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -121,7 +126,7 @@ fun SettingsScreen(
 ) {
     val skin = LocalUiSkin.current
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-
+        // Galaxy gets the glowing aurora hero; Nova (exp2) + Classic use the plain header.
         if (skin == UiSkin.Galaxy) NovaHero(title = "you") else ScreenHeader("you")
         Column(Modifier.padding(horizontal = Spacing.l)) {
             if (skin == UiSkin.Galaxy) {
@@ -133,7 +138,7 @@ fun SettingsScreen(
                     onEditProfile = onEditProfile,
                 )
             } else if (skin == UiSkin.Nova) {
-
+                // NOVA (ported from -exp): bold flat accent-gradient identity card.
                 Exp2IdentityHero(
                     username = username,
                     displayName = displayName,
@@ -195,6 +200,9 @@ fun SettingsScreen(
     }
 }
 
+/** NOVA identity hero: an elevated card that floats over the aurora — a soft
+ *  accent-washed cover, a haloed + ringed avatar, cyan handle, and a gradient
+ *  CTA. The whole block reveals with [heroAppear]. */
 @Composable
 private fun NovaIdentityHero(
     username: String,
@@ -224,14 +232,14 @@ private fun NovaIdentityHero(
             ) { Avatar(displayName, avatarModel, 62.dp) }
             Column(Modifier.weight(1f).padding(start = Spacing.l)) {
                 Text(displayName, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
-
+                // cyan handle = one of Nova's deliberate secondary-accent touchpoints
                 Text("@$username", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.secondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 statusText?.takeIf { it.isNotBlank() }?.let {
                     Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = Spacing.xxs))
                 }
             }
         }
-
+        // gradient CTA with a lit glow-shadow + spring press
         Row(
             Modifier.fillMaxWidth().padding(top = Spacing.l)
                 .clickableScale(onClick = onEditProfile)
@@ -248,6 +256,9 @@ private fun NovaIdentityHero(
     }
 }
 
+/** NOVA identity hero ported from the -exp experiment: a flat accent→surface
+ *  gradient card with a ringed avatar and a full-width filled edit-profile CTA.
+ *  Deliberately flat — no glow/halo/elevation (that's Galaxy's language). */
 @Composable
 private fun Exp2IdentityHero(
     username: String,
@@ -290,17 +301,21 @@ private fun Exp2IdentityHero(
     }
 }
 
+/** One rounded container per settings section — rows live inside, separated by
+ *  inset hairlines. Deliberately plain tonal (no glass): glass is reserved for
+ *  floating layers. */
 @Composable
 internal fun GroupCard(content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
     when (LocalUiSkin.current) {
         UiSkin.Galaxy ->
-
+            // GALAXY: grouped sections float over the aurora with a soft accent-tinted
+            // drop shadow + lifted-top gradient fill + lit rim (via novaElevation).
             Column(
                 Modifier.fillMaxWidth().novaElevation(NovaCorners.card, MaterialTheme.colorScheme.surfaceContainer, MaterialTheme.colorScheme.primary),
                 content = content,
             )
         UiSkin.Nova ->
-
+            // NOVA (ported from -exp): flat surface card with a hairline rim.
             Column(
                 Modifier.fillMaxWidth().clip(NovaCorners.card).background(MaterialTheme.colorScheme.surfaceContainer)
                     .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f), NovaCorners.card),
@@ -314,6 +329,7 @@ internal fun GroupCard(content: @Composable androidx.compose.foundation.layout.C
     }
 }
 
+/** Hairline divider inset past the leading icon badge. */
 @Composable
 internal fun RowDivider() {
     val inset = if (LocalExperimentalRedesign.current) Spacing.l + 44.dp + Spacing.m else Spacing.l + Dimens.iconBadge + Spacing.m
@@ -324,6 +340,9 @@ internal fun RowDivider() {
     )
 }
 
+/** Notification controls for the device plus explicit per-scope overrides.
+ * Scope rows are intentionally local-first so they remain usable when the
+ * account is offline; PushService reads the same store before posting. */
 @Composable
 fun NotificationSettingsScreen(onBack: () -> Unit) {
     val context = LocalContext.current
@@ -394,10 +413,10 @@ private fun ScopeModeRow(icon: ImageVector, title: String, detail: String, scope
     val nova = skin == UiSkin.Nova
     val accent = MaterialTheme.colorScheme.primary
     val container = when (skin) {
-
+        // GALAXY: elevated aurora card.
         UiSkin.Galaxy -> Modifier.fillMaxWidth().padding(vertical = Spacing.xxs)
             .novaElevation(NovaCorners.card, MaterialTheme.colorScheme.surfaceContainer, accent)
-
+        // NOVA (ported from -exp): flat rounded surface.
         UiSkin.Nova -> Modifier.fillMaxWidth().padding(vertical = Spacing.xxs).clip(NovaCorners.card).background(MaterialTheme.colorScheme.surfaceContainer)
         UiSkin.Classic -> Modifier.fillMaxWidth().padding(vertical = Spacing.xxs).clip(Corners.group).background(MaterialTheme.colorScheme.surfaceContainer)
     }
@@ -406,14 +425,14 @@ private fun ScopeModeRow(icon: ImageVector, title: String, detail: String, scope
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(icon, null, tint = accent, modifier = Modifier.size(20.dp))
                 Text(title, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f).padding(start = Spacing.m))
-
+                // active mode reads in cyan on Galaxy — the dual-accent meta touch
                 Text(modeLabel(mode), style = MaterialTheme.typography.labelMedium, color = if (galaxy) MaterialTheme.colorScheme.secondary else accent)
             }
             Text(detail, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = Spacing.xxl, top = Spacing.xxs))
             OutlinedTextField(value = scopeId, onValueChange = onScopeId, label = { Text("${title.dropLastWhile { it == 's' }} id") }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(top = Spacing.xs), shape = if (galaxy || nova) NovaCorners.input else Corners.input)
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = Spacing.s), horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
                 listOf("all" to "all", "mentions" to "mentions", "mute" to "mute").forEach { (value, label) ->
-
+                    // Galaxy uses the pill NovaTag; Nova (ported) + Classic use plain FilterChips.
                     if (galaxy) {
                         NovaTag(selected = mode == value, onClick = { onMode(value) }) { Text(label) }
                     } else {
@@ -438,7 +457,7 @@ internal fun Group(label: String) {
             if (label.isNotBlank()) NovaSectionLabel(label, modifier = Modifier.padding(top = Spacing.xl, bottom = Spacing.m, start = Spacing.m))
             else Spacer(Modifier.height(Spacing.l))
         UiSkin.Nova ->
-
+            // NOVA (ported from -exp): plain bold section label, no aurora treatment.
             if (label.isNotBlank()) Text(label.lowercase(), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.padding(top = Spacing.xl, bottom = Spacing.m, start = Spacing.s))
             else Spacer(Modifier.height(Spacing.l))
         UiSkin.Classic ->
@@ -447,6 +466,8 @@ internal fun Group(label: String) {
     }
 }
 
+/** A row inside a [GroupCard]: 56dp, 20dp leading icon in a soft tinted rounded
+ *  square, quiet chevron. Plain ripple — grouped rows stay calm, no scale, no glass. */
 @Composable
 private fun MenuRow(icon: ImageVector, label: String, detail: String?, onClick: () -> Unit, danger: Boolean = false, cyanBadge: Boolean = false) {
     val accent = if (danger) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
@@ -454,7 +475,7 @@ private fun MenuRow(icon: ImageVector, label: String, detail: String?, onClick: 
     val galaxy = skin == UiSkin.Galaxy
     val nova = skin == UiSkin.Nova
     val experimental = galaxy || nova
-
+    // Galaxy: a couple of category badges tint cyan for the dual-accent story.
     val badgeTint = if (galaxy && cyanBadge && !danger) MaterialTheme.colorScheme.secondary else accent
     val badgeSize = if (experimental) 44.dp else Dimens.iconBadge
     Row(
@@ -480,7 +501,7 @@ private fun MenuRow(icon: ImageVector, label: String, detail: String?, onClick: 
                 Icon(icon, null, tint = badgeTint, modifier = Modifier.size(22.dp))
             }
         } else {
-
+        // NOVA (ported from -exp) + Classic: flat tinted badge, no rim.
         Box(
             Modifier.size(badgeSize).clip(if (nova) NovaCorners.iconBadge else Corners.iconBadge)
                 .background(accent.copy(alpha = if (nova) 0.18f else 0.12f)),
@@ -520,7 +541,7 @@ internal fun SettingsSubHeader(title: String, onBack: () -> Unit) {
                 )
             }
         UiSkin.Nova ->
-
+            // NOVA (ported from -exp): plain circular back button + big display title.
             Column(Modifier.fillMaxWidth().padding(top = Spacing.xxl, bottom = Spacing.m)) {
                 IconButton(onBack, Modifier.background(MaterialTheme.colorScheme.surfaceContainer, CircleShape)) {
                     Icon(Icons.AutoMirrored.Outlined.ArrowBack, "back", tint = MaterialTheme.colorScheme.onSurface)
@@ -578,7 +599,7 @@ fun AppearanceScreen(onBack: () -> Unit, onAppIcon: () -> Unit = {}) {
                 val on = prefs.accent == a.key
                 Box(
                     Modifier
-
+                        // Nova: the selected accent lights a soft halo of its own color
                         .then(if (on && novaSel) Modifier.novaHalo(a.bright, alpha = NovaDepth.glowStrong) else Modifier)
                         .size(44.dp).background(a.bright, CircleShape).clickable { vm.setAccent(a.key) }
                         .then(if (on) Modifier.border(3.dp, MaterialTheme.colorScheme.onSurface, CircleShape) else Modifier),
@@ -647,6 +668,10 @@ fun AppearanceScreen(onBack: () -> Unit, onAppIcon: () -> Unit = {}) {
     }
 }
 
+/**
+ * Three-way UI skin picker: classic / nova / galaxy. Each option is a selectable
+ * card with a one-line description. Selection persists via [SettingsViewModel.setUiSkin].
+ */
 @Composable
 private fun SkinPicker(current: String, onSelect: (String) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(Spacing.s)) {
@@ -712,9 +737,12 @@ private fun SkinOption(
 }
 
 @Composable
-fun PrivacyScreen(onBack: () -> Unit, onBlocked: () -> Unit) {
+fun PrivacyScreen(username: String, onBack: () -> Unit, onBlocked: () -> Unit) {
     val vm: SettingsViewModel = pigeonVm { c, _ -> SettingsViewModel(c.authRepository, c.themeStore) }
     val prefs by vm.prefs.collectAsState(initial = ThemePrefs())
+    // Invite minting is gated to trusted users; the server 403s anyone else anyway.
+    val canInvite = username in listOf("admin", "a_arond", "andrei")
+    var showInviteDialog by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = Spacing.l)) {
         SettingsSubHeader("privacy & safety", onBack)
         GroupCard {
@@ -726,10 +754,106 @@ fun PrivacyScreen(onBack: () -> Unit, onBlocked: () -> Unit) {
         GroupCard {
             MenuRow(Icons.Outlined.Shield, "blocked users", "manage who can't reach you", onBlocked)
         }
+        if (canInvite) {
+            Spacer(Modifier.height(Spacing.l))
+            GroupCard {
+                MenuRow(Icons.Outlined.PersonAdd, "generate invites", "create signup invite codes", { showInviteDialog = true })
+            }
+        }
         Spacer(Modifier.height(Spacing.huge))
+    }
+    if (showInviteDialog) {
+        GenerateInvitesDialog(onDismiss = { showInviteDialog = false })
     }
 }
 
+/** Trusted-user tool: mint signup invite codes. count 1..50, uses 1..1000 (clamped
+ *  client-side too). Reuses the same glassCard/Dialog skin the accent editor uses. */
+@Composable
+private fun GenerateInvitesDialog(onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val api = (context.applicationContext as? app.pigeonsms.PigeonApp)?.container?.api
+    val scope = rememberCoroutineScope()
+    val clipboard = LocalClipboardManager.current
+    var count by remember { mutableStateOf("1") }
+    var uses by remember { mutableStateOf("1") }
+    var busy by remember { mutableStateOf(false) }
+    var codes by remember { mutableStateOf<List<String>>(emptyList()) }
+    var error by remember { mutableStateOf<String?>(null) }
+    Dialog(onDismissRequest = onDismiss) {
+        Box(Modifier.glassCard(Corners.card, tint = MaterialTheme.colorScheme.surfaceContainerHigh)) {
+            Column(Modifier.padding(Spacing.l), verticalArrangement = Arrangement.spacedBy(Spacing.s)) {
+                Text("generate invites", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
+                if (codes.isEmpty()) {
+                    OutlinedTextField(
+                        value = count,
+                        onValueChange = { count = it.filter { c -> c.isDigit() }.take(2) },
+                        label = { Text("how many codes?") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = uses,
+                        onValueChange = { uses = it.filter { c -> c.isDigit() }.take(4) },
+                        label = { Text("how many uses each?") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    error?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error) }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
+                        OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f)) { Text("cancel") }
+                        Button(
+                            onClick = {
+                                if (busy) return@Button
+                                error = null
+                                val n = (count.toIntOrNull() ?: 1).coerceIn(1, 50)
+                                val u = (uses.toIntOrNull() ?: 1).coerceIn(1, 1000)
+                                busy = true
+                                scope.launch {
+                                    try {
+                                        val minted = api?.generateInvites(n, u)?.map { it.code } ?: emptyList()
+                                        if (minted.isEmpty()) error = "no codes returned" else codes = minted
+                                    } catch (e: app.pigeonsms.network.PigeonApiException) {
+                                        error = if (e.code == "http_403") "not allowed" else e.message
+                                    } catch (e: Exception) {
+                                        error = "something went wrong"
+                                    } finally {
+                                        busy = false
+                                    }
+                                }
+                            },
+                            enabled = !busy,
+                            modifier = Modifier.weight(1f),
+                        ) { Text(if (busy) "generating…" else "generate") }
+                    }
+                } else {
+                    Text("${codes.size} code${if (codes.size == 1) "" else "s"} created", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Column(
+                        Modifier.fillMaxWidth().heightIn(max = 240.dp).verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(Spacing.xs),
+                    ) {
+                        codes.forEach { code ->
+                            Text(
+                                code,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.fillMaxWidth().clip(Corners.button).background(MaterialTheme.colorScheme.surfaceContainer).padding(horizontal = Spacing.m, vertical = Spacing.s),
+                            )
+                        }
+                    }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
+                        OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f)) { Text("done") }
+                        Button(onClick = { clipboard.setText(AnnotatedString(codes.joinToString("\n"))) }, modifier = Modifier.weight(1f)) { Text("copy all") }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Hairline between toggle rows — full-width text inset (no icon badge). */
 @Composable
 private fun ToggleDivider() {
     androidx.compose.material3.HorizontalDivider(
@@ -739,6 +863,7 @@ private fun ToggleDivider() {
     )
 }
 
+/** Toggle row with a supporting subtitle beneath the label. */
 @Composable
 private fun ToggleRow(label: String, subtitle: String, checked: Boolean, onChange: (Boolean) -> Unit) {
     val nova = LocalExperimentalRedesign.current
@@ -779,6 +904,7 @@ private fun ToggleRow(label: String, checked: Boolean, onChange: (Boolean) -> Un
     }
 }
 
+/** Full HSV editor for the custom accent color. */
 @Composable
 private fun ColorEditorDialog(current: String, onPick: (String) -> Unit, onDismiss: () -> Unit) {
     val initial = remember {

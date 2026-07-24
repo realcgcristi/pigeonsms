@@ -2,6 +2,10 @@ package app.pigeonsms.design.theme
 
 import androidx.compose.ui.graphics.Color
 
+/**
+ * roost palette — warm plum-charcoal darks with a peach signature accent.
+ * Dark is the default personality; oled swaps the floor to true black.
+ */
 object PigeonColors {
     // canvas
     val Ink = Color(0xFF16131A)
@@ -37,6 +41,7 @@ object PigeonColors {
         Color(0xFF76BEFF), Color(0xFFFF8FB0), Amber,
     )
 
+    /** Ink used for the initial letter on [AvatarPalette] discs. */
     val OnAvatar = Color(0xFF201018)
 
     // light theme canvas

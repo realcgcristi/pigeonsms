@@ -24,6 +24,11 @@ val Figtree = FontFamily(
     figtree(FontWeight.Bold),
 )
 
+/**
+ * Scale tuned for chat density: bodies slightly tighter than M3 defaults,
+ * titles friendly rather than loud. Lowercase is a convention applied by
+ * components, not by the type system.
+ */
 val PigeonTypography = Typography(
     displaySmall = TextStyle(fontFamily = Figtree, fontWeight = FontWeight.Bold, fontSize = 32.sp, lineHeight = 38.sp),
     headlineMedium = TextStyle(fontFamily = Figtree, fontWeight = FontWeight.Bold, fontSize = 24.sp, lineHeight = 30.sp),

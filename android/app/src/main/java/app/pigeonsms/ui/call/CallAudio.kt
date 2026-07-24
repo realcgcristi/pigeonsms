@@ -7,6 +7,11 @@ import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.os.Build
 
+/**
+ * Routes call audio like a phone call: MODE_IN_COMMUNICATION + voice-comm audio
+ * focus, earpiece by default for voice calls, speakerphone for video calls.
+ * [stop] restores whatever mode/routing the device had before the call.
+ */
 class CallAudioController(context: Context) {
 
     private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -15,16 +20,19 @@ class CallAudioController(context: Context) {
     private var focusRequest: AudioFocusRequest? = null
     private var started = false
 
+    /** Speaker state we last applied — the UI toggle reads this as its source of truth. */
     var speakerOn: Boolean = false
         private set
 
+    /** Last audio error, if any — surfaced on-screen since we debug blind. Never fatal. */
     var lastError: String? = null
         private set
 
     fun start(defaultSpeaker: Boolean) {
         if (started) return
         started = true
-
+        // Every platform call below can throw SecurityException / IllegalStateException on
+        // odd OEM builds. Audio routing must never crash the call, so wrap each independently.
         runCatching {
             previousMode = audioManager.mode
             previousSpeakerphone = audioManager.isSpeakerphoneOn
@@ -38,7 +46,7 @@ class CallAudioController(context: Context) {
             val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
                 .setAudioAttributes(attrs)
                 .setAcceptsDelayedFocusGain(false)
-                .setOnAudioFocusChangeListener {  }
+                .setOnAudioFocusChangeListener { /* WebRTC keeps flowing; nothing to pause */ }
                 .build()
             audioManager.requestAudioFocus(request)
             focusRequest = request

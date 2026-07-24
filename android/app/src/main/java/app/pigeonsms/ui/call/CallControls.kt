@@ -45,8 +45,13 @@ import app.pigeonsms.design.theme.Spacing
 import app.pigeonsms.ui.util.clickableScale
 import app.pigeonsms.ui.util.glassPanel
 
+/** Connection lifecycle as reported by the in-WebView JS. */
 enum class CallStatus { Connecting, Connected, Reconnecting, Ended }
 
+/** Title + duration ticker + connection chip, floating over the call surface.
+ *  [diagLog] is a rolling list of the last few diagnostics lines — shown while the
+ *  call is not yet fully connected (or on error) so blind-debugging users can
+ *  screenshot exactly which phase failed. */
 @Composable
 fun CallTopOverlay(
     title: String,
@@ -97,6 +102,8 @@ fun CallTopOverlay(
             }
         }
 
+        // Verbose diagnostics log — visible until the call is fully connected, or
+        // whenever there's an error. Scrollable; shows the last several phases.
         if (diagLog.isNotEmpty() && (status != CallStatus.Connected || errorMessage != null)) {
             val scroll = rememberScrollState()
             LaunchedEffect(diagLog.size) { scroll.scrollTo(scroll.maxValue) }
@@ -136,6 +143,7 @@ fun formatCallDuration(seconds: Long): String {
     return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%d:%02d".format(m, s)
 }
 
+/** Bottom liquid-glass pill with the call controls; springs in from below. */
 @Composable
 fun CallControlBar(
     visible: Boolean,

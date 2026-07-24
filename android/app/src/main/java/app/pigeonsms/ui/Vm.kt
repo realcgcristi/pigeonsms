@@ -9,6 +9,7 @@ import androidx.compose.runtime.Composable
 import app.pigeonsms.AppContainer
 import app.pigeonsms.PigeonApp
 
+/** One factory that can build every screen VM from the DI container. */
 class PigeonVmFactory(
     private val build: (AppContainer, CreationExtras) -> ViewModel,
 ) : ViewModelProvider.Factory {

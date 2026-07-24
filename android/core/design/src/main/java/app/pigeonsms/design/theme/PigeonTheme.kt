@@ -12,17 +12,34 @@ import androidx.compose.runtime.staticCompositionLocalOf
 
 enum class PigeonThemeMode { System, Dark, Oled, Light }
 
+/**
+ * The chosen UI skin. Classic = the untouched original look. Nova and Galaxy
+ * both render the experimental LAYOUTS (screens branch on
+ * [LocalExperimentalRedesign], which is true for both) and differ only in the
+ * design-system TREATMENT:
+ *  - [Nova]   — flatter, cleaner: minimal glow, flat cards + thin rim, calm nav.
+ *  - [Galaxy] — deep/glowy: gradient-mesh aurora, accent glow, big soft shadows.
+ */
 enum class UiSkin { Classic, Nova, Galaxy }
 
+/** The active skin, read by the Nova design primitives to pick flat (Nova) vs
+ *  deep (Galaxy) treatment. Defaults to Classic. */
 val LocalUiSkin = staticCompositionLocalOf { UiSkin.Classic }
 
+/** Whether motion should be minimized (accessibility setting), read anywhere. */
 val LocalReducedMotion = staticCompositionLocalOf { false }
 val LocalAccent = staticCompositionLocalOf { accentByKey("peach") }
 
+/** Experimental Liquid Glass look — frosted translucent surfaces, edge highlights,
+ *  liquid-morphing controls. Read anywhere to opt a surface into the glass style. */
 val LocalLiquidGlass = staticCompositionLocalOf { false }
 
+/** Whole-app experimental redesign ("Nova"): vivid indigo palette, rounder
+ *  shapes, louder type, a reimagined floating nav. Read anywhere to branch a
+ *  surface onto the Nova treatment; off = classic look, untouched. */
 val LocalExperimentalRedesign = staticCompositionLocalOf { false }
 
+/** Tint the glass picks up from the active wallpaper (white when none). */
 val LocalGlassTint = staticCompositionLocalOf { androidx.compose.ui.graphics.Color.White }
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
@@ -37,9 +54,9 @@ fun PigeonTheme(
     skin: UiSkin = UiSkin.Classic,
     content: @Composable () -> Unit,
 ) {
-
+    // Both Nova and Galaxy render the experimental layouts; Classic is untouched.
     val experimental = skin != UiSkin.Classic
-
+    // In experimental (Nova) mode the default accent is Iris; a user-chosen
     // accent still wins so people keep their pick across the redesign.
     val accent =
         if (experimental && accentKey == "peach") NovaAccent else accentByKey(accentKey)
@@ -50,6 +67,7 @@ fun PigeonTheme(
     }
     val oled = mode == PigeonThemeMode.Oled
 
+    // Material You: palette derived from the device wallpaper (API 31+), opt-in
     val context = androidx.compose.ui.platform.LocalContext.current
     val scheme = if (dynamicColor && android.os.Build.VERSION.SDK_INT >= 31) {
         if (dark) androidx.compose.material3.dynamicDarkColorScheme(context)

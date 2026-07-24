@@ -12,6 +12,9 @@ import coil.decode.SvgDecoder
 class PigeonApp : Application(), ImageLoaderFactory {
     val container: AppContainer by lazy { AppContainer(this) }
 
+    // Notifications can be tapped before the Compose graph has mounted (or
+    // while the account is signed out). Retain the latest target until the
+    // logged-in AppShell consumes it.
     private val _pendingNotificationTarget = MutableStateFlow<NotificationTarget?>(null)
     val pendingNotificationTarget: StateFlow<NotificationTarget?> = _pendingNotificationTarget.asStateFlow()
 

@@ -77,9 +77,15 @@ import app.pigeonsms.ui.util.presence
 import app.pigeonsms.ui.util.smartTime
 import kotlinx.coroutines.delay
 
+// --- Shared list primitives ------------------------------------------------------
+// Glass is reserved for floating layers (nav pill, FABs, sheets). List rows across
 // home / friends / spaces / forum stay calm: plain full-bleed surfaces, spacing-only
 // separation, one appear animation, one unread pill.
 
+/**
+ * Entrance for list items: fade + 12dp rise on a smooth spring, staggered for the
+ * first screenful, instant under reduced motion. Cheap — one graphicsLayer, no blur.
+ */
 internal fun Modifier.itemAppear(index: Int): Modifier = composed {
     val reduced = LocalReducedMotion.current
     if (reduced) return@composed this
@@ -99,6 +105,7 @@ internal fun Modifier.itemAppear(index: Int): Modifier = composed {
     }
 }
 
+/** Unread count pill: min 20dp, bright accent, capped at 99+. */
 @Composable
 internal fun UnreadPill(count: Int, modifier: Modifier = Modifier) {
     Box(
@@ -118,6 +125,7 @@ internal fun UnreadPill(count: Int, modifier: Modifier = Modifier) {
     }
 }
 
+/** Section label: quiet, no box, generous air above. */
 @Composable
 internal fun ListSectionHeader(text: String, modifier: Modifier = Modifier) {
     Text(
@@ -240,6 +248,8 @@ private fun DmRow(
     }
 }
 
+// --- GALAXY ----------------------------------------------------------------------
+// A structurally distinct DM list floating over a breathing aurora mesh: a shared
 // hero header with an animated unread counter, a horizontal "online now" strip of
 // avatars wearing breathing cyan presence rings, then conversations as elevated
 // rounded cards — real accent-tinted shadow + lit rim, 60dp avatar with a pulsing
@@ -255,7 +265,7 @@ private fun GalaxyMessagesScreen(
     val home by app.home.collectAsState()
     LaunchedEffect(Unit) { app.refreshDms() }
     val accent = MaterialTheme.colorScheme.primary
-
+    // Aurora mesh drawn once behind the whole tab (fixed, not per-row) so the
     // space-indigo canvas breathes under the scrolling content.
     Box(
         Modifier
@@ -302,10 +312,21 @@ private fun GalaxyMessagesScreen(
     }
 }
 
+/**
+ * Galaxy messages hero. Routes through the shared [NovaHero] so this tab shares the
+ * exact display-title rhythm with Friends/Spaces (title fades + rises in). The
+ * unread total then animates via [NovaAnimatedCount] on a custom stat line — the
+ * number users watch tick down — rendered in cyan when there's unread so the
+ * dual-accent identity reaches the header instead of leaving it mono-violet.
+ *
+ * No trailing search affordance: this screen exposes no search route, and a badge
+ * that presses but goes nowhere reads as broken. The stat line carries the header.
+ */
 @Composable
 private fun GalaxyMessagesHeader(unread: Int, count: Int) {
     NovaHero(title = "messages")
-
+    // Custom animated stat line under the hero so the unread total slides on
+    // change; NovaHero's static subtitle can't animate the number.
     Row(
         Modifier
             .fillMaxWidth()
@@ -334,6 +355,7 @@ private fun GalaxyMessagesHeader(unread: Int, count: Int) {
     }
 }
 
+/** Horizontal favorites/online strip: circular avatars w/ cyan presence ring. */
 @Composable
 private fun GalaxyOnlineStrip(
     dms: List<DmDto>,
@@ -342,7 +364,8 @@ private fun GalaxyOnlineStrip(
     modifier: Modifier = Modifier,
 ) {
     val cyan = MaterialTheme.colorScheme.secondary
-
+    // One shared breathing value so every presence ring pulses in unison — a
+    // single living cue rather than N independent flickers. Reduced-motion safe.
     val pulse = rememberNovaPulse(periodMillis = 2400)
     Column(modifier.padding(top = Spacing.xs, bottom = Spacing.xs)) {
         Row(
@@ -397,6 +420,13 @@ private fun GalaxyOnlineStrip(
     }
 }
 
+/** Expressive conversation card floating over the aurora: a real accent-tinted
+ *  drop shadow + lifted-top gradient fill + lit rim via [novaElevation], a 60dp
+ *  avatar with a breathing cyan presence ring, a bold name over a two-line
+ *  preview, an animated accent unread pill and an inline timestamp. Unread cards
+ *  lift harder (accent-lit rim + accent glow-shadow) and carry a leading iris→cyan
+ *  accent bar instead of a full outline, so unread reads as "important" rather
+ *  than "selected". */
 @Composable
 private fun GalaxyDmCard(
     dm: DmDto,
@@ -415,9 +445,9 @@ private fun GalaxyDmCard(
     Row(
         modifier
             .fillMaxWidth()
-
+            // Layered depth: soft shadow (accent-tinted + glowing when unread),
             // lifted-top gradient fill and a lit rim — one call, consistent with
-
+            // every other Nova surface.
             .novaElevation(
                 NovaCorners.card,
                 tint = cardBg,
@@ -431,7 +461,8 @@ private fun GalaxyDmCard(
             .padding(horizontal = Spacing.m, vertical = Spacing.m),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-
+        // Leading iris→cyan accent bar marks unread without the "focus ring" read
+        // of a full outline. Sized to the avatar; invisible when read.
         Box(
             Modifier
                 .width(4.dp)
@@ -491,6 +522,9 @@ private fun GalaxyDmCard(
     }
 }
 
+/** Nova unread pill: an iris→cyan gradient disc with a soft accent glow and an
+ *  animated sliding-digit count, so the number the user watches actually ticks.
+ *  Nova-only; the classic [UnreadPill] is untouched. */
 @Composable
 private fun GalaxyUnreadPill(count: Int, modifier: Modifier = Modifier) {
     val accent = MaterialTheme.colorScheme.primary
@@ -511,6 +545,14 @@ private fun GalaxyUnreadPill(count: Int, modifier: Modifier = Modifier) {
     }
 }
 
+/**
+ * Circular avatar with the Nova presence treatment: when [online], a soft cyan
+ * halo + hairline ring that breathe together via [rememberNovaPulse]; when read
+ * (offline), a plain avatar with no animation at all. Keeping the pulse inside
+ * this composable — and only reaching it on the online branch — means offline
+ * rows in a long list allocate zero infinite transitions, so scrolling stays
+ * crisp. Reduced-motion falls back to a static ring (pulse returns a constant).
+ */
 @Composable
 private fun GalaxyPresenceAvatar(
     name: String,
@@ -546,8 +588,13 @@ private fun GalaxyPresenceAvatar(
     }
 }
 
+// --- NOVA (2nd-experiment "-exp" layout) -----------------------------------------
+// A structurally distinct DM list: a bold greeting block + search pill up top, a
 // horizontal "online now" avatar strip when peers are around, then conversations as
 // expressive rounded cards — big 60dp avatar w/ presence ring, loud name, preview
+// with an accent unread pill and repositioned timestamp. Ported from the -exp
+// codebase; uses exp3's flat NovaCorners + MaterialTheme primitives and the shared
+// classic UnreadPill (no aurora/glow — that identity is Galaxy's).
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -594,6 +641,8 @@ private fun NovaMessagesScreen(
     }
 }
 
+/** Bold greeting block: big display title + a tappable-looking search pill. Reads
+ *  as a header hero, not a plain top bar. */
 @Composable
 private fun NovaMessagesHeader(unread: Int) {
     Column(
@@ -634,6 +683,7 @@ private fun NovaMessagesHeader(unread: Int) {
     }
 }
 
+/** Horizontal favorites/online strip: circular avatars w/ cyan presence ring. */
 @Composable
 private fun NovaOnlineStrip(
     dms: List<DmDto>,
@@ -684,6 +734,10 @@ private fun NovaOnlineStrip(
     }
 }
 
+/** Expressive conversation card: rounded filled surface, 60dp avatar with a
+ *  presence ring, bold name over a two-line-hierarchy preview, a vivid accent
+ *  unread pill and a repositioned inline timestamp. Unread cards get a tinted
+ *  surface + accent hairline so they pop. */
 @Composable
 private fun NovaDmCard(
     dm: DmDto,

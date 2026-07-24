@@ -61,8 +61,18 @@ fun callPermissionsGranted(video: Boolean, context: android.content.Context): Bo
     return audio && camera
 }
 
+/** A remote peer's rendered video, tracked so we can attach/release renderers. */
 private class RemoteTile(val peerId: String, val track: VideoTrack)
 
+/**
+ * Full-screen native WebRTC call surface. Media is captured with the platform
+ * mic/camera via [WebRtcCallClient] (org.webrtc.*) — the WebView getUserMedia
+ * path is gone because it failed with NotReadableError on some devices. Signaling
+ * still speaks the CallRoom Durable Object protocol byte-for-byte. All controls,
+ * status, and audio routing remain native.
+ *
+ * Signature is load-bearing — ChatScreen calls this exact shape.
+ */
 @Composable
 fun CallScreenDialog(
     websocketUrl: String,
@@ -73,12 +83,14 @@ fun CallScreenDialog(
     val context = LocalContext.current
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
 
+    // Shared EGL context for all renderers + the encoder/decoder factories.
+    // Created once; released in onDispose after all renderers are released.
     val eglBase = remember { EglBase.create() }
 
     var status by remember { mutableStateOf(CallStatus.Connecting) }
     var mediaReady by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
-
+    // Rolling on-screen diagnostics log — keep the last several phase/status/error
     // lines visible for the user to screenshot (we debug calls blind).
     val diagLog = remember { mutableStateListOf<String>() }
     fun logLine(line: String) {
@@ -93,10 +105,13 @@ fun CallScreenDialog(
     var controlsVisible by remember { mutableStateOf(true) }
     var controlsShownAt by remember { mutableLongStateOf(0L) }
 
+    // Remote peers with an active video track, keyed by peerId. Compose state so
+    // the grid recomposes as peers join/leave. Voice calls never populate this.
     val remoteTiles = remember { mutableStateMapOf<String, RemoteTile>() }
 
     val audio = remember { CallAudioController(context) }
 
+    // The native WebRTC engine. Callbacks arrive on WebRTC/ws threads → hop to main.
     val client = remember {
         WebRtcCallClient(
             appContext = context.applicationContext,
@@ -142,8 +157,11 @@ fun CallScreenDialog(
         onDismiss()
     }
 
+    // Start capture + signaling once.
     LaunchedEffect(Unit) { client.start() }
 
+    // Phone-call audio routing once the mic is live (grabbing MODE_IN_COMMUNICATION
+    // earlier is what tripped NotReadableError on the WebView path; here we still
     // wait for mic capture before routing, matching the phone-call behavior).
     LaunchedEffect(mediaReady) {
         if (mediaReady) {
@@ -156,17 +174,20 @@ fun CallScreenDialog(
         onDispose {
             audio.stop()
             client.release()
-
+            // Renderers release themselves (see AndroidView onRelease); the shared
+            // EGL context is released last, after all renderers are gone.
             eglBase.release()
         }
     }
 
+    // Call duration ticker — counts while connected.
     LaunchedEffect(status) {
         if (status == CallStatus.Connected) {
             while (true) { delay(1_000); durationSeconds += 1 }
         }
     }
 
+    // Auto-hide controls on video calls after 4s; tap re-shows them.
     LaunchedEffect(controlsShownAt, video) {
         if (video && controlsVisible) {
             delay(4_000)
@@ -188,7 +209,7 @@ fun CallScreenDialog(
                 ),
         ) {
             if (video) {
-
+                // Remote video tiles fill the surface; local preview floats.
                 val tiles = remoteTiles.values.toList()
                 if (tiles.isEmpty()) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -220,6 +241,7 @@ fun CallScreenDialog(
                     }
                 }
 
+                // Local self-preview, small, top-right.
                 val localTrack = client.localVideoTrack
                 if (localTrack != null && !cameraOff) {
                     VideoRenderer(
@@ -236,7 +258,7 @@ fun CallScreenDialog(
                     )
                 }
             } else {
-
+                // Voice call — avatar placeholder centered.
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Box(
                         Modifier
@@ -254,6 +276,7 @@ fun CallScreenDialog(
                 }
             }
 
+            // Tap layer for video calls — toggles the controls.
             if (video) {
                 Box(
                     Modifier
@@ -314,6 +337,11 @@ fun CallScreenDialog(
     }
 }
 
+/**
+ * A single WebRTC video tile. SurfaceViewRenderer must be init'd on the main
+ * thread with the shared EGL context, and the sink added/removed to match the
+ * view lifecycle so we never leak a track→renderer edge or double-release.
+ */
 @Composable
 private fun VideoRenderer(
     track: VideoTrack,

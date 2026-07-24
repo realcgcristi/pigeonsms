@@ -4,6 +4,7 @@ import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
+/** Cached message. Optimistic sends live here too (state = SENDING). */
 @Entity(tableName = "messages", indices = [Index(value = ["channelId", "seq"]), Index("nonce")])
 data class MessageEntity(
     @PrimaryKey val id: String,
@@ -23,12 +24,12 @@ data class MessageEntity(
     val createdAt: Long,
     val editedAt: Long?,
     val deleted: Boolean,
-    val reactionsJson: String,
+    val reactionsJson: String,   // JSON array of {emoji,count,me}
     val revisionsJson: String?,  // admin-only edit history
     val kind: String? = null,        // poll | event | sticker | ... — null means plain text
     val metadataJson: String? = null, // kind-specific blob (event title/starts_at/…)
-    val pollJson: String? = null,
-    val state: String = "SENT",
+    val pollJson: String? = null,     // serialized PollDto snapshot (options, votes, me)
+    val state: String = "SENT",  // SENDING | SENT | FAILED
 )
 
 @Entity(tableName = "outbox")
@@ -45,6 +46,7 @@ data class OutboxEntity(
     val attempts: Int = 0,
 )
 
+/** Per-channel sync cursor for the reconnect resume protocol. */
 @Entity(tableName = "channel_cursor")
 data class ChannelCursorEntity(
     @PrimaryKey val channelId: String,

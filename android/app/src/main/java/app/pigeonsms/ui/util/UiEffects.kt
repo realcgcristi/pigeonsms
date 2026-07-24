@@ -39,6 +39,11 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 import app.pigeonsms.design.theme.Corners
 
+/**
+ * Clickable that springs down slightly while pressed — tactile depth on rows and
+ * cards. Uses its own interaction source so the scale reacts to the very press
+ * that fires [onClick].
+ */
 fun Modifier.clickableScale(pressedScale: Float = 0.97f, onClick: () -> Unit): Modifier = composed {
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
@@ -53,6 +58,8 @@ fun Modifier.clickableScale(pressedScale: Float = 0.97f, onClick: () -> Unit): M
         .clickable(interactionSource = source, indication = ripple(), onClick = onClick)
 }
 
+/** Press-scale without click handling — layer under Buttons/Surfaces that own
+ *  their own click. Pass the same interaction source the clickable uses. */
 fun Modifier.pressScale(source: MutableInteractionSource, pressedScale: Float = 0.97f): Modifier = composed {
     val pressed by source.collectIsPressedAsState()
     val reduced = app.pigeonsms.design.theme.LocalReducedMotion.current
@@ -64,6 +71,7 @@ fun Modifier.pressScale(source: MutableInteractionSource, pressedScale: Float = 
     graphicsLayer { scaleX = scale; scaleY = scale }
 }
 
+/** Animated shimmer sweep used by skeleton placeholders. */
 @Composable
 fun shimmerBrush(): Brush {
     val transition = rememberInfiniteTransition(label = "shimmer")
@@ -87,6 +95,7 @@ private fun ShimmerBlock(modifier: Modifier) {
     Box(modifier.clip(Corners.chip).background(shimmerBrush()))
 }
 
+/** A single list-row skeleton: circular avatar + two text lines. */
 @Composable
 fun SkeletonRow() {
     Row(
@@ -102,6 +111,9 @@ fun SkeletonRow() {
     }
 }
 
+/** Full-screen skeleton list shown while first data loads. On the Nova path it
+ *  swaps to rounded card-shaped placeholders that echo the Nova card silhouette
+ *  so first-load matches the loaded UI instead of a bare spinner. */
 @Composable
 fun SkeletonList(rows: Int = 8, contentPadding: PaddingValues = PaddingValues(vertical = 8.dp)) {
     if (app.pigeonsms.design.theme.LocalExperimentalRedesign.current) {
@@ -118,6 +130,8 @@ fun SkeletonList(rows: Int = 8, contentPadding: PaddingValues = PaddingValues(ve
     }
 }
 
+/** A Nova card-shaped skeleton: rounded block with an avatar disc + two lines,
+ *  matching the [Modifier.glassCard] Nova silhouette. */
 @Composable
 fun SkeletonCard() {
     Row(
@@ -137,6 +151,8 @@ fun SkeletonCard() {
     }
 }
 
+// --- Shared-element transitions -------------------------------------------------
+// The two scopes are threaded via composition locals so only AppShell + Avatar
 // need to know about them; screens stay ignorant.
 
 val LocalSharedTransitionScope =
@@ -144,6 +160,11 @@ val LocalSharedTransitionScope =
 val LocalNavAnimatedScope =
     androidx.compose.runtime.compositionLocalOf<androidx.compose.animation.AnimatedVisibilityScope?> { null }
 
+/**
+ * Marks a composable as a shared element keyed by [key]. When both scopes are
+ * present (inside the nav graph), the element morphs between screens — e.g. a
+ * list avatar flies into the profile header. No-op when scopes are absent.
+ */
 @OptIn(androidx.compose.animation.ExperimentalSharedTransitionApi::class)
 @Composable
 fun Modifier.sharedAvatar(key: String): Modifier {

@@ -55,6 +55,10 @@ import app.pigeonsms.design.theme.NovaDepth
 import app.pigeonsms.design.theme.PigeonMotion
 import app.pigeonsms.design.theme.Spacing
 
+/**
+ * @param selectedIcon optional filled variant shown while the tab is active;
+ * falls back to [icon] when absent, so existing call sites are untouched.
+ */
 data class NavItem(
     val route: String,
     val label: String,
@@ -62,6 +66,15 @@ data class NavItem(
     val selectedIcon: ImageVector? = null,
 )
 
+/**
+ * Floating pill navigation. The selected tab expands into an accent-tinted
+ * pill holding a filled icon + label (springy); unselected tabs are quiet
+ * outlined icons. Every target is at least [Dimens.touchTarget] tall.
+ *
+ * When Liquid Glass is on the bar is a thin frosted slab: low-opacity tint,
+ * a 1dp rim light entering top-left, and a soft inner shadow settling on the
+ * bottom edge — gradients only, no RenderEffect, no tilt reads.
+ */
 @Composable
 fun PigeonNavBar(
     items: List<NavItem>,
@@ -72,13 +85,14 @@ fun PigeonNavBar(
     val experimental = LocalExperimentalRedesign.current
     val glass = LocalLiquidGlass.current
     val barColor = MaterialTheme.colorScheme.surfaceContainerHigh
-
+    // Nova: a bold floating rounded slab with an accent-lit rim — not the pill.
+    // Reads NovaCorners so its radius matches every other Nova container.
     val novaShape = NovaCorners.card
     val galaxy = app.pigeonsms.design.theme.isGalaxySkin()
     val barModifier = if (experimental && !glass && galaxy) {
         val accent = MaterialTheme.colorScheme.primary
         Modifier
-
+            // GALAXY: soft accent-tinted drop shadow so the bar visibly floats
             // over the aurora canvas + a bright accent-lit rim.
             .shadow(
                 elevation = NovaDepth.floatingElevation,
@@ -108,7 +122,10 @@ fun PigeonNavBar(
                 novaShape,
             )
     } else if (experimental && !glass) {
-
+        // NOVA (flat): the exp2 nav — a simple SOLID rounded slab with one thin
+        // neutral hairline rim. No gradient-mesh fill, no drop shadow, no accent
+        // bloom, no igniting rim. Clean and quiet; the selected accent pill is
+        // the only color. This is the flat differentiator from Galaxy's lit bar.
         Modifier
             .clip(novaShape)
             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
@@ -180,7 +197,7 @@ private fun NavBarItem(item: NavItem, selected: Boolean, onClick: () -> Unit) {
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
     val accent = MaterialTheme.colorScheme.primary
-
+    // Nova: selected label + icon flip to the on-accent ink (sits on a solid
     // accent pill); classic keeps the tinted accent-on-transparent look.
     val tint by animateColorAsState(
         targetValue = when {
@@ -212,10 +229,10 @@ private fun NavBarItem(item: NavItem, selected: Boolean, onClick: () -> Unit) {
         else spring(dampingRatio = 0.65f, stiffness = Spring.StiffnessMediumLow),
         label = "navSettle",
     )
-
+    // Nova gives the selected pill a bolder pop; classic stays subtle.
     val grow = if (experimental) 0.12f else 0.06f
     // the pill's accent glow blooms in on select then eases back — a tab that
-
+    // "ignites" rather than a paint chip. Nova only; cheap radial/border alpha.
     val bloom by animateFloatAsState(
         targetValue = if (selected) 1f else 0f,
         animationSpec = spring(dampingRatio = 0.55f, stiffness = Spring.StiffnessMedium),
@@ -231,7 +248,7 @@ private fun NavBarItem(item: NavItem, selected: Boolean, onClick: () -> Unit) {
             .clip(CircleShape)
             .then(
                 if (experimental && selected && galaxy) {
-
+                    // GALAXY: gradient indicator (iris → cyan) + a soft lit halo
                     // behind that blooms in on select.
                     Modifier
                         .background(Brush.horizontalGradient(listOf(accent, lerp(accent, NovaColors.Cyan, 0.55f))))
@@ -248,7 +265,7 @@ private fun NavBarItem(item: NavItem, selected: Boolean, onClick: () -> Unit) {
                             )
                         }
                 } else if (experimental && selected) {
-
+                    // NOVA (flat): a clean solid accent pill — no gradient, no bloom.
                     Modifier.background(accent)
                 } else {
                     Modifier.background(pillColor)

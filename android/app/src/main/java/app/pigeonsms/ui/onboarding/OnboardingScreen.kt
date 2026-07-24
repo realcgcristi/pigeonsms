@@ -80,10 +80,13 @@ import app.pigeonsms.ui.pigeonVm
 
 @Composable
 fun OnboardingScreen() {
-
+    // 3-way skin dispatch, listed explicitly so Classic isn't misrouted through a
+    // catch-all `else`. Nova and Classic both render the neutral flat body via
+    // ExOnboardingScreen; only Galaxy gets the deep aurora/halo treatment.
     when (LocalUiSkin.current) {
         UiSkin.Nova -> ExOnboardingScreen()
-        else -> GalaxyOnboardingScreen()
+        UiSkin.Classic -> ExOnboardingScreen()
+        UiSkin.Galaxy -> GalaxyOnboardingScreen()
     }
 }
 
@@ -103,7 +106,7 @@ private fun GalaxyOnboardingScreen() {
             .background(MaterialTheme.colorScheme.background)
             .then(
                 if (nova) {
-
+                    // NOVA: a living gradient-mesh aurora (iris top-left + cyan
                     // bottom-right) that slowly breathes behind the whole flow —
                     // the first impression, so it should feel alive, not flat.
                     Modifier.novaAuroraBackground(accent, cyan = lavender, animate = true)
@@ -138,7 +141,8 @@ private fun GalaxyOnboardingScreen() {
     ) {
         if (state.step != OnboardingStep.Welcome) {
             if (nova) {
-
+                // NOVA: a rounded rim-pill back affordance matching the chat/settings
+                // back button, so navigation chrome is part of the Nova material system.
                 Box(
                     Modifier
                         .padding(Spacing.m)
@@ -203,7 +207,7 @@ private fun Welcome(vm: OnboardingViewModel) = Step {
     val cyan = MaterialTheme.colorScheme.secondary
     val nova = LocalExperimentalRedesign.current
     val glyphSize = if (nova) 140.dp else 112.dp
-
+    // NOVA: a slow idle float + breathing glow so the brand mark feels alive.
     val pulse = rememberNovaPulse(periodMillis = 3400)
     val reduced = LocalReducedMotion.current
     val floatDy = if (nova && !reduced) (pulse - 0.5f) * 10f else 0f
@@ -314,7 +318,8 @@ private fun Field(value: String, onChange: (String) -> Unit, placeholder: String
     val nova = LocalExperimentalRedesign.current
     val source = remember { MutableInteractionSource() }
     val focused by source.collectIsFocusedAsState()
-
+    // NOVA: the focus ring brightens toward cyan as the field wakes up, matching
+    // the composer's "wake on focus" language; classic keeps default M3 behaviour.
     val novaFocusBorder by androidx.compose.animation.animateColorAsState(
         targetValue = if (focused) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.outline,
         label = "fieldFocus",
@@ -339,9 +344,9 @@ private fun Field(value: String, onChange: (String) -> Unit, placeholder: String
 @Composable
 private fun Primary(text: String, loading: Boolean, onClick: () -> Unit) {
     if (LocalExperimentalRedesign.current) {
-
+        // NOVA: the shared iris->cyan gradient CTA with an accent glow-shadow and a
         // spring press-scale — the most-tapped control finally feels premium and
-
+        // physically pressable. Dims to neutral while loading (not armed).
         Box(Modifier.fillMaxWidth().height(Dimens.ctaHeight + 8.dp)) {
             NovaPillButton(
                 text = text,
@@ -372,7 +377,11 @@ private fun Err(error: String?) {
 }
 
 // ---------------------------------------------------------------------------
-
+// NOVA skin: structural layout ported from the -exp ("2nd experiment") source.
+// Distinct from Galaxy: flat Nova material (plain drawBehind ambient wash, a
+// linear iris->tertiary gradient glyph, displaySmall.copy() headings, and a
+// clip+gradient CTA) — none of Galaxy's aurora / halo / heroAppear / pill flair.
+// Adapted to exp3's flat Nova primitives (NovaCorners, MaterialTheme tertiary).
 // ---------------------------------------------------------------------------
 
 @Composable
@@ -548,7 +557,7 @@ private fun ExField(value: String, onChange: (String) -> Unit, placeholder: Stri
 
 @Composable
 private fun ExPrimary(text: String, loading: Boolean, onClick: () -> Unit) {
-
+    // NOVA (ported): full-width accent-gradient CTA, taller and rounder
     Box(
         Modifier
             .fillMaxWidth()

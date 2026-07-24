@@ -123,6 +123,8 @@ fun AppShell(session: LocalSession) {
         app.activateSession(session.userId, session.token)
     }
 
+    // Push: ask for the notification permission once, then hand the FCM token to
+    // the backend. Both are no-ops when Firebase isn't configured (no
     // google-services.json) — the app works fine without push.
     val appContext = androidx.compose.ui.platform.LocalContext.current
     val notifPermission = androidx.activity.compose.rememberLauncherForActivityResult(
@@ -141,7 +143,7 @@ fun AppShell(session: LocalSession) {
                 com.google.firebase.messaging.FirebaseMessaging.getInstance().token
                     .addOnSuccessListener { token -> app.registerPushToken(token) }
                     .addOnFailureListener {
-
+                        // Token fetch failed — fall back to the token PushService
                         // persisted on rotation so it still reaches the backend.
                         appContext.getSharedPreferences("push_token", android.content.Context.MODE_PRIVATE)
                             .getString("fcm_token", null)
@@ -314,13 +316,14 @@ fun AppShell(session: LocalSession) {
             composable("appicon") {
                 AppIconScreen(onBack = { nav.popBackStack() }, onOpenUser = { id -> nav.navigate("profile/$id") })
             }
-            composable("privacy") { PrivacyScreen(onBack = { nav.popBackStack() }, onBlocked = { nav.navigate("blocked") }) }
+            composable("privacy") { PrivacyScreen(username = session.username, onBack = { nav.popBackStack() }, onBlocked = { nav.navigate("blocked") }) }
             composable("notifications") { NotificationSettingsScreen(onBack = { nav.popBackStack() }) }
             composable("nestsettings") { NestSettingsScreen(app, onBack = { nav.popBackStack() }) }
         }
         }
         }
 
+        // In-app heads-up banner for messages arriving in channels you're not viewing.
         var ping by remember { androidx.compose.runtime.mutableStateOf<AppViewModel.IncomingPing?>(null) }
         val pingMuteStore = remember { ChatAppearanceStore(appContext.applicationContext) }
         LaunchedEffect(app) {
@@ -347,7 +350,7 @@ fun AppShell(session: LocalSession) {
             if (current != null) {
                 val glass = LocalLiquidGlass.current
                 val density = androidx.compose.ui.platform.LocalDensity.current
-
+                // Swipe-away: track the horizontal drag; past the threshold the
                 // banner dismisses, otherwise it snaps back to center.
                 var dragX by remember(current) { androidx.compose.runtime.mutableFloatStateOf(0f) }
                 val settledX by androidx.compose.animation.core.animateFloatAsState(
@@ -383,7 +386,7 @@ fun AppShell(session: LocalSession) {
                         )
                         .clickable {
                             ping = null
-
+                            // Forum channels open the forum, not the chat timeline.
                             val location = home.spaces.asSequence()
                                 .flatMap { space -> space.channels.asSequence().map { space to it } }
                                 .firstOrNull { (_, channel) -> channel.id == current.channelId }
@@ -430,7 +433,7 @@ fun AppShell(session: LocalSession) {
 
 @Composable
 private fun BottomBar(current: String, profileName: String, profileAvatar: Any?, hazeState: HazeState, messageBadge: Int, nestBadge: Int, onSelect: (Tab) -> Unit) {
-
+    // Floating rounded pill. A scrim fades into the true bottom edge so the
     // gesture-nav strip reads as part of the bar instead of showing a sliver
     // of screen/wallpaper behind it.
     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.BottomCenter) {

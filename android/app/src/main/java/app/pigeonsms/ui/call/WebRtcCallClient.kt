@@ -44,22 +44,49 @@ import org.webrtc.VideoSource
 import org.webrtc.VideoTrack
 import org.webrtc.audio.JavaAudioDeviceModule
 
+/**
+ * Native WebRTC call engine (org.webrtc.*). Replaces the WebView getUserMedia
+ * path, which fails with NotReadableError on some devices even though native mic
+ * capture works fine (voice messages record). All media is captured with the
+ * platform mic/camera; signaling reuses the EXACT CallRoom Durable Object
+ * protocol that the old in-WebView JS spoke, byte-for-byte:
+ *
+ *   inbound : ready {participant,participants[]}, join {participant},
+ *             leave {participant}, offer {from,data:{type,sdp}},
+ *             answer {from,data}, ice {from,data:{candidate,sdpMid,sdpMLineIndex}}
+ *   outbound: {type:'offer',target,data:<sdp>}, {type:'answer',target,data},
+ *             {type:'ice',target,data:<candidate>}
+ *
+ * Offer initiator rule mirrors the JS: the peer with the lexicographically
+ * smaller selfId creates the offer (`if (selfId < peerId) createOffer`).
+ *
+ * ICE: Google STUN only. No TURN is available, so cross-NAT (symmetric NAT)
+ * calls may fail to connect; same-network / cone-NAT calls will.
+ *
+ * Threading: PeerConnectionFactory / PeerConnection / capturer calls happen off
+ * the UI thread here (a background coroutine scope); the caller must init/attach
+ * SurfaceViewRenderers and read [remoteVideoTracks] on the main thread. Callbacks
+ * from org.webrtc arrive on WebRTC's signaling thread — we marshal everything
+ * user-visible through [onEvent]/[onRemoteTrack]/[onRemoteRemoved], which the
+ * Compose layer re-dispatches to main.
+ */
 class WebRtcCallClient(
     private val appContext: Context,
     private val websocketUrl: String,
     private val video: Boolean,
     val eglBase: EglBase,
-
+    /** Diagnostics/status line — mirrors the old JS `phase`/`status` output. */
     private val onEvent: (WebRtcEvent) -> Unit,
-
+    /** A remote video track appeared for [peerId]. Called on any thread. */
     private val onRemoteTrack: (peerId: String, track: VideoTrack) -> Unit,
-
+    /** A peer left / its connection died — drop its tile. Called on any thread. */
     private val onRemoteRemoved: (peerId: String) -> Unit,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     private val http = HttpClient(OkHttp) { install(WebSockets) }
 
+    // Outbound signaling queue — decouples WebRTC callback threads from the ws.
     private val outbound = Channel<String>(Channel.UNLIMITED)
     @Volatile private var session: DefaultClientWebSocketSession? = null
     @Volatile private var ended = false
@@ -74,6 +101,7 @@ class WebRtcCallClient(
     private var surfaceHelper: SurfaceTextureHelper? = null
     private var frontFacing = true
 
+    /** Local camera preview track (null for voice calls). Read on main thread. */
     @Volatile var localVideoTrack: VideoTrack? = null
         private set
 
@@ -87,6 +115,8 @@ class WebRtcCallClient(
 
     // --- lifecycle -----------------------------------------------------------
 
+    /** Build the factory + acquire local media, then connect signaling. Blocks
+     *  briefly on the WebRTC init; safe to call from a coroutine. */
     fun start() {
         scope.launch {
             try {
@@ -105,7 +135,9 @@ class WebRtcCallClient(
             PeerConnectionFactory.InitializationOptions.builder(appContext)
                 .createInitializationOptions(),
         )
-
+        // Use the plain MIC source (same as the app's working voice-message recorder)
+        // instead of WebRTC's default VOICE_COMMUNICATION, and turn off hardware
+        // AEC/NS — on some devices those init paths fail and the mic never opens.
         val audioModule = JavaAudioDeviceModule.builder(appContext)
             .setAudioSource(android.media.MediaRecorder.AudioSource.MIC)
             .setUseHardwareAcousticEchoCanceler(false)
@@ -122,13 +154,14 @@ class WebRtcCallClient(
     }
 
     private fun acquireLocalMedia() {
-
+        // Audio — always.
         audioSource = factory.createAudioSource(MediaConstraints())
         audioTrack = factory.createAudioTrack("pigeon-audio", audioSource).apply { setEnabled(true) }
         onEvent(WebRtcEvent.Phase("mic ok"))
 
         if (!video) return
 
+        // Video — front camera by default.
         val enumerator = Camera2Enumerator(appContext)
         val deviceName = pickCamera(enumerator, front = true)
             ?: enumerator.deviceNames.firstOrNull()
@@ -165,7 +198,7 @@ class WebRtcCallClient(
                     retries = 0
                     onEvent(WebRtcEvent.Status(CallStatus.Connecting))
                     onEvent(WebRtcEvent.Phase("ws open — waiting for peer"))
-
+                    // Pump outbound queue for the life of this session.
                     val sender = launch {
                         for (text in outbound) {
                             if (!isActive) break
@@ -185,7 +218,7 @@ class WebRtcCallClient(
                 onEvent(WebRtcEvent.Phase("ws error: ${t.message ?: t.javaClass.simpleName}"))
             }
             if (ended) break
-
+            // Signaling dropped — tear down peers, retry with backoff.
             dropAllPeers()
             if (retries < 5) {
                 retries++
@@ -199,6 +232,7 @@ class WebRtcCallClient(
         }
     }
 
+    /** Enqueue outbound signaling JSON; safe from any (WebRTC callback) thread. */
     private fun signal(json: String) {
         if (!ended) outbound.trySend(json)
     }
@@ -217,7 +251,7 @@ class WebRtcCallClient(
                         val pid = p.optString("userId")
                         if (pid.isEmpty() || pid == selfId) continue
                         count++
-
+                        // Smaller id creates the offer (mirrors old JS).
                         if (selfId < pid) createPeer(pid, offer = true)
                     }
                 }
@@ -274,7 +308,7 @@ class WebRtcCallClient(
                 )
                 pc.addIceCandidate(candidate)
             }
-
+            // mute / camera are informational for remote UI; we don't render
             // remote mute state, so nothing to do (kept for protocol parity).
         }
     }
@@ -294,7 +328,7 @@ class WebRtcCallClient(
                 config,
                 PeerObserver(peerId),
             ) ?: return null
-
+            // Attach local tracks. UNIFIED_PLAN: addTrack per track.
             audioTrack?.let { pc.addTrack(it, listOf("pigeon-stream")) }
             videoTrack?.let { pc.addTrack(it, listOf("pigeon-stream")) }
             peers[peerId] = pc
@@ -374,6 +408,8 @@ class WebRtcCallClient(
             }
         }
 
+        // Unified-plan track callback. Audio auto-plays via the audio device
+        // module; video tracks are handed to the Compose layer for a renderer.
         override fun onTrack(transceiver: org.webrtc.RtpTransceiver?) {
             val track = transceiver?.receiver?.track() ?: return
             if (track is VideoTrack) {
@@ -390,6 +426,8 @@ class WebRtcCallClient(
             }
         }
     }
+
+    // --- controls (called from UI) ------------------------------------------
 
     fun setMuted(muted: Boolean) {
         audioTrack?.setEnabled(!muted)
@@ -413,10 +451,12 @@ class WebRtcCallClient(
         })
     }
 
+    /** True while the local front camera is active — the preview should mirror. */
     val isFrontCamera: Boolean get() = frontFacing
 
     // --- teardown ------------------------------------------------------------
 
+    /** Fully release everything. Idempotent. Renderers are released by the UI. */
     fun release() {
         if (ended) return
         ended = true
@@ -425,7 +465,7 @@ class WebRtcCallClient(
             session = null
         }
         outbound.close()
-
+        // Stop capture first so no frames flow into a disposed source.
         runCatching { capturer?.stopCapture() }
         runCatching { capturer?.dispose() }
         runCatching { surfaceHelper?.dispose() }
@@ -444,6 +484,7 @@ class WebRtcCallClient(
         JSONObject().put("type", desc.type.canonicalForm()).put("sdp", desc.description)
 }
 
+/** Minimal SdpObserver so callers only override what they need. */
 private open class SimpleSdpObserver : SdpObserver {
     override fun onCreateSuccess(desc: SessionDescription) {}
     override fun onSetSuccess() {}
@@ -451,13 +492,14 @@ private open class SimpleSdpObserver : SdpObserver {
     override fun onSetFailure(error: String?) {}
 }
 
+/** Events the engine emits to the Compose layer (which re-dispatches to main). */
 sealed interface WebRtcEvent {
-
+    /** Verbose diagnostics line — mirrors the old JS `phase`. */
     data class Phase(val text: String) : WebRtcEvent
-
+    /** Connection lifecycle change. */
     data class Status(val status: CallStatus) : WebRtcEvent
-
+    /** Fatal-ish error line for the on-screen log. */
     data class Error(val message: String) : WebRtcEvent
-
+    /** Local mic (and camera, if video) captured — safe to start audio routing. */
     data object MediaReady : WebRtcEvent
 }

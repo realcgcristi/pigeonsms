@@ -7,6 +7,7 @@ import app.pigeonsms.network.ProfileResponse
 import app.pigeonsms.network.SpaceDto
 import java.util.UUID
 
+/** Friends, DMs, spaces, profiles — network-backed, refreshed on open + gateway events. */
 class SocialRepository(private val api: PigeonApi) {
     fun mediaUrl(key: String?) = key?.let { api.mediaUrl(it) }
 

@@ -53,6 +53,16 @@ import app.pigeonsms.design.theme.novaSurface
 import kotlinx.coroutines.delay
 import kotlin.math.abs
 
+/**
+ * Liquid Glass surface: a frosted translucent fill with a bright top edge
+ * highlight and a soft inner sheen. Apply to cards, bars, headers when the
+ * experimental glass look is enabled. Real backdrop blur is layered separately
+ * (haze) on the nav pill; this gives the material + edge light everywhere else.
+ *
+ * Deliberately CHEAP: pure clip + gradient fill + static sheen + gradient
+ * border. No tilt state reads, no RenderEffect — safe to apply per-row inside
+ * a LazyColumn. Pass [accent] for a faint accent-tinted vibrancy glow.
+ */
 fun Modifier.liquidGlass(
     shape: Shape,
     tint: Color,
@@ -110,6 +120,11 @@ fun Modifier.liquidGlass(
         shape,
     )
 
+/**
+ * The everyday card material: liquid glass when the glass look is on, a plain
+ * tonal surface otherwise. Reads the theme so callers stay one-liners. Uses the
+ * cheap [liquidGlass] variant, so it's safe on LazyColumn rows.
+ */
 @Composable
 fun Modifier.glassCard(
     shape: Shape,
@@ -124,7 +139,9 @@ fun Modifier.glassCard(
             accent = if (accented) MaterialTheme.colorScheme.primary else Color.Unspecified,
         )
     } else if (app.pigeonsms.design.theme.LocalExperimentalRedesign.current) {
-
+        // Nova card: lifted-top gradient fill + brighter lit hairline rim, from
+        // the central NovaDepth ladder so every Nova surface shares one edge
+        // language. Fill-only (no per-row drop shadow) — LazyColumn-safe.
         this.novaSurface(
             shape = shape,
             tint = tint,
@@ -135,6 +152,11 @@ fun Modifier.glassCard(
         this.clip(shape).background(tint)
     }
 
+/**
+ * List-row variant: frosted glass card when the glass look is on, plain
+ * clipped (transparent) row otherwise — classic mode keeps its airy list look.
+ * Cheap on purpose; designed for LazyColumn rows.
+ */
 @Composable
 fun Modifier.glassRow(shape: Shape): Modifier =
     if (app.pigeonsms.design.theme.LocalLiquidGlass.current) {
@@ -148,6 +170,10 @@ fun Modifier.glassRow(shape: Shape): Modifier =
         this.clip(shape)
     }
 
+/** A glassy specular blob used as a control thumb. Clipped-first (never square
+ *  corners) translucent fill with a tilt-tracked specular hotspot drawn inside
+ *  the clip and a bright rim. Runs at 120fps — the highlight is drawn, not a
+ *  shader, and reads tilt inside the draw pass so it never recomposes. */
 @Composable
 fun Modifier.liquidGlassThumb(): Modifier {
     val tilt = rememberTilt()
@@ -182,6 +208,13 @@ fun Modifier.liquidGlassThumb(): Modifier {
         .border(1.dp, Brush.linearGradient(listOf(Color.White.copy(alpha = 0.80f), Color.White.copy(alpha = 0.15f))), CircleShape)
 }
 
+/**
+ * Liquid Glass panel — frosted translucent fill with a tilt specular + bright top
+ * edge highlight. Clipped-first so it can't paint square corners. For bars,
+ * headers, cards, sheets when glass is on. One tilt-driven specular per panel:
+ * use sparingly (heroes, sheets, bars) — lazy rows should use [liquidGlass] /
+ * [glassCard] instead. Pass [accent] to let the panel pick up an accent glow.
+ */
 @Composable
 fun Modifier.glassPanel(shape: Shape, tint: Color, accent: Color = Color.Unspecified): Modifier {
     val tilt = rememberTilt()
@@ -237,6 +270,10 @@ fun Modifier.glassPanel(shape: Shape, tint: Color, accent: Color = Color.Unspeci
         )
 }
 
+/**
+ * Liquid-glass toggle: a pill track with a glass thumb that slides on a bouncy
+ * spring. Drop-in for the M3 Switch when the glass look is on.
+ */
 @Composable
 fun LiquidSwitch(
     checked: Boolean,
@@ -270,6 +307,11 @@ fun LiquidSwitch(
     }
 }
 
+/**
+ * Liquid-glass segmented control: the selected glass thumb slides between
+ * options on a bouncy spring and stretches as it travels (the elastic "liquid"
+ * morph from the adoption guide), then settles.
+ */
 @Composable
 fun LiquidSegmented(
     options: List<String>,
@@ -335,6 +377,11 @@ fun LiquidSegmented(
     }
 }
 
+/**
+ * Liquid-glass slider: accent-filled track with a translucent glass thumb that
+ * squishes toward the drag direction (anisotropic stretch) and springs back on
+ * release — matching the adoption-guide slider.
+ */
 @Composable
 fun LiquidSlider(
     value: Float,
@@ -355,7 +402,7 @@ fun LiquidSlider(
         val widthPx = with(density) { maxWidth.toPx() }
         val thumb = 28.dp
         val thumbPx = with(density) { thumb.toPx() }
-
+        // guard: layout narrower than the thumb would make this denominator ≤0 → NaN
         val travelPx = (widthPx - thumbPx).coerceAtLeast(1f)
         fun fracFromX(px: Float) = ((px - thumbPx / 2f) / travelPx).coerceIn(0f, 1f)
         fun emit(px: Float) = onValueChange(valueRange.start + fracFromX(px) * span)

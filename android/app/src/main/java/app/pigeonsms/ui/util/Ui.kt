@@ -23,6 +23,7 @@ import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.util.Calendar
 
+// design/Palette.kt is the single source of truth for avatar disc colors
 private val avatarColors = PigeonColors.AvatarPalette
 
 @Composable
@@ -43,6 +44,8 @@ fun Avatar(name: String, model: Any?, size: Dp = 40.dp, modifier: Modifier = Mod
     }
 }
 
+// java.time formatters: no Context, so they're safe on API 36 where
+// DateUtils.formatDateTime(null, ...) NPEs inside is24HourFormat.
 private val timeFmt = DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT)
 private val dateFmt = DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)
 

@@ -46,8 +46,10 @@ import coil.compose.AsyncImage
 
 enum class AttachmentAction { PhotosVideos, Camera, Documents, Poll, Audio, Event }
 
+/** A single recent gallery item surfaced in the attachment sheet strip. */
 data class RecentMediaItem(val uri: android.net.Uri, val isVideo: Boolean)
 
+/** Horizontally-scrolling strip of recent photo/video thumbnails. */
 @Composable
 fun RecentMediaStrip(
     items: List<RecentMediaItem>,
@@ -95,6 +97,7 @@ fun RecentMediaStrip(
     }
 }
 
+/** Unified attachment sheet; space-only actions are hidden for direct messages. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AttachmentOptionsSheet(

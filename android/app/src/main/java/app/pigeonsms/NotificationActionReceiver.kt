@@ -10,6 +10,13 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
+/**
+ * Handles notification actions away from the UI process.
+ *
+ * Android may start this receiver while the activity is not running, so all
+ * work goes through the application's single AppContainer graph. goAsync()
+ * keeps the process alive until the network/database operation completes.
+ */
 class NotificationActionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
         val pendingResult = goAsync()
@@ -19,6 +26,7 @@ class NotificationActionReceiver : BroadcastReceiver() {
             return
         }
 
+        // RemoteInput results are attached to the broadcast intent. Extract
         // them before handing the work to a background coroutine.
         val replyResults = RemoteInput.getResultsFromIntent(intent)
         val reply = sequenceOf(KEY_TEXT_REPLY, "key_text_reply", "reply", "text")
@@ -34,7 +42,7 @@ class NotificationActionReceiver : BroadcastReceiver() {
                     NOTIFICATION_ACTION_MARK_READ -> handleMarkRead(app.container, intent)
                 }
             } catch (_: Throwable) {
-
+                // Notification actions are best-effort. A signed-out account,
                 // expired token, or offline device must not crash the process.
             } finally {
                 intent.getIntExtra(EXTRA_NOTIFICATION_ID, Int.MIN_VALUE)
@@ -55,7 +63,7 @@ class NotificationActionReceiver : BroadcastReceiver() {
         val channelId = intent.getStringExtra(EXTRA_CHANNEL_ID)?.trim()?.takeIf { it.isNotEmpty() } ?: return
         val session = container.sessionStore.session.first() ?: return
         val messageId = intent.getStringExtra(EXTRA_MESSAGE_ID)?.trim()?.takeIf { it.isNotEmpty() }
-
+        // Route through ChatRepository so the reply is durable when the
         // device briefly loses connectivity; flush immediately when possible.
         container.chatRepository.send(
             channelId = channelId,
@@ -74,7 +82,8 @@ class NotificationActionReceiver : BroadcastReceiver() {
             ?.trim()
             ?.takeIf { it.isNotEmpty() }
             ?.let { messageId ->
-
+                // The first page contains the just-pushed message in normal
+                // operation. This also supports older payloads that omitted
                 // message_seq while retaining message_id.
                 container.api.messages(channelId).firstOrNull { it.id == messageId }?.seq
             }

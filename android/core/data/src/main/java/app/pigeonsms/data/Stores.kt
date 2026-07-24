@@ -13,6 +13,7 @@ private val Context.dataStore by preferencesDataStore(name = "pigeon_prefs")
 
 data class LocalSession(val token: String, val userId: String, val username: String, val email: String, val isAdmin: Boolean)
 
+/** Who am I on this device. */
 class SessionStore(private val context: Context) {
     private object K {
         val token = stringPreferencesKey("token")
@@ -46,13 +47,15 @@ data class ThemePrefs(
     val wallpaperDim: Float = 0.3f,
     val liquidGlass: Boolean = false,
     val dynamicColor: Boolean = false,
-
+    /** UI skin: "classic" | "nova" | "galaxy". Nova + Galaxy both render the
+     *  experimental layouts; they differ in the design-system treatment. */
     val uiSkin: String = "classic",
 ) {
-
+    /** Derived convenience: any experimental skin (Nova or Galaxy) is on. */
     val experimentalRedesign: Boolean get() = uiSkin != "classic"
 }
 
+/** App-wide look + behavior toggles. */
 class ThemeStore(private val context: Context) {
     private object K {
         val mode = stringPreferencesKey("theme_mode")
@@ -69,7 +72,7 @@ class ThemeStore(private val context: Context) {
         val uiSkin = stringPreferencesKey("ui_skin")
     }
     val prefs: Flow<ThemePrefs> = context.dataStore.data.map { p ->
-
+        // Migration: if the new string key is unset, fall back to the old boolean
         // (true → "galaxy" = the current experimental look, false → "classic").
         val skin = p[K.uiSkin]
             ?: if (p[K.experimentalRedesign] == true) "galaxy" else "classic"
@@ -97,13 +100,14 @@ class ThemeStore(private val context: Context) {
     suspend fun setWallpaperDim(v: Float) = context.dataStore.edit { it[K.wallpaperDim] = v }
     suspend fun setLiquidGlass(v: Boolean) = context.dataStore.edit { it[K.liquidGlass] = v }
     suspend fun setDynamicColor(v: Boolean) = context.dataStore.edit { it[K.dynamicColor] = v }
-
+    /** Persist the UI skin ("classic" | "nova" | "galaxy"). */
     suspend fun setUiSkin(skin: String) = context.dataStore.edit { it[K.uiSkin] = skin }
-
+    /** Legacy shim kept source-compatible: true → galaxy, false → classic. */
     suspend fun setExperimentalRedesign(v: Boolean) =
         context.dataStore.edit { it[K.uiSkin] = if (v) "galaxy" else "classic" }
 }
 
+/** Per-chat look: a wallpaper key ("aurora" / "custom:<uri>"), an accent override, mute. */
 data class ChatAppearance(val wallpaper: String?, val accent: String?, val muted: Boolean = false)
 
 class ChatAppearanceStore(private val context: Context) {

@@ -26,8 +26,8 @@ data class SessionDto(
     val device_name: String? = null,
     val user_agent: String? = null,
     val ip: String? = null,
-    val created_at: Long,
-    val last_seen: Long,
+    val created_at: Long = 0,
+    val last_seen: Long = 0,
     val current: Boolean = false,
 )
 
@@ -38,8 +38,8 @@ data class HistoryEntry(
     val ip: String? = null,
     val user_agent: String? = null,
     val device_name: String? = null,
-    val success: Int,
-    val created_at: Long,
+    val success: Int = 0,
+    val created_at: Long = 0,
 )
 
 @Serializable data class HistoryResponse(val history: List<HistoryEntry>)
@@ -76,7 +76,7 @@ data class NotificationPreferencesResponse(
 )
 
 @Serializable
-data class ReactionDto(val emoji: String, val count: Int, val me: Boolean)
+data class ReactionDto(val emoji: String, val count: Int = 0, val me: Boolean = false)
 
 @Serializable
 data class ReactionMutationResponse(
@@ -102,16 +102,18 @@ data class PollOptionDto(
 
 @Serializable
 data class PollDto(
-    val question: String,
+    val question: String = "",
     val anonymous: Boolean = false,
     val multiple_choice: Boolean = false,
     val total_votes: Int = 0,
     val options: List<PollOptionDto> = emptyList(),
 )
 
+/** PUT /messages/:id/poll/votes/:optionId and DELETE /messages/:id/poll/vote. */
 @Serializable
 data class PollVoteResponse(val ok: Boolean = true, val changed: Boolean = false, val poll: PollDto? = null)
 
+/** Metadata blob for kind == "event" messages. Timestamps are epoch millis. */
 @Serializable
 data class EventMetadataDto(
     val title: String,
@@ -121,6 +123,7 @@ data class EventMetadataDto(
     val description: String? = null,
 )
 
+/** Gateway `poll.update` payload — authoritative per-option counts (no `me` info). */
 @Serializable data class PollOptionCountDto(val id: String, val votes: Int)
 
 @Serializable
@@ -134,13 +137,13 @@ data class PollUpdateEventDto(
 data class MessageDto(
     val id: String,
     val channel_id: String,
-    val seq: Long,
+    val seq: Long = 0,
     val author: ApiUser,
-    val content: String,
+    val content: String = "",
     val reply_to: String? = null,
     val nonce: String? = null,
     val attachment: AttachmentDto? = null,
-    val created_at: Long,
+    val created_at: Long = 0,
     val edited_at: Long? = null,
     val deleted: Boolean = false,
     val reactions: List<ReactionDto> = emptyList(),
@@ -151,6 +154,7 @@ data class MessageDto(
     val thread_id: String? = null,
 )
 
+/** GET /channels/:id/messages cursor — channel_last_seq covers replies past the page. */
 @Serializable
 data class MessagesCursorDto(
     val first_seq: Long? = null,
@@ -164,10 +168,13 @@ data class MessagesCursorDto(
 @Serializable data class SuperPinDto(val message: MessageDto, val pinned_by: String, val created_at: Long = 0, val dismissed: Boolean = false)
 @Serializable data class SuperPinResponse(val super_pin: SuperPinDto? = null)
 
+/** Gateway `pin.add` / `pin.remove` payloads (pinned_by only rides pin.add). */
 @Serializable data class PinEventDto(val channel_id: String, val message_id: String, val pinned_by: String? = null)
 
+/** Gateway `super_pin.set` payload — the full banner message plus what it replaced. */
 @Serializable data class SuperPinSetEventDto(val channel_id: String, val message: MessageDto, val replaced_message_id: String? = null)
 
+/** Gateway `super_pin.remove` payload — message_id may be null when unknown. */
 @Serializable data class SuperPinRemoveEventDto(val channel_id: String, val message_id: String? = null)
 
 @Serializable
@@ -242,6 +249,7 @@ data class SpaceDto(
     val channels: List<ChannelDto> = emptyList(),
 )
 
+/** Gateway `channel.update` payload — a channel renamed/edited by the owner. */
 @Serializable
 data class ChannelUpdateEventDto(
     val id: String,
@@ -251,6 +259,7 @@ data class ChannelUpdateEventDto(
     val kind: String = "text",
 )
 
+/** Gateway `channel.delete` payload. */
 @Serializable data class ChannelDeleteEventDto(val id: String, val space_id: String)
 
 @Serializable data class SpacesResponse(val spaces: List<SpaceDto> = emptyList())
@@ -299,12 +308,18 @@ data class MutualSpaceDto(
 )
 @Serializable data class ProfileResponse(val profile: ProfileDto, val mutual_spaces: List<MutualSpaceDto> = emptyList())
 
+/** Forum tag definition — POST/GET /channels/:id/forum/tags. */
 @Serializable
 data class ForumTagDto(val id: String, val name: String, val mark_label: String? = null)
 
 @Serializable data class ForumTagResponse(val tag: ForumTagDto)
 @Serializable data class ForumTagsResponse(val tags: List<ForumTagDto> = emptyList())
 
+/**
+ * Forum post summary from GET /channels/:id/forum/posts — a serialized message
+ * (kind == "forum_post", metadata.title holds the post title) plus aggregate
+ * thread stats computed server-side.
+ */
 @Serializable
 data class ForumPostDto(
     val id: String,
@@ -332,12 +347,16 @@ data class ForumPostDto(
 @Serializable data class ForumPostResponse(val message: ForumPostDto)
 @Serializable data class ForumCursorDto(val last_seq: Long? = null)
 
+/** PUT/DELETE /messages/:id/like → the post's new like tally + this user's state. */
 @Serializable data class LikeMutationResponse(val like_count: Int = 0, val liked: Boolean = false)
 
+/** PUT/DELETE /messages/:id/marked → whether the post is now marked (400 not_markable). */
 @Serializable data class MarkMutationResponse(val marked: Boolean = false)
 
+/** Gateway `forum.like` payload — authoritative like tally (no per-user `liked`). */
 @Serializable data class ForumLikeEventDto(val channel_id: String, val message_id: String, val like_count: Int = 0)
 
+/** GET /channels/:id/forum/posts/:postId — root post plus its replies. */
 @Serializable
 data class ForumThreadResponse(
     val post: MessageDto,
@@ -353,10 +372,14 @@ data class ForumThreadResponse(
 @Serializable data class RecoveryResponse(val recovery_codes: List<String>)
 
 @Serializable
-data class ReleaseDto(val version_code: Int, val version_name: String, val url: String, val notes: String? = null)
+data class ReleaseDto(val version_code: Int = 0, val version_name: String = "", val url: String = "", val notes: String? = null)
 @Serializable data class LatestReleaseResponse(val release: ReleaseDto? = null)
 
+/** Gateway event envelope: { "t": "message.new", "d": {...} } */
 @Serializable data class GatewayEvent(val t: String, val d: JsonElement)
 
 @Serializable internal data class ErrorEnvelope(val error: ErrorDetail)
 @Serializable internal data class ErrorDetail(val code: String, val message: String)
+
+@Serializable data class InviteCodeDto(val code: String, val max_uses: Int = 1)
+@Serializable data class GenerateInvitesResponse(val invites: List<InviteCodeDto> = emptyList())

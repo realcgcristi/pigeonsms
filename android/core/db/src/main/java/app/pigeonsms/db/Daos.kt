@@ -38,14 +38,20 @@ interface MessageDao {
     @Query("UPDATE messages SET state = :state WHERE nonce = :nonce")
     suspend fun setState(nonce: String, state: String)
 
+    /**
+     * All image/video attachments in a conversation, newest first — feeds the media grid.
+     * Orders by createdAt (not seq): a SENDING attachment carries a synthetic pending seq
+     * (Long.MAX_VALUE-based) that would otherwise pin it to the top until the echo lands.
+     */
     @Query(
         "SELECT * FROM messages WHERE channelId = :channelId AND deleted = 0 " +
             "AND attachmentKey IS NOT NULL " +
             "AND (attachmentType LIKE 'image/%' OR attachmentType LIKE 'video/%') " +
-            "ORDER BY seq DESC, createdAt DESC"
+            "ORDER BY createdAt DESC, seq DESC"
     )
     fun mediaStream(channelId: String): Flow<List<MessageEntity>>
 
+    /** Local (offline) message text search. Callers must escape %, _ and \ in [query]. */
     @Query(
         "SELECT * FROM messages WHERE channelId = :channelId AND deleted = 0 " +
             "AND content LIKE '%' || :query || '%' ESCAPE '\\' " +
@@ -70,6 +76,10 @@ interface OutboxDao {
 
     @Query("UPDATE outbox SET attempts = attempts + 1 WHERE nonce = :nonce")
     suspend fun bumpAttempt(nonce: String)
+
+    /** Explicit user retry clears the attempt budget so a dead-lettered item can send again. */
+    @Query("UPDATE outbox SET attempts = 0 WHERE nonce = :nonce")
+    suspend fun resetAttempts(nonce: String)
 }
 
 @Dao

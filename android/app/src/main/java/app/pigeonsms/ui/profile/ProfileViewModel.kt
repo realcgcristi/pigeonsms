@@ -29,6 +29,7 @@ class ProfileViewModel(private val repo: SocialRepository, private val userId: S
     private var loadGeneration = 0L
     fun mediaUrl(key: String?) = repo.mediaUrl(key)
 
+    /** Block this profile's user (also unfriends server-side), then run [onDone]. */
     fun block(onDone: () -> Unit) {
         viewModelScope.launch {
             runCatching { repo.block(userId) }
