@@ -145,13 +145,30 @@ class PigeonApi(
             .unwrap<MessagesResponse>().cursor?.channel_last_seq
     }.getOrNull() ?: 0L
 
-    suspend fun sendMessage(channelId: String, content: String, nonce: String, replyTo: String? = null, attachment: AttachmentDto? = null) =
+    /**
+     * ttl (seconds) makes the message disappearing (server sets expires_at = now + ttl*1000).
+     * sendAt (epoch ms) in the future schedules it instead of sending (goes to scheduled_messages).
+     * encrypted=true stores base64 ciphertext in content, encrypted=1 server-side (E2EE, flag-off).
+     */
+    suspend fun sendMessage(
+        channelId: String,
+        content: String,
+        nonce: String,
+        replyTo: String? = null,
+        attachment: AttachmentDto? = null,
+        ttl: Long? = null,
+        sendAt: Long? = null,
+        encrypted: Boolean = false,
+    ) =
         client.post("$baseUrl/channels/$channelId/messages") {
             auth(); contentType(ContentType.Application.Json)
             setBody(buildJsonObject {
                 put("content", content); put("nonce", nonce)
                 if (replyTo != null) put("reply_to", replyTo)
                 if (attachment != null) put("attachment", json.encodeToJsonElement(AttachmentDto.serializer(), attachment))
+                if (ttl != null) put("ttl", ttl)
+                if (sendAt != null) put("send_at", sendAt)
+                if (encrypted) put("encrypted", 1)
             })
         }.unwrap<MessageResponse>().message
 
@@ -222,6 +239,10 @@ class PigeonApi(
     suspend fun removeSuperPin(channelId: String) { client.delete("$baseUrl/channels/$channelId/super-pin") { auth() }.unwrap<OkResponse>() }
     suspend fun dismissSuperPin(channelId: String) { client.put("$baseUrl/channels/$channelId/super-pin/dismiss") { auth() }.unwrap<OkResponse>() }
     suspend fun search(channelId: String, q: String) = client.get("$baseUrl/channels/$channelId/search?q=${q(q)}") { auth() }.unwrap<MessagesResponse>().messages
+    /** Space-wide FTS5 search across permitted channels; paginate with before (LIMIT 50). Skips encrypted messages server-side. */
+    suspend fun searchSpace(spaceId: String, q: String, before: Long? = null) =
+        client.get("$baseUrl/spaces/$spaceId/search?q=${q(q)}${if (before != null) "&before=$before" else ""}") { auth() }
+            .unwrap<SearchResponse>()
     suspend fun typing(channelId: String) { runCatching { client.post("$baseUrl/channels/$channelId/typing") { auth() } } }
     suspend fun markRead(channelId: String, seq: Long) { runCatching {
         client.put("$baseUrl/channels/$channelId/read") { auth(); contentType(ContentType.Application.Json); setBody(buildJsonObject { put("seq", seq) }) }
@@ -363,4 +384,48 @@ class PigeonApi(
         }
     }
     suspend fun latestRelease() = client.get("$baseUrl/updates/latest").unwrap<LatestReleaseResponse>().release
+    /** Admin-only: re-broadcast the update FCM to every push token for an already-published release. */
+    suspend fun notifyAllOfRelease(versionCode: Int) {
+        client.post("$baseUrl/admin/releases/$versionCode/notify") { auth() }.unwrap<OkResponse>()
+    }
+
+    // --- devices / e2ee (ships flag-off, experimental) ---
+    /** Register this device's X25519 identity pub key. Returns the new device id. */
+    suspend fun postDevice(pubKey: String, name: String? = null): String {
+        val body = client.post("$baseUrl/auth/devices") {
+            auth(); contentType(ContentType.Application.Json)
+            setBody(buildJsonObject { put("pub_key", pubKey); if (name != null) put("name", name) })
+        }.unwrap<JsonObject>()
+        return (body["id"] as? JsonPrimitive)?.content ?: ""
+    }
+    /** The caller's own registered devices (full detail). */
+    suspend fun myDevices() = client.get("$baseUrl/auth/devices") { auth() }.unwrap<DevicesResponse>().devices
+    /** Another user's device pub keys — only when a mutual DM/friend exists (403 otherwise). */
+    suspend fun userDevices(userId: String) = client.get("$baseUrl/users/$userId/devices") { auth() }.unwrap<DevicesResponse>().devices
+    /** Password-derived encrypted key backup for multi-device recovery; null when none stored. */
+    suspend fun getKeyBackup() = client.get("$baseUrl/auth/key-backup") { auth() }.unwrap<KeyBackupResponse>().backup
+    suspend fun putKeyBackup(blob: String, salt: String, params: String) {
+        client.put("$baseUrl/auth/key-backup") {
+            auth(); contentType(ContentType.Application.Json)
+            setBody(buildJsonObject { put("blob", blob); put("kdf_salt", salt); put("kdf_params", params) })
+        }.unwrap<OkResponse>()
+    }
+    /** Deliver per-DM symmetric keys wrapped (sealed box) to each recipient device. */
+    suspend fun postKeyEnvelopes(channelId: String, list: List<KeyEnvelopeDto>) {
+        client.post("$baseUrl/channels/$channelId/key-envelopes") {
+            auth(); contentType(ContentType.Application.Json)
+            setBody(buildJsonObject {
+                putJsonArray("envelopes") {
+                    list.forEach { add(buildJsonObject { put("to_device", it.to_device); put("wrapped_key", it.wrapped_key) }) }
+                }
+            })
+        }.unwrap<OkResponse>()
+    }
+    /** Wrapped keys addressed to the caller's own devices for this channel. */
+    suspend fun getKeyEnvelopes(channelId: String) =
+        client.get("$baseUrl/channels/$channelId/key-envelopes") { auth() }.unwrap<EnvelopesResponse>().envelopes
+
+    // --- scheduled messages ---
+    suspend fun listScheduled() = client.get("$baseUrl/scheduled") { auth() }.unwrap<ScheduledResponse>().scheduled
+    suspend fun cancelScheduled(id: String) { client.delete("$baseUrl/scheduled/$id") { auth() }.unwrap<OkResponse>() }
 }

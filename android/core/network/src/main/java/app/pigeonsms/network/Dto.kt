@@ -140,6 +140,7 @@ data class MessageDto(
     val seq: Long = 0,
     val author: ApiUser,
     val content: String = "",
+    val encrypted: Boolean = false,
     val reply_to: String? = null,
     val nonce: String? = null,
     val attachment: AttachmentDto? = null,
@@ -383,3 +384,56 @@ data class ReleaseDto(val version_code: Int = 0, val version_name: String = "", 
 
 @Serializable data class InviteCodeDto(val code: String, val max_uses: Int = 1)
 @Serializable data class GenerateInvitesResponse(val invites: List<InviteCodeDto> = emptyList())
+
+// --- 2.8.0: E2EE, multi-device, key backup, search, scheduled messages ---
+
+/** A user's E2EE device (X25519 identity pub key). GET /auth/devices, GET /users/:id/devices. */
+@Serializable
+data class DeviceDto(
+    val id: String,
+    val pub_key: String,
+    val name: String? = null,
+    val created_at: Long = 0,
+    val last_seen: Long? = 0,
+)
+
+@Serializable data class DevicesResponse(val devices: List<DeviceDto> = emptyList())
+
+/** Password-derived encrypted key backup blob. GET/PUT /auth/key-backup. */
+@Serializable
+data class KeyBackupDto(
+    val blob: String,
+    val kdf_salt: String,
+    val kdf_params: String,
+    val updated_at: Long = 0,
+)
+
+@Serializable data class KeyBackupResponse(val backup: KeyBackupDto? = null)
+
+/** A per-DM symmetric key wrapped (sealed box) to a recipient device. /channels/:id/key-envelopes. */
+@Serializable
+data class KeyEnvelopeDto(
+    val id: String,
+    val to_device: String,
+    val from_user: String,
+    val wrapped_key: String,
+    val created_at: Long = 0,
+)
+
+@Serializable data class EnvelopesResponse(val envelopes: List<KeyEnvelopeDto> = emptyList())
+
+/** GET /spaces/:id/search — FTS5 message results plus a cursor. */
+@Serializable
+data class SearchResponse(val results: List<MessageDto> = emptyList(), val next_before: Long? = null)
+
+/** A pending scheduled message. GET /scheduled. */
+@Serializable
+data class ScheduledMessageDto(
+    val id: String,
+    val channel_id: String,
+    val content: String,
+    val send_at: Long = 0,
+    val created_at: Long = 0,
+)
+
+@Serializable data class ScheduledResponse(val scheduled: List<ScheduledMessageDto> = emptyList())

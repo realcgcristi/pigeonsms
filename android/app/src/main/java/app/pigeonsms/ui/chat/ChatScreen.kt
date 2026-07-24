@@ -175,6 +175,11 @@ import androidx.compose.material.icons.outlined.Stop
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.Link
+import androidx.compose.material.icons.outlined.Timer
+import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.LockOpen
+import androidx.compose.material.icons.outlined.HourglassEmpty
 import kotlinx.coroutines.Dispatchers
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material3.FloatingActionButton
@@ -654,7 +659,9 @@ fun ChatScreen(
         Composer(
             ui = ui,
             isSpace = isSpace,
-            onSend = vm::send,
+            // ttl/sendAt/encrypted pass straight through to ChatViewModel.send (A8):
+            // send(text, ttl, sendAt, encrypted). Edits ignore them (see the VM).
+            onSend = { body, ttl, sendAt, encrypted -> vm.send(body, ttl, sendAt, encrypted) },
             onTyping = vm::typing,
             onAttachment = vm::sendAttachment,
             onAttachmentError = vm::reportError,
@@ -664,6 +671,8 @@ fun ChatScreen(
             mediaUrl = vm::mediaUrl,
             onCreatePoll = { showCreatePoll = true },
             onCreateEvent = { showCreateEvent = true },
+            // E2EE toggle is gated on the beta flag (default off) — flag owned by the data agent
+            e2eeEnabled = themePrefs.e2ee,
         )
         }
     }
@@ -1343,10 +1352,11 @@ private fun MessageBubble(
     var confirmDelete by remember { mutableStateOf(false) }
     var bubbleWindowY by remember(message.id) { mutableStateOf(-1f) }
     val haptics = LocalHapticFeedback.current
+    val reducedMotion = LocalReducedMotion.current
     val clipboard = LocalClipboardManager.current
     val copyContext = LocalContext.current
     val onDoubleTapReact = {
-        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        if (!reducedMotion) haptics.performHapticFeedback(HapticFeedbackType.LongPress)
         onReact("❤️", true)
     }
     val reactions = remember(message.reactionsJson) {
@@ -1475,7 +1485,7 @@ private fun MessageBubble(
                         dragX = (dragX + dragAmount).coerceIn(0f, 160f)
                         val armed = dragX > 120f
                         // one tick the moment the swipe arms, not on release
-                        if (armed && !replyArmed) haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        if (armed && !replyArmed && !reducedMotion) haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                         replyArmed = armed
                     }
                 },
@@ -1718,6 +1728,15 @@ private fun MessageBubble(
                     }
                 }
 
+                // encrypted-lock + disappearing-countdown indicators, aligned to the
+                // bubble's sending side. Rendered for both own and others' messages
+                // (they are properties of the message, not the viewer).
+                MessageSecurityRow(
+                    encrypted = message.encrypted,
+                    expiresAt = message.expiresAt,
+                    self = self,
+                )
+
                 MessageMeta(
                     message = message,
                     showSentTime = self || (imageKey != null && grouped),
@@ -1902,6 +1921,60 @@ private fun MessageMeta(message: MessageEntity, showSentTime: Boolean, onRetry: 
                 }
             }
         }
+    }
+}
+
+/**
+ * Small indicator strip under a bubble carrying two message-level security cues:
+ *  - a lock glyph + "encrypted" when the message is E2EE ([encrypted] = 1),
+ *  - a live disappearing countdown ("vanishes in 6h") when [expiresAt] is set.
+ * Aligned to the bubble's sending side; renders nothing when neither applies.
+ */
+@Composable
+private fun MessageSecurityRow(encrypted: Boolean, expiresAt: Long?, self: Boolean) {
+    if (!encrypted && expiresAt == null) return
+    // re-tick roughly once a minute so the remaining-time label stays fresh while
+    // the bubble is on screen (cheap: one coroutine per visible disappearing bubble)
+    var nowMs by remember { mutableStateOf(System.currentTimeMillis()) }
+    if (expiresAt != null) {
+        LaunchedEffect(expiresAt) {
+            while (isActive) {
+                nowMs = System.currentTimeMillis()
+                if (nowMs >= expiresAt) break
+                delay(30_000)
+            }
+        }
+    }
+    val tint = MaterialTheme.colorScheme.onSurfaceVariant
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = Spacing.s, vertical = Spacing.xxs),
+        horizontalArrangement = if (self) Arrangement.End else Arrangement.Start,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (encrypted) {
+            Icon(Icons.Outlined.Lock, "encrypted", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(13.dp))
+            Spacer(Modifier.width(Spacing.xxs))
+            Text("encrypted", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, maxLines = 1)
+        }
+        if (encrypted && expiresAt != null) Spacer(Modifier.width(Spacing.s))
+        if (expiresAt != null) {
+            Icon(Icons.Outlined.Timer, "disappearing message", tint = tint, modifier = Modifier.size(13.dp))
+            Spacer(Modifier.width(Spacing.xxs))
+            Text(disappearingLabel(expiresAt, nowMs), style = MaterialTheme.typography.labelSmall, color = tint, maxLines = 1)
+        }
+    }
+}
+
+/** "vanishes in 6h" / "5m" / "expired" — coarse remaining-time label for a TTL. */
+private fun disappearingLabel(expiresAt: Long, nowMs: Long): String {
+    val remaining = expiresAt - nowMs
+    if (remaining <= 0) return "expired"
+    val minutes = remaining / 60_000
+    return when {
+        minutes < 1 -> "vanishes in <1m"
+        minutes < 60 -> "vanishes in ${minutes}m"
+        minutes < 60 * 24 -> "vanishes in ${minutes / 60}h"
+        else -> "vanishes in ${minutes / (60 * 24)}d"
     }
 }
 
@@ -2597,7 +2670,9 @@ private fun AttachmentView(name: String?, type: String?, url: String, self: Bool
 private fun Composer(
     ui: ChatUiState,
     isSpace: Boolean,
-    onSend: (String) -> Unit,
+    // text, ttl (seconds; null = off), sendAt (epoch ms; null = send now),
+    // encrypted (E2EE flag). ttl/sendAt/encrypted map 1:1 to the send-path contract.
+    onSend: (String, Long?, Long?, Boolean) -> Unit,
     onTyping: () -> Unit,
     onAttachment: (ByteArray, String, String, String) -> Unit,
     onAttachmentError: (String) -> Unit,
@@ -2607,10 +2682,22 @@ private fun Composer(
     mediaUrl: (String) -> String = { it },
     onCreatePoll: () -> Unit = {},
     onCreateEvent: () -> Unit = {},
+    // gates the "encrypt" affordance — off by default (E2EE ships flag-off)
+    e2eeEnabled: Boolean = false,
 ) {
     var text by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue("")) }
     var readingAttachment by remember { mutableStateOf(false) }
     var showAttachmentOptions by remember { mutableStateOf(false) }
+    // ---- disappearing / schedule / encrypt composer options -----------------
+    // ttl in seconds (null = disappearing off). Fixed presets: 1h / 1d / 7d.
+    var ttlSeconds by rememberSaveable { mutableStateOf<Long?>(null) }
+    // schedule-send timestamp in epoch ms (null = send immediately)
+    var scheduledAt by rememberSaveable { mutableStateOf<Long?>(null) }
+    // per-message E2EE flag; only ever settable when the beta flag is on
+    var encryptOn by rememberSaveable { mutableStateOf(false) }
+    var showScheduleDialog by remember { mutableStateOf(false) }
+    // encrypt can never linger on once the flag is turned off
+    LaunchedEffect(e2eeEnabled) { if (!e2eeEnabled) encryptOn = false }
     // Recent device gallery items surfaced inside the attachment sheet.
     val recentMedia = remember { mutableStateListOf<RecentMediaItem>() }
     // An image currently sitting on the clipboard, if any — drives a "paste image" affordance.
@@ -2725,6 +2812,7 @@ private fun Composer(
     }
 
     val haptics = LocalHapticFeedback.current
+    val reducedMotion = LocalReducedMotion.current
     var recording by remember { mutableStateOf(false) }
     var paused by remember { mutableStateOf(false) }
     var elapsedMs by remember { mutableStateOf(0L) }
@@ -2763,7 +2851,7 @@ private fun Composer(
             elapsedMs = 0L
             paused = false
             recording = true
-            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+            if (!reducedMotion) haptics.performHapticFeedback(HapticFeedbackType.LongPress)
         }.onFailure { onAttachmentError("couldn't start recording") }
     }
     fun finishRecording(send: Boolean) {
@@ -2789,7 +2877,7 @@ private fun Composer(
         val rec = recorderRef.value ?: return
         runCatching {
             if (paused) { rec.resume(); paused = false } else { rec.pause(); paused = true }
-            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+            if (!reducedMotion) haptics.performHapticFeedback(HapticFeedbackType.LongPress)
         }
     }
     // live amplitude + timer polling while actively recording (not paused)
@@ -2930,6 +3018,19 @@ private fun Composer(
                     },
                 )
             }
+            // options row: disappearing ttl, schedule-send, encrypt. Hidden while
+            // recording or editing (options apply to fresh text sends only).
+            if (!recording && ui.editing == null) {
+                ComposerOptionsRow(
+                    ttlSeconds = ttlSeconds,
+                    scheduledAt = scheduledAt,
+                    encryptOn = encryptOn,
+                    e2eeEnabled = e2eeEnabled,
+                    onPickTtl = { ttlSeconds = it },
+                    onSchedule = { showScheduleDialog = true },
+                    onToggleEncrypt = { encryptOn = !encryptOn },
+                )
+            }
             if (recording) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -3052,9 +3153,14 @@ private fun Composer(
                             keepKeyboardAfterSend = true
                             focusRequester.requestFocus()
                             keyboardController?.show()
-                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            if (!reducedMotion) haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                             sendTick++
-                            onSend(submitted)
+                            // editing ignores ttl/schedule/encrypt (the VM only edits text);
+                            // a fresh send carries whatever options are armed on the composer.
+                            onSend(submitted, ttlSeconds, scheduledAt, encryptOn)
+                            // schedule is one-shot — clear it so the next message sends now.
+                            // ttl + encrypt persist (they're conversation-intent, not per-send).
+                            scheduledAt = null
                         }
                         val sendIcon = if (ui.editing != null) Icons.Outlined.Done else Icons.Rounded.Send
                         val sendLabel = if (ui.editing != null) "save edit" else "send message"
@@ -3122,6 +3228,19 @@ private fun Composer(
             onSend = { edited, caption ->
                 pendingImageEdit = null
                 dispatchAttachment(edited.bytes, edited.filename, edited.type, caption = caption)
+            },
+        )
+    }
+    if (showScheduleDialog) {
+        ScheduleSendDialog(
+            initial = scheduledAt,
+            onDismiss = { showScheduleDialog = false },
+            onClear = { showScheduleDialog = false; scheduledAt = null },
+            onPick = { epochMs ->
+                showScheduleDialog = false
+                // only a future time is a real schedule; anything else clears it
+                scheduledAt = epochMs.takeIf { it > System.currentTimeMillis() }
+                if (epochMs <= System.currentTimeMillis()) onAttachmentError("pick a time in the future")
             },
         )
     }
@@ -3276,6 +3395,187 @@ private fun ComposerContextRow(title: String, detail: String, onClose: () -> Uni
             Icon(Icons.Outlined.Close, "cancel", tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
+}
+
+/** Fixed disappearing-message presets. null = off. */
+private val TTL_PRESETS: List<Pair<String, Long?>> = listOf(
+    "off" to null,
+    "1h" to 3_600L,
+    "1d" to 86_400L,
+    "7d" to 604_800L,
+)
+
+private fun ttlChipLabel(ttlSeconds: Long?): String =
+    TTL_PRESETS.firstOrNull { it.second == ttlSeconds }?.first?.takeIf { it != "off" }
+        ?: "vanish"
+
+private fun scheduleChipLabel(scheduledAt: Long?): String {
+    if (scheduledAt == null) return "schedule"
+    val cal = java.util.Calendar.getInstance().apply { timeInMillis = scheduledAt }
+    return java.text.SimpleDateFormat("MMM d, HH:mm", java.util.Locale.getDefault()).format(cal.time)
+}
+
+/**
+ * The row of send-modifier chips sitting just above the input: disappearing-message
+ * ttl (off/1h/1d/7d via a dropdown), schedule-send (opens a date/time dialog), and —
+ * only when the E2EE beta flag is on — an encrypt toggle. Each chip lights up in the
+ * accent when armed so the composer visibly carries state into the next send. Shared
+ * chip styling matches the rest of the composer (both classic + experimental skins).
+ */
+@Composable
+private fun ComposerOptionsRow(
+    ttlSeconds: Long?,
+    scheduledAt: Long?,
+    encryptOn: Boolean,
+    e2eeEnabled: Boolean,
+    onPickTtl: (Long?) -> Unit,
+    onSchedule: () -> Unit,
+    onToggleEncrypt: () -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = Spacing.xs, start = Spacing.xs),
+        horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // disappearing ttl — a chip that opens the preset dropdown
+        Box {
+            var ttlMenu by remember { mutableStateOf(false) }
+            ComposerOptionChip(
+                icon = if (ttlSeconds != null) Icons.Outlined.Timer else Icons.Outlined.HourglassEmpty,
+                label = ttlChipLabel(ttlSeconds),
+                active = ttlSeconds != null,
+                onClick = { ttlMenu = true },
+            )
+            DropdownMenu(expanded = ttlMenu, onDismissRequest = { ttlMenu = false }) {
+                TTL_PRESETS.forEach { (label, seconds) ->
+                    DropdownMenuItem(
+                        text = { Text(if (label == "off") "off" else "disappear after $label") },
+                        trailingIcon = {
+                            if (seconds == ttlSeconds) Icon(Icons.Outlined.Check, "selected", modifier = Modifier.size(18.dp))
+                        },
+                        onClick = { ttlMenu = false; onPickTtl(seconds) },
+                    )
+                }
+            }
+        }
+        // schedule-send — armed chip shows the target time; tap opens the picker,
+        // long-press-equivalent clear happens via the "off" item in the picker itself.
+        ComposerOptionChip(
+            icon = Icons.Outlined.Schedule,
+            label = scheduleChipLabel(scheduledAt),
+            active = scheduledAt != null,
+            onClick = onSchedule,
+        )
+        // encrypt — only offered when the beta flag is on (E2EE ships flag-off)
+        if (e2eeEnabled) {
+            ComposerOptionChip(
+                icon = if (encryptOn) Icons.Outlined.Lock else Icons.Outlined.LockOpen,
+                label = if (encryptOn) "encrypted" else "encrypt",
+                active = encryptOn,
+                onClick = onToggleEncrypt,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ComposerOptionChip(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    active: Boolean,
+    onClick: () -> Unit,
+) {
+    val container by animateColorAsState(
+        if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.16f) else MaterialTheme.colorScheme.surfaceContainerHigh,
+        tween(160),
+        label = "optionChipBg",
+    )
+    val content = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+    Row(
+        Modifier.clip(Corners.chip)
+            .background(container)
+            .then(if (active) Modifier.border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f), Corners.chip) else Modifier)
+            .clickable(onClick = onClick)
+            .padding(horizontal = Spacing.s, vertical = Spacing.xs),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
+    ) {
+        Icon(icon, null, tint = content, modifier = Modifier.size(16.dp))
+        Text(label, style = MaterialTheme.typography.labelMedium, color = content, maxLines = 1)
+    }
+}
+
+/**
+ * Schedule-send date/time picker. Uses the platform date + time dialogs (self-contained,
+ * no extra M3 state plumbing) and emits a single epoch-ms target through [onPick]. [onClear]
+ * turns scheduling back off. Starts from [initial] or the next full hour.
+ */
+@Composable
+private fun ScheduleSendDialog(
+    initial: Long?,
+    onDismiss: () -> Unit,
+    onClear: () -> Unit,
+    onPick: (Long) -> Unit,
+) {
+    val context = LocalContext.current
+    // working calendar seeded to initial or the next full hour
+    val cal = remember {
+        java.util.Calendar.getInstance().apply {
+            timeInMillis = initial ?: (System.currentTimeMillis() + 3_600_000L)
+            set(java.util.Calendar.SECOND, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }
+    }
+    var pickedMs by remember { mutableStateOf(cal.timeInMillis) }
+    val dateFmt = remember { java.text.SimpleDateFormat("EEE, MMM d yyyy", java.util.Locale.getDefault()) }
+    val timeFmt = remember { java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()) }
+    fun openDate() {
+        val c = java.util.Calendar.getInstance().apply { timeInMillis = pickedMs }
+        android.app.DatePickerDialog(
+            context,
+            { _, y, m, d ->
+                c.set(java.util.Calendar.YEAR, y); c.set(java.util.Calendar.MONTH, m); c.set(java.util.Calendar.DAY_OF_MONTH, d)
+                pickedMs = c.timeInMillis
+            },
+            c.get(java.util.Calendar.YEAR), c.get(java.util.Calendar.MONTH), c.get(java.util.Calendar.DAY_OF_MONTH),
+        ).apply { datePicker.minDate = System.currentTimeMillis() }.show()
+    }
+    fun openTime() {
+        val c = java.util.Calendar.getInstance().apply { timeInMillis = pickedMs }
+        android.app.TimePickerDialog(
+            context,
+            { _, h, min ->
+                c.set(java.util.Calendar.HOUR_OF_DAY, h); c.set(java.util.Calendar.MINUTE, min); c.set(java.util.Calendar.SECOND, 0)
+                pickedMs = c.timeInMillis
+            },
+            c.get(java.util.Calendar.HOUR_OF_DAY), c.get(java.util.Calendar.MINUTE), true,
+        ).show()
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Outlined.Schedule, null) },
+        title = { Text("schedule send") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(Spacing.s)) {
+                Text("this message will send automatically at the chosen time.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(horizontalArrangement = Arrangement.spacedBy(Spacing.s), verticalAlignment = Alignment.CenterVertically) {
+                    Surface(onClick = { openDate() }, shape = Corners.chip, color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+                        Text(dateFmt.format(pickedMs), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = Spacing.m, vertical = Spacing.s))
+                    }
+                    Surface(onClick = { openTime() }, shape = Corners.chip, color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+                        Text(timeFmt.format(pickedMs), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = Spacing.m, vertical = Spacing.s))
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { onPick(pickedMs) }) { Text("schedule") } },
+        dismissButton = {
+            Row {
+                if (initial != null) TextButton(onClick = onClear) { Text("send now", color = MaterialTheme.colorScheme.error) }
+                TextButton(onClick = onDismiss) { Text("cancel") }
+            }
+        },
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

@@ -175,13 +175,14 @@ fun PigeonNavBar(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         val haptics = LocalHapticFeedback.current
+        val reducedMotion = LocalReducedMotion.current
         items.forEach { item ->
             val isSel = item.route == selectedRoute
             NavBarItem(
                 item = item,
                 selected = isSel,
                 onClick = {
-                    if (!isSel) haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    if (!isSel && !reducedMotion) haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                     onSelect(item)
                 },
             )

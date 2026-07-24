@@ -5,6 +5,7 @@ import app.pigeonsms.db.ChannelCursorEntity
 import app.pigeonsms.db.MessageEntity
 import app.pigeonsms.db.OutboxEntity
 import app.pigeonsms.db.PigeonDatabase
+import app.pigeonsms.data.e2ee.E2eeManager
 import app.pigeonsms.network.AttachmentDto
 import app.pigeonsms.network.MessageDto
 import app.pigeonsms.network.PigeonApi
@@ -33,7 +34,17 @@ sealed interface PinEvent {
  * Offline-first messaging. Room is the source of truth for the chat screen;
  * network + gateway feed it. Sends go through the outbox for reliable delivery.
  */
-class ChatRepository(private val api: PigeonApi, private val db: PigeonDatabase) {
+class ChatRepository(
+    private val api: PigeonApi,
+    private val db: PigeonDatabase,
+    /**
+     * A9's E2EE façade (EXPERIMENTAL, flag-OFF). Nullable + defaulted so the manual-DI
+     * call sites (AppContainer) and CI keep compiling before A9 wires a concrete instance;
+     * a null manager means "no encryption available", identical to the flag being off.
+     * Referenced by the A9 contract type only — this module never touches A9's internals.
+     */
+    private val e2ee: E2eeManager? = null,
+) {
     private companion object {
         /** Outbox retry budget: past this many failed attempts a message is dead-lettered (FAILED) and no longer retried. */
         const val MAX_OUTBOX_ATTEMPTS = 5
@@ -43,6 +54,20 @@ class ChatRepository(private val api: PigeonApi, private val db: PigeonDatabase)
     private val reactionMutex = Mutex()
     private val pollMutex = Mutex()
     private val flushMutex = Mutex()
+
+    /** Placeholder shown for an encrypted message we can't decrypt (keys missing / not yet established). */
+    private val lockedPlaceholder = "🔒 encrypted message"
+
+    /**
+     * Per-send delivery metadata keyed by nonce. The outbox table (core/db, owned by
+     * A10) has no columns for ttl/send_at/encrypted, so we can't persist them on the
+     * OutboxEntity without a schema change outside this module's scope. Instead we hold
+     * them in-memory so the immediate flushOutbox() that follows a send picks them up.
+     * A restart between enqueue and flush drops the ttl/send_at hints (the message still
+     * sends, just without disappearing/scheduling) — noted for the A10 outbox-schema pass.
+     */
+    private data class SendMeta(val ttl: Long?, val sendAt: Long?, val encrypted: Boolean)
+    private val pendingSendMeta = java.util.concurrent.ConcurrentHashMap<String, SendMeta>()
 
     /**
      * Process-wide monotonic seq for optimistic (pending) rows. Starts above every real
@@ -131,10 +156,41 @@ class ChatRepository(private val api: PigeonApi, private val db: PigeonDatabase)
         return older.isNotEmpty()
     }
 
-    /** Optimistic send: render immediately, queue for delivery. */
-    suspend fun send(channelId: String, content: String, replyTo: String?, attachment: AttachmentDto?, selfName: String) {
+    /**
+     * Optimistic send: render immediately, queue for delivery.
+     *
+     * [ttl] (seconds) marks a disappearing message — the server derives expires_at.
+     * [sendAt] (epoch ms in the future) schedules the message server-side instead of
+     * sending now. [e2eeEnabled] is the client flag (default OFF): when on AND A9's
+     * manager reports keys are established for this DM, the content is encrypted here
+     * and flagged encrypted=1 so the server only ever stores ciphertext.
+     */
+    suspend fun send(
+        channelId: String,
+        content: String,
+        replyTo: String?,
+        attachment: AttachmentDto?,
+        selfName: String,
+        ttl: Long? = null,
+        sendAt: Long? = null,
+        e2eeEnabled: Boolean = false,
+    ) {
         val nonce = "${System.currentTimeMillis()}-${(0..9999).random()}"
         val now = System.currentTimeMillis()
+        // E2EE hook (flag-OFF by default): encrypt only when the flag is on and the A9
+        // manager is present. The manager throws when no key material exists for the DM
+        // (key exchange not done — see E2eeManager.requireRatchetState), so a null result
+        // means "not established yet" and we fall back to sending plaintext rather than
+        // dropping the message. Encryption is best-effort while experimental.
+        val cipher = if (e2eeEnabled && e2ee != null) {
+            runCatching { e2ee.encrypt(channelId, content) }.getOrNull()
+        } else {
+            null
+        }
+        val wireContent = cipher ?: content
+        val encrypted = cipher != null
+        // The local optimistic row shows the plaintext the user just typed; only the
+        // outbox/wire copy carries ciphertext.
         db.messages().upsertOne(
             MessageEntity(
                 id = "pending-$nonce", channelId = channelId, seq = pendingSeq.incrementAndGet(),
@@ -145,7 +201,8 @@ class ChatRepository(private val api: PigeonApi, private val db: PigeonDatabase)
                 state = "SENDING",
             )
         )
-        db.outbox().add(OutboxEntity(nonce, channelId, content, replyTo, attachment?.key, attachment?.name, attachment?.type, attachment?.size, now))
+        pendingSendMeta[nonce] = SendMeta(ttl = ttl, sendAt = sendAt, encrypted = encrypted)
+        db.outbox().add(OutboxEntity(nonce, channelId, wireContent, replyTo, attachment?.key, attachment?.name, attachment?.type, attachment?.size, now))
     }
 
     suspend fun flushOutbox(channelId: String? = null) = flushMutex.withLock {
@@ -160,12 +217,20 @@ class ChatRepository(private val api: PigeonApi, private val db: PigeonDatabase)
             }
             try {
                 val att = item.attachmentKey?.let { AttachmentDto(it, item.attachmentName, item.attachmentType, item.attachmentSize) }
-                val sent = api.sendMessage(item.channelId, item.content, item.nonce, item.replyTo, att)
+                // ttl/send_at/encrypted ride the in-memory SendMeta (the outbox row can't
+                // carry them until A10 extends OutboxEntity); absent meta = a plain send,
+                // which is also the correct post-restart fallback.
+                val meta = pendingSendMeta[item.nonce]
+                val sent = api.sendMessage(
+                    item.channelId, item.content, item.nonce, item.replyTo, att,
+                    ttl = meta?.ttl, sendAt = meta?.sendAt, encrypted = meta?.encrypted ?: false,
+                )
                 db.withTransaction {
                     db.messages().delete("pending-${item.nonce}")
                     db.messages().upsertOne(sent.toEntity())
                     db.outbox().remove(item.nonce)
                 }
+                pendingSendMeta.remove(item.nonce)
             } catch (_: Exception) {
                 db.outbox().bumpAttempt(item.nonce)
                 db.messages().setState(item.nonce, "FAILED")
@@ -289,6 +354,8 @@ class ChatRepository(private val api: PigeonApi, private val db: PigeonDatabase)
     suspend fun removeSuperPin(channelId: String) = api.removeSuperPin(channelId)
     suspend fun dismissSuperPin(channelId: String) = api.dismissSuperPin(channelId)
     suspend fun search(channelId: String, q: String) = api.search(channelId, q)
+    /** Space-wide FTS5 search (2.8.0); paginate with [before]. Server skips encrypted messages. */
+    suspend fun searchSpace(spaceId: String, q: String, before: Long? = null) = api.searchSpace(spaceId, q, before)
     suspend fun typing(channelId: String) = api.typing(channelId)
     suspend fun markRead(channelId: String, seq: Long) = api.markRead(channelId, seq)
     suspend fun uploadFile(bytes: ByteArray, filename: String, type: String) = api.uploadFile(bytes, filename, type)
@@ -320,8 +387,28 @@ class ChatRepository(private val api: PigeonApi, private val db: PigeonDatabase)
     // isn't inserted yet — your own message flickers out then back. Room's
     // withTransaction is re-entrant, so this is a no-op when sync/flushOutbox/loadOlder
     // already opened an outer transaction.
+    /**
+     * E2EE receive hook (flag-OFF by default). When A9's manager is present and the
+     * message is marked encrypted, decrypt for display: on success show plaintext, on
+     * missing/unestablished keys (E2eeManager.decrypt throws) show [lockedPlaceholder]
+     * instead of raw base64.
+     *
+     * [isEncrypted] comes from the server's `encrypted=1` flag, now surfaced on
+     * [MessageDto.encrypted] and passed through from [mergeEvent]. For plaintext rows
+     * (encrypted=false) this is a safe no-op — we never attempt to decrypt (and thus
+     * never clobber) plaintext.
+     */
+    private suspend fun decryptForDisplay(channelId: String, content: String, isEncrypted: Boolean): String {
+        val manager = e2ee ?: return content
+        if (!isEncrypted || content.isEmpty()) return content
+        return runCatching { manager.decrypt(channelId, content) }.getOrNull() ?: lockedPlaceholder
+    }
+
     private suspend fun mergeEvent(dto: MessageDto) = db.withTransaction {
-        val incoming = dto.toEntity()
+        // The server's `encrypted` flag drives decryptForDisplay: for encrypted rows we
+        // decrypt to plaintext (or [lockedPlaceholder]); plaintext rows are a no-op.
+        val display = decryptForDisplay(dto.channel_id, dto.content, isEncrypted = dto.encrypted)
+        val incoming = dto.toEntity().let { if (display !== dto.content) it.copy(content = display) else it }
         // Reconcile with our own optimistic send: the gateway echo (and the send
         // API response) carry the nonce we minted locally. The optimistic row was
         // inserted under a temporary id ("pending-<nonce>"), so a lookup by the

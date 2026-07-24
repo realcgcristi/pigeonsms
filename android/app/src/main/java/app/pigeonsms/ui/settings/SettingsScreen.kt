@@ -122,6 +122,7 @@ fun SettingsScreen(
     onPrivacy: () -> Unit,
     onNotifications: () -> Unit,
     onNests: () -> Unit,
+    onAbout: () -> Unit,
     onSignOut: () -> Unit,
 ) {
     val skin = LocalUiSkin.current
@@ -189,6 +190,11 @@ fun SettingsScreen(
                 MenuRow(Icons.Outlined.History, "login history", "recent sign-ins", onHistory)
                 RowDivider()
                 MenuRow(Icons.Outlined.Lock, "two-factor auth", "extra account security", onSecurity)
+            }
+
+            Group("app")
+            GroupCard {
+                MenuRow(Icons.Outlined.Info, "about", "version, creator, updates", onAbout)
             }
 
             Spacer(Modifier.height(Spacing.l))

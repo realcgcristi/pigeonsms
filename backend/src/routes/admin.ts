@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { ApiError } from '../middleware/errors';
 import { timingSafeEqualStrings, hashPassword } from '../lib/crypto';
 import { randomFromAlphabet } from '../lib/ids';
+import { broadcastRelease } from '../lib/notifications';
 import type { AppEnv } from '../types';
 
 /**
@@ -108,7 +109,26 @@ admin.post('/releases', async (c) => {
   )
     .bind(versionCode, versionName, url, String(body['notes'] ?? '') || null, Date.now())
     .run();
+  // Notify every registered device that a new build is out. Fire only after the
+  // row is committed so the updater feed and the push agree.
+  await broadcastRelease(c.env, versionCode, versionName);
   return c.json({ ok: true }, 201);
+});
+
+/** POST /admin/releases/:version_code/notify — re-broadcast an existing release. */
+admin.post('/releases/:version_code/notify', async (c) => {
+  const versionCode = Number(c.req.param('version_code'));
+  if (!Number.isInteger(versionCode)) {
+    throw new ApiError(400, 'bad_release', 'integer version_code required');
+  }
+  const release = await c.env.DB.prepare(
+    'SELECT version_name FROM app_releases WHERE version_code = ?',
+  )
+    .bind(versionCode)
+    .first<{ version_name: string }>();
+  if (!release) throw new ApiError(404, 'not_found', 'no such release');
+  await broadcastRelease(c.env, versionCode, release.version_name);
+  return c.json({ ok: true });
 });
 
 export default admin;
