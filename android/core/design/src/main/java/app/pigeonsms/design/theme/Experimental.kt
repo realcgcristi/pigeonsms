@@ -130,7 +130,7 @@ val NovaTypography = Typography(
     labelSmall = TextStyle(fontFamily = Figtree, fontWeight = FontWeight.SemiBold, fontSize = 11.sp, lineHeight = 14.sp, letterSpacing = 0.3.sp),
 )
 
-val NovaAccent = Accent("iris", "iris", NovaColors.Iris, NovaColors.IrisDeep, NovaColors.OnIris)
+val NovaAccent = Accent("iris", "iris", Color(0xFFB388FF), Color(0xFF8B5CF6), Color(0xFF150A2E))
 
 object NovaDepth {
 
