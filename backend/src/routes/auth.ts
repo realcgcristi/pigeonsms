@@ -21,6 +21,10 @@ import type { AppEnv } from '../types';
 
 const auth = new Hono<AppEnv>();
 
+/**
+ * Burned on a wrong-username login so it costs the same as a wrong password.
+ * Lazy: Workers forbid crypto in module scope.
+ */
 let dummyHash: Promise<string> | null = null;
 function getDummyHash(pepper: string): Promise<string> {
   dummyHash ??= hashPassword('pigeon-timing-pad', pepper);
@@ -39,7 +43,7 @@ function publicUser(u: {
     username: u.username,
     email: u.email,
     display_name: u.display_name ?? u.displayName ?? null,
-
+    // mirrors middleware/auth.ts isAdmin so clients don't cache a stale false
     is_admin: u.username === 'admin',
   };
 }
@@ -95,6 +99,7 @@ function recordLogin(
   );
 }
 
+/** GET /auth/invite/:code — early UX validation during onboarding. */
 auth.get('/invite/:code', async (c) => {
   await enforceRateLimit(c.env.RL_AUTH, `inv:${clientIp(c)}`);
   const code = c.req.param('code').trim().toUpperCase();
@@ -108,6 +113,7 @@ auth.get('/invite/:code', async (c) => {
   return c.json({ valid });
 });
 
+/** POST /auth/signup { invite, username, email, password, device_name? } */
 auth.post('/signup', async (c) => {
   await enforceRateLimit(c.env.RL_AUTH, `signup:${clientIp(c)}`);
   const body = await c.req.json<Record<string, unknown>>().catch(() => {
@@ -123,6 +129,7 @@ auth.post('/signup', async (c) => {
 
   const passwordHash = await hashPassword(password, c.env.PASSWORD_PEPPER);
 
+  // Atomic consume: only succeeds while uses remain and not expired.
   const consumed = await c.env.DB.prepare(
     `UPDATE invites SET uses = uses + 1
      WHERE code = ? AND uses < max_uses AND (expires_at IS NULL OR expires_at > ?)`,
@@ -172,6 +179,7 @@ auth.post('/signup', async (c) => {
   );
 });
 
+/** POST /auth/login { login (username|email), password, device_name? } */
 auth.post('/login', async (c) => {
   const ip = clientIp(c);
   await enforceRateLimit(c.env.RL_AUTH, `login:${ip}`);
@@ -183,6 +191,10 @@ auth.post('/login', async (c) => {
   const password = String(body['password'] ?? '');
   const deviceName = optionalDeviceName(body['device_name']);
   if (!login || !password) throw new ApiError(400, 'bad_request', 'login and password required');
+
+  // Per-account limiter (in addition to the per-IP one above) so a botnet can't
+  // spread a credential-stuffing run against one account across many IPs.
+  await enforceRateLimit(c.env.RL_AUTH, `login-acct:${login}`);
 
   const user = await c.env.DB.prepare(
     `SELECT id, username, email, display_name, password_hash, totp_secret, totp_enabled FROM users
@@ -201,7 +213,19 @@ auth.post('/login', async (c) => {
       false);
 
   if (!user || !ok) {
-    if (user) recordLogin(c, user.id, deviceName, false);
+    if (user) {
+      recordLogin(c, user.id, deviceName, false);
+    } else {
+      // No user row to attach login_history to; log the attempt so brute-forcing
+      // nonexistent usernames is still visible.
+      c.executionCtx.waitUntil(
+        c.env.DB.prepare(
+          'INSERT INTO audit_log (id, actor_id, action, target, ip, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+        )
+          .bind(snowflake(), null, 'security.login_fail_nouser', login.slice(0, 100), ip, Date.now())
+          .run(),
+      );
+    }
     throw new ApiError(401, 'bad_credentials', 'wrong username or password');
   }
 
@@ -223,6 +247,8 @@ auth.post('/login', async (c) => {
     }
   }
 
+  // New-device heuristic: no prior successful login from this UA. Alert becomes
+  // a push + system DM once those pillars exist (M2/M7); audit_log carries it now.
   const ua = c.req.header('user-agent') ?? '';
   const known = await c.env.DB.prepare(
     'SELECT 1 FROM login_history WHERE user_id = ? AND user_agent = ? AND success = 1 LIMIT 1',
@@ -247,6 +273,7 @@ auth.post('/login', async (c) => {
 // --- authenticated surface ---
 auth.use(requireAuth);
 
+/** GET /auth/me */
 auth.get('/me', (c) => {
   const user = c.get('user') as AuthedUser;
   return c.json({
@@ -260,6 +287,7 @@ auth.get('/me', (c) => {
   });
 });
 
+/** POST /auth/logout — revoke current session. */
 auth.post('/logout', async (c) => {
   const session = c.get('session')!;
   await c.env.DB.prepare('UPDATE sessions SET revoked_at = ? WHERE id = ?')
@@ -270,6 +298,7 @@ auth.post('/logout', async (c) => {
   return c.json({ ok: true });
 });
 
+/** GET /auth/sessions — device list. */
 auth.get('/sessions', async (c) => {
   const user = c.get('user') as AuthedUser;
   const session = c.get('session')!;
@@ -285,6 +314,7 @@ auth.get('/sessions', async (c) => {
   });
 });
 
+/** DELETE /auth/sessions/:id — revoke one of your devices. */
 auth.delete('/sessions/:id', async (c) => {
   const user = c.get('user') as AuthedUser;
   const target = c.req.param('id');
@@ -301,6 +331,7 @@ auth.delete('/sessions/:id', async (c) => {
   return c.json({ ok: true });
 });
 
+/** GET /auth/history — recent login attempts. */
 auth.get('/history', async (c) => {
   const user = c.get('user') as AuthedUser;
   const { results } = await c.env.DB.prepare(

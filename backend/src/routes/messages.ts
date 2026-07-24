@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { ApiError } from '../middleware/errors';
 import { requireAuth } from '../middleware/auth';
-import { assertChannelAccess, bumpSeq, channelRecipients, fanout } from '../lib/channels';
+import { assertChannelAccess, bumpSeq, channelRecipients, fanout, releaseSeq } from '../lib/channels';
 import { snowflake } from '../lib/ids';
 import { assertOwnedAttachment, type AttachmentInput } from '../lib/media';
 import { autocompleteMentions, resolveMentions, type ResolvedMention } from '../lib/mentions';
@@ -47,6 +47,11 @@ export interface MessageRow {
   marked_at: number | null;
 }
 
+/**
+ * Serialize a page of messages with authors, reactions, and (admin) revisions.
+ * `viewerId: null` produces a viewer-neutral copy (every `me` flag false) —
+ * required for fanout payloads that go to many recipients.
+ */
 export async function serializeMessages(
   env: Env,
   rows: MessageRow[],
@@ -132,7 +137,7 @@ export async function serializeMessages(
         }>()
     ).results;
     for (const reply of replyRows) {
-
+      // Never expose a preview from a channel the current page does not contain;
       // valid new replies are same-channel by construction, while this also
       // contains legacy rows created before validation existed.
       if (!sourceChannels.get(reply.id)?.has(reply.channel_id)) continue;
@@ -209,6 +214,8 @@ export async function serializeMessages(
     polls.set(poll.message_id, value);
   }
 
+  // Forum-post enrichment: pinned state, like counts + viewer flag, and the
+  // resolved tag definition. Only forum posts carry these fields.
   const forumPostIds = rows.filter((r) => r.kind === 'forum_post').map((r) => r.id);
   const pinnedSet = new Set<string>();
   const likeCounts = new Map<string, number>();
@@ -276,7 +283,7 @@ export async function serializeMessages(
       reactions: reactions.get(m.id) ?? [],
       poll: polls.get(m.id) ?? null,
       revisions: isAdmin ? (revisions.get(m.id) ?? []) : undefined,
-
+      // Forum-post-only fields; omitted (undefined) for every other kind.
       pinned: forumPost ? pinnedSet.has(m.id) : undefined,
       like_count: forumPost ? (likeCounts.get(m.id) ?? 0) : undefined,
       liked: forumPost ? likedSet.has(m.id) : undefined,
@@ -355,6 +362,7 @@ async function mutateReaction(c: Context<AppEnv>, action: 'add' | 'remove'): Pro
   return c.json({ ok: true, changed, reaction });
 }
 
+/** GET /channels/:id/messages?before=<seq>|after=<seq>&limit=50 */
 messages.get('/channels/:id/messages', async (c) => {
   const user = c.get('user') as AuthedUser;
   const channel = await assertChannelAccess(c.env, user.id, c.req.param('id'));
@@ -387,11 +395,18 @@ messages.get('/channels/:id/messages', async (c) => {
     ).results.reverse();
   }
 
+  // Cap the read-receipt map: returning every member's marker on every page grows
+  // unbounded in large spaces. 100 covers DMs and normal channels in full; big
+  // spaces get the furthest-along readers (the ones a client actually renders as
+  // "seen" avatars) rather than the whole roster.
+  const READ_RECEIPT_CAP = 100;
   const readRows = (
     await c.env.DB.prepare(
-      'SELECT user_id, last_read_seq FROM channel_members WHERE channel_id = ? AND last_read_seq > 0',
+      `SELECT user_id, last_read_seq FROM channel_members
+       WHERE channel_id = ? AND last_read_seq > 0
+       ORDER BY last_read_seq DESC LIMIT ?`,
     )
-      .bind(channel.id)
+      .bind(channel.id, READ_RECEIPT_CAP)
       .all<{ user_id: string; last_read_seq: number }>()
   ).results;
 
@@ -407,6 +422,7 @@ messages.get('/channels/:id/messages', async (c) => {
   });
 });
 
+/** GET /messages/:id — exact fetch for reply navigation and deep links. */
 messages.get('/messages/:id', async (c) => {
   const user = c.get('user') as AuthedUser;
   const row = await loadMessage(c, c.req.param('id'));
@@ -414,6 +430,7 @@ messages.get('/messages/:id', async (c) => {
   return c.json({ message: (await serializeMessages(c.env, [row], user.id, user.isAdmin))[0] });
 });
 
+/** GET /channels/:id/mentions?q= — autocomplete scoped to actual members. */
 messages.get('/channels/:id/mentions', async (c) => {
   const user = c.get('user') as AuthedUser;
   const channel = await assertChannelAccess(c.env, user.id, c.req.param('id'));
@@ -421,6 +438,10 @@ messages.get('/channels/:id/mentions', async (c) => {
   return c.json({ users });
 });
 
+/**
+ * POST /channels/:id/messages
+ * { content, reply_to?, nonce, attachment?, kind?, metadata?, poll? }
+ */
 messages.post('/channels/:id/messages', async (c) => {
   const user = c.get('user') as AuthedUser;
   const channel = await assertChannelAccess(c.env, user.id, c.req.param('id'));
@@ -457,6 +478,7 @@ messages.post('/channels/:id/messages', async (c) => {
     throw new ApiError(400, 'empty_message', 'say something');
   }
 
+  // DMs respect blocks in both directions
   if (!channel.space_id) {
     const peers = (await channelRecipients(c.env, channel)).filter((u) => u !== user.id);
     for (const peer of peers) {
@@ -542,7 +564,14 @@ messages.post('/channels/:id/messages', async (c) => {
     `INSERT OR IGNORE INTO message_mentions (message_id, user_id, kind, created_at)
      VALUES (?, ?, ?, ?)`,
   ).bind(row.id, mention.userId, mention.kind, now)));
-  await c.env.DB.batch(statements);
+  try {
+    // seq was allocated by bumpSeq in a separate statement; if the insert batch
+    // fails, hand the number back so it doesn't burn a permanent gap.
+    await c.env.DB.batch(statements);
+  } catch (err) {
+    await releaseSeq(c.env, channel.id, seq);
+    throw err;
+  }
 
   const serialized = (await serializeMessages(c.env, [row], user.id, false))[0];
   const recipients = await channelRecipients(c.env, channel);
@@ -558,7 +587,8 @@ messages.post('/channels/:id/messages', async (c) => {
   );
   const mentionIds = mentions.map((mention) => mention.userId);
   fanout(c, recipients, { t: 'message.new', d: serialized }, {
-
+    // Include the sender's gateway so their other devices converge immediately.
+    // Mentioned users are pushed by the mention fanout below instead.
     suppressPushFor: [user.id, ...mentionIds],
     push: plan.push,
   });
@@ -576,6 +606,7 @@ messages.post('/channels/:id/messages', async (c) => {
   return c.json({ message: serialized }, 201);
 });
 
+/** PATCH /messages/:id { content } — author only, old content kept as a revision. */
 messages.patch('/messages/:id', async (c) => {
   const user = c.get('user') as AuthedUser;
   const row = await loadMessage(c, c.req.param('id'));
@@ -648,6 +679,7 @@ messages.patch('/messages/:id', async (c) => {
   return c.json({ message: serialized });
 });
 
+/** DELETE /messages/:id — author, platform admin, or space admin. Soft. */
 messages.delete('/messages/:id', async (c) => {
   const user = c.get('user') as AuthedUser;
   const row = await loadMessage(c, c.req.param('id'));
@@ -721,6 +753,7 @@ messages.delete('/messages/:id', async (c) => {
   return c.json({ ok: true, message: tombstone });
 });
 
+/** PUT/DELETE /messages/:id/reactions/:emoji */
 messages.put('/messages/:id/reactions/:emoji', (c) => mutateReaction(c, 'add'));
 messages.delete('/messages/:id/reactions/:emoji', (c) => mutateReaction(c, 'remove'));
 
@@ -745,6 +778,7 @@ async function broadcastPoll(c: Context<AppEnv>, row: MessageRow, channel: Await
   });
 }
 
+/** PUT /messages/:id/poll/votes/:optionId — one choice per user. */
 messages.put('/messages/:id/poll/votes/:optionId', async (c) => {
   const user = c.get('user') as AuthedUser;
   const row = await loadMessage(c, c.req.param('id'));
@@ -771,6 +805,7 @@ messages.put('/messages/:id/poll/votes/:optionId', async (c) => {
   return c.json({ ok: true, changed: result.meta.changes > 0, poll: await pollResponse(c, row, user) });
 });
 
+/** DELETE /messages/:id/poll/vote */
 messages.delete('/messages/:id/poll/vote', async (c) => {
   const user = c.get('user') as AuthedUser;
   const row = await loadMessage(c, c.req.param('id'));
@@ -803,6 +838,7 @@ async function assertCanPin(
   }
 }
 
+/** PUT/DELETE /messages/:id/pin + GET /channels/:id/pins */
 messages.put('/messages/:id/pin', async (c) => {
   const user = c.get('user') as AuthedUser;
   const row = await loadMessage(c, c.req.param('id'));
@@ -819,7 +855,7 @@ messages.put('/messages/:id/pin', async (c) => {
     fanout(c, recipients, {
       t: 'pin.add', d: { channel_id: row.channel_id, message_id: row.id, pinned_by: user.id },
     });
-
+    // Forum posts carry `pinned` in their DTO — push the refreshed post too.
     if (row.kind === 'forum_post') {
       const broadcast = (await serializeMessages(c.env, [await loadMessage(c, row.id)], null, false))[0];
       fanout(c, recipients, { t: 'forum.post.update', d: broadcast });
@@ -863,6 +899,7 @@ messages.get('/channels/:id/pins', async (c) => {
   return c.json({ messages: await serializeMessages(c.env, rows, user.id, user.isAdmin) });
 });
 
+/** PUT /messages/:id/super-pin — set or atomically replace the channel banner. */
 messages.put('/messages/:id/super-pin', async (c) => {
   const user = c.get('user') as AuthedUser;
   const row = await loadMessage(c, c.req.param('id'));
@@ -916,6 +953,7 @@ messages.delete('/messages/:id/super-pin', async (c) => {
   return removeSuperPin(c, row.channel_id, row.id);
 });
 
+/** GET /channels/:id/super-pin — omitted after this viewer dismisses this version. */
 messages.get('/channels/:id/super-pin', async (c) => {
   const user = c.get('user') as AuthedUser;
   const channel = await assertChannelAccess(c.env, user.id, c.req.param('id'));
@@ -987,11 +1025,13 @@ async function createForumMessage(
   const metadata = root
     ? normalizeMessageMetadata(kind, body['metadata'], true)
     : normalizeMessageMetadata(kind, { ...(body['metadata'] as object ?? {}), title: body['title'] }, true);
-
+  // A forum POST is valid with just a title (normalizeMessageMetadata already
+  // required it); content/attachment are optional. A REPLY still needs a body.
   if (root && !content.trim() && !attachment) {
     throw new ApiError(400, 'empty_message', 'reply content is required');
   }
 
+  // Tag reference (posts only): must be a tag defined for this forum channel.
   let forumTagId: string | null = null;
   if (!root && body['tag'] !== undefined && body['tag'] !== null && body['tag'] !== '') {
     const tagId = String(body['tag']);
@@ -1025,10 +1065,11 @@ async function createForumMessage(
   const mentions = await resolveMentions(c.env, channel, user, content);
   const id = snowflake();
   const now = Date.now();
+  const seq = await bumpSeq(c.env, channel.id);
   const row: MessageRow = {
     id,
     channel_id: channel.id,
-    seq: await bumpSeq(c.env, channel.id),
+    seq,
     author_id: user.id,
     content,
     reply_to: replyTo,
@@ -1046,20 +1087,27 @@ async function createForumMessage(
     forum_tag_id: forumTagId,
     marked_at: null,
   };
-  await c.env.DB.batch([
-    c.env.DB.prepare(
-      `INSERT INTO messages (id, channel_id, seq, author_id, content, reply_to, nonce,
-        attachment_key, attachment_name, attachment_type, attachment_size, created_at,
-        kind, metadata, thread_id, forum_tag_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).bind(
-      row.id, row.channel_id, row.seq, row.author_id, row.content, row.reply_to, row.nonce,
-      row.attachment_key, row.attachment_name, row.attachment_type, row.attachment_size,
-      row.created_at, row.kind, row.metadata, row.thread_id, row.forum_tag_id,
-    ),
-    ...mentions.map((mention) => c.env.DB.prepare(
-      'INSERT INTO message_mentions (message_id, user_id, kind, created_at) VALUES (?, ?, ?, ?)',
-    ).bind(row.id, mention.userId, mention.kind, now)),
-  ]);
+  try {
+    // seq is allocated separately by bumpSeq; reconcile it on batch failure so a
+    // failed forum insert can't burn a permanent gap in the channel sequence.
+    await c.env.DB.batch([
+      c.env.DB.prepare(
+        `INSERT INTO messages (id, channel_id, seq, author_id, content, reply_to, nonce,
+          attachment_key, attachment_name, attachment_type, attachment_size, created_at,
+          kind, metadata, thread_id, forum_tag_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(
+        row.id, row.channel_id, row.seq, row.author_id, row.content, row.reply_to, row.nonce,
+        row.attachment_key, row.attachment_name, row.attachment_type, row.attachment_size,
+        row.created_at, row.kind, row.metadata, row.thread_id, row.forum_tag_id,
+      ),
+      ...mentions.map((mention) => c.env.DB.prepare(
+        'INSERT INTO message_mentions (message_id, user_id, kind, created_at) VALUES (?, ?, ?, ?)',
+      ).bind(row.id, mention.userId, mention.kind, now)),
+    ]);
+  } catch (err) {
+    await releaseSeq(c.env, channel.id, seq);
+    throw err;
+  }
 
   const serialized = (await serializeMessages(c.env, [row], user.id, user.isAdmin))[0];
   const recipients = await channelRecipients(c.env, channel);
@@ -1085,6 +1133,7 @@ async function createForumMessage(
   return c.json({ message: serialized }, 201);
 }
 
+/** POST /channels/:id/forum/posts { title, content, nonce?, attachment? } */
 messages.post('/channels/:id/forum/posts', async (c) => {
   const user = c.get('user') as AuthedUser;
   const channel = await assertChannelAccess(c.env, user.id, c.req.param('id'));
@@ -1094,6 +1143,7 @@ messages.post('/channels/:id/forum/posts', async (c) => {
   return createForumMessage(c, channel, user, body, null);
 });
 
+/** POST /channels/:id/forum/posts/:postId/replies */
 messages.post('/channels/:id/forum/posts/:postId/replies', async (c) => {
   const user = c.get('user') as AuthedUser;
   const channel = await assertChannelAccess(c.env, user.id, c.req.param('id'));
@@ -1107,6 +1157,7 @@ messages.post('/channels/:id/forum/posts/:postId/replies', async (c) => {
   return createForumMessage(c, channel, user, body, root);
 });
 
+/** GET /channels/:id/forum/posts?sort=recent|oldest|active&limit= */
 messages.get('/channels/:id/forum/posts', async (c) => {
   const user = c.get('user') as AuthedUser;
   const channel = await assertChannelAccess(c.env, user.id, c.req.param('id'));
@@ -1121,7 +1172,7 @@ messages.get('/channels/:id/forum/posts', async (c) => {
       ? 'p.created_at ASC'
       : 'last_activity_at DESC';
   const limit = Math.min(100, Math.max(1, Number(c.req.query('limit')) || 30));
-
+  // Optional tag filter: matches a tag definition by id or (case-insensitive) name.
   const tagFilter = (c.req.query('tag') ?? '').trim();
   const tagClause = tagFilter
     ? `AND p.forum_tag_id IN (
@@ -1153,6 +1204,7 @@ messages.get('/channels/:id/forum/posts', async (c) => {
   });
 });
 
+/** GET /channels/:id/forum/posts/:postId?after=<seq>&limit= */
 messages.get('/channels/:id/forum/posts/:postId', async (c) => {
   const user = c.get('user') as AuthedUser;
   const channel = await assertChannelAccess(c.env, user.id, c.req.param('id'));
@@ -1177,6 +1229,7 @@ messages.get('/channels/:id/forum/posts/:postId', async (c) => {
   });
 });
 
+/** True when the user owns the space this channel belongs to (or is platform admin). */
 async function isSpaceOwner(
   c: Context<AppEnv>,
   user: AuthedUser,
@@ -1190,6 +1243,7 @@ async function isSpaceOwner(
   return row?.owner_id === user.id;
 }
 
+/** Re-serialize a forum post viewer-neutrally and fanout a change event. */
 async function broadcastForumPost(
   c: Context<AppEnv>,
   channel: Awaited<ReturnType<typeof assertChannelAccess>>,
@@ -1200,6 +1254,7 @@ async function broadcastForumPost(
   fanout(c, await channelRecipients(c.env, channel), { t: 'forum.post.update', d: broadcast });
 }
 
+/** POST /channels/:id/forum/tags { name, mark_label? } — space owner only. */
 messages.post('/channels/:id/forum/tags', async (c) => {
   const user = c.get('user') as AuthedUser;
   const channel = await assertChannelAccess(c.env, user.id, c.req.param('id'));
@@ -1223,6 +1278,7 @@ messages.post('/channels/:id/forum/tags', async (c) => {
   return c.json({ tag: { id, name, mark_label: markLabel } }, 201);
 });
 
+/** GET /channels/:id/forum/tags — tag definitions for this forum. */
 messages.get('/channels/:id/forum/tags', async (c) => {
   const user = c.get('user') as AuthedUser;
   const channel = await assertChannelAccess(c.env, user.id, c.req.param('id'));
@@ -1235,6 +1291,7 @@ messages.get('/channels/:id/forum/tags', async (c) => {
   return c.json({ tags: rows.map((t) => ({ id: t.id, name: t.name, mark_label: t.mark_label })) });
 });
 
+/** PUT /messages/:id/like — any channel member may like a forum post. */
 messages.put('/messages/:id/like', async (c) => {
   const user = c.get('user') as AuthedUser;
   const post = await loadMessage(c, c.req.param('id'));
@@ -1255,6 +1312,7 @@ messages.put('/messages/:id/like', async (c) => {
   return c.json({ ok: true, changed: result.meta.changes > 0, like_count: Number(count?.count ?? 0), liked: true });
 });
 
+/** DELETE /messages/:id/like */
 messages.delete('/messages/:id/like', async (c) => {
   const user = c.get('user') as AuthedUser;
   const post = await loadMessage(c, c.req.param('id'));
@@ -1274,6 +1332,7 @@ messages.delete('/messages/:id/like', async (c) => {
   return c.json({ ok: true, changed: result.meta.changes > 0, like_count: Number(count?.count ?? 0), liked: false });
 });
 
+/** PUT /messages/:id/marked — OP or space owner; only if the post's tag is markable. */
 messages.put('/messages/:id/marked', async (c) => {
   const user = c.get('user') as AuthedUser;
   const post = await loadMessage(c, c.req.param('id'));
@@ -1294,6 +1353,7 @@ messages.put('/messages/:id/marked', async (c) => {
   return c.json({ ok: true, changed: result.meta.changes > 0, marked: true });
 });
 
+/** DELETE /messages/:id/marked — OP or space owner. */
 messages.delete('/messages/:id/marked', async (c) => {
   const user = c.get('user') as AuthedUser;
   const post = await loadMessage(c, c.req.param('id'));
@@ -1310,6 +1370,7 @@ messages.delete('/messages/:id/marked', async (c) => {
   return c.json({ ok: true, changed: result.meta.changes > 0, marked: false });
 });
 
+/** GET /channels/:id/search?q= */
 messages.get('/channels/:id/search', async (c) => {
   const user = c.get('user') as AuthedUser;
   const channel = await assertChannelAccess(c.env, user.id, c.req.param('id'));
@@ -1327,6 +1388,7 @@ messages.get('/channels/:id/search', async (c) => {
   return c.json({ messages: await serializeMessages(c.env, rows, user.id, user.isAdmin) });
 });
 
+/** POST /channels/:id/typing — ephemeral fanout only. */
 messages.post('/channels/:id/typing', async (c) => {
   const user = c.get('user') as AuthedUser;
   const channel = await assertChannelAccess(c.env, user.id, c.req.param('id'));
@@ -1337,12 +1399,13 @@ messages.post('/channels/:id/typing', async (c) => {
   return c.json({ ok: true });
 });
 
+/** PUT /channels/:id/read { seq } */
 messages.put('/channels/:id/read', async (c) => {
   const user = c.get('user') as AuthedUser;
   const channel = await assertChannelAccess(c.env, user.id, c.req.param('id'));
   const body = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
   const seq = Number(body['seq']) || 0;
-
+  // RETURNING only yields a row when the insert lands or the guard passes,
   // so a stale/duplicate seq produces no fanout.
   const advanced = await c.env.DB.prepare(
     `INSERT INTO channel_members (channel_id, user_id, last_read_seq, joined_at) VALUES (?, ?, ?, ?)

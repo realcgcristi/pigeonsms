@@ -25,6 +25,7 @@ export interface PollInput {
 
 const USER_MENTION = /(^|[^a-z0-9_.])@([a-z0-9_.]{3,20}|everyone)\b/giu;
 
+/** Parse unique, normalized mention tokens without trusting them as recipients. */
 export function parseMentionTokens(content: string): MentionTokens {
   const usernames = new Set<string>();
   let everyone = false;
@@ -55,6 +56,7 @@ function objectBody(raw: unknown): Record<string, unknown> {
 
 const MAX_METADATA_JSON = 2048;
 
+/** Kinds that pass client metadata through must still stay bounded on disk. */
 function capMetadata(value: Record<string, unknown>): Record<string, unknown> {
   if (JSON.stringify(value).length > MAX_METADATA_JSON) {
     throw new ApiError(400, 'bad_metadata', `metadata must serialize to ${MAX_METADATA_JSON} characters or fewer`);
@@ -62,6 +64,7 @@ function capMetadata(value: Record<string, unknown>): Record<string, unknown> {
   return value;
 }
 
+/** Validate structured metadata and return a JSON-safe object. */
 export function normalizeMessageMetadata(
   kind: MessageKind,
   raw: unknown,
@@ -103,7 +106,15 @@ export function normalizeMessageMetadata(
   if (kind === 'forum_post') {
     const title = String(input['title'] ?? '').trim().slice(0, 160);
     if (!title) throw new ApiError(400, 'bad_forum_post', 'post title is required');
-    return capMetadata({ ...input, title });
+    // Only echo the metadata keys the forum actually uses. Spreading raw client
+    // input let arbitrary keys ride through and get served to every viewer
+    // (stored XSS surface). Structured forum features (tag, pinned, likes, mark)
+    // live in dedicated columns/tables, not here — so title/description suffice.
+    const metadata: Record<string, unknown> = { title };
+    if (input['description'] !== undefined && input['description'] !== null) {
+      metadata['description'] = String(input['description']).trim().slice(0, 1000);
+    }
+    return capMetadata(metadata);
   }
 
   return Object.keys(input).length ? capMetadata(input) : null;

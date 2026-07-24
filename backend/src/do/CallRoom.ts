@@ -30,6 +30,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/** Parse and bound the only client messages CallRoom will relay. */
 export function parseClientSignal(raw: string): SignalParseResult {
   if (new TextEncoder().encode(raw).byteLength > MAX_SIGNAL_BYTES) {
     return { ok: false, code: 'signal_too_large' };
@@ -111,6 +112,10 @@ function sendJson(ws: WebSocket, payload: unknown): boolean {
   }
 }
 
+/**
+ * One hibernation-aware signaling room per channel. It only relays bounded
+ * WebRTC signaling/state JSON; audio and video never pass through the Worker.
+ */
 export class CallRoom {
   private readonly departed = new WeakSet<WebSocket>();
 
@@ -130,6 +135,7 @@ export class CallRoom {
       const identity = await this.resolveIdentity(req, url);
       if (!identity) return errorResponse(401, 'unauthorized', 'invalid or expired session');
 
+      // The Worker route checks this before forwarding too. Repeating it here
       // prevents the room from trusting identity or membership passed by a caller.
       await assertChannelAccess(this.env, identity.userId, path.channelId);
 

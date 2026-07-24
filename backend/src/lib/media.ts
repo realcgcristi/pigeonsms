@@ -15,6 +15,10 @@ interface MediaRow {
   size: number;
 }
 
+/**
+ * Resolve attachment metadata from the ownership registry. Objects uploaded by
+ * pre-v04 workers are lazily registered from their trusted R2 custom metadata.
+ */
 export async function assertOwnedAttachment(
   env: Env,
   userId: string,

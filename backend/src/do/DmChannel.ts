@@ -1,5 +1,9 @@
 import type { Env } from '../types';
 
+/**
+ * One per DM / group-DM conversation. Same responsibilities as Space but for
+ * spaceless channels. Lands in milestone 2.
+ */
 export class DmChannel {
   constructor(
     private readonly state: DurableObjectState,

@@ -28,6 +28,61 @@ async function channelUsers(env: Env, channel: ChannelRow): Promise<MentionUserR
   return results;
 }
 
+/**
+ * Members whose lowercased username is one of `usernames`. Filters in SQL so a
+ * mention resolution touches only the handful of tagged rows, not the whole
+ * space membership. Returns [] for an empty list without querying.
+ */
+async function channelUsersByName(
+  env: Env,
+  channel: ChannelRow,
+  usernames: string[],
+): Promise<MentionUserRow[]> {
+  if (usernames.length === 0) return [];
+  const placeholders = usernames.map(() => '?').join(', ');
+  const { results } = channel.space_id
+    ? await env.DB.prepare(
+        `SELECT u.id, u.username FROM space_members sm
+         JOIN users u ON u.id = sm.user_id
+         WHERE sm.space_id = ? AND u.deleted_at IS NULL
+           AND LOWER(u.username) IN (${placeholders})`,
+      ).bind(channel.space_id, ...usernames).all<MentionUserRow>()
+    : await env.DB.prepare(
+        `SELECT u.id, u.username FROM channel_members cm
+         JOIN users u ON u.id = cm.user_id
+         WHERE cm.channel_id = ? AND u.deleted_at IS NULL
+           AND LOWER(u.username) IN (${placeholders})`,
+      ).bind(channel.id, ...usernames).all<MentionUserRow>();
+  return results;
+}
+
+/** Members whose username starts with `prefix`, capped for autocomplete. */
+async function channelUsersByPrefix(
+  env: Env,
+  channel: ChannelRow,
+  prefix: string,
+  limit: number,
+): Promise<MentionUserRow[]> {
+  const like = `${prefix}%`;
+  const { results } = channel.space_id
+    ? await env.DB.prepare(
+        `SELECT u.id, u.username FROM space_members sm
+         JOIN users u ON u.id = sm.user_id
+         WHERE sm.space_id = ? AND u.deleted_at IS NULL
+           AND LOWER(u.username) LIKE ?
+         ORDER BY u.username LIMIT ?`,
+      ).bind(channel.space_id, like, limit).all<MentionUserRow>()
+    : await env.DB.prepare(
+        `SELECT u.id, u.username FROM channel_members cm
+         JOIN users u ON u.id = cm.user_id
+         WHERE cm.channel_id = ? AND u.deleted_at IS NULL
+           AND LOWER(u.username) LIKE ?
+         ORDER BY u.username LIMIT ?`,
+      ).bind(channel.id, like, limit).all<MentionUserRow>();
+  return results;
+}
+
+/** Resolve and validate mentions against the actual channel membership. */
 export async function resolveMentions(
   env: Env,
   channel: ChannelRow,
@@ -37,7 +92,11 @@ export async function resolveMentions(
   const parsed = parseMentionTokens(content);
   if (!parsed.everyone && parsed.usernames.length === 0) return [];
 
-  const members = await channelUsers(env, channel);
+  // @everyone still needs the full roster to fan out to; a plain mention only
+  // needs the tagged rows, so filter those in SQL instead of loading everyone.
+  const members = parsed.everyone
+    ? await channelUsers(env, channel)
+    : await channelUsersByName(env, channel, parsed.usernames);
   const byName = new Map(members.map((member) => [member.username.toLowerCase(), member]));
   const invalid = parsed.usernames.filter((username) => !byName.has(username));
   if (invalid.length) {
@@ -80,9 +139,12 @@ export async function autocompleteMentions(
 ): Promise<MentionUserRow[]> {
   const q = query.trim().toLowerCase().replaceAll('%', '').replaceAll('_', '').slice(0, 20);
   if (!q) return [];
-  const users = await channelUsers(env, channel);
+  // Filter + cap in SQL so a keystroke touches only matching rows, not the whole
+  // space membership. Wildcards are already stripped above, so `q%` is a literal
+  // prefix match. Over-fetch by one so an exact-order localeCompare still yields
+  // a stable top 10 close to the previous client-side sort.
+  const users = await channelUsersByPrefix(env, channel, q, 11);
   return users
-    .filter((user) => user.username.toLowerCase().startsWith(q))
     .sort((a, b) => a.username.localeCompare(b.username))
     .slice(0, 10);
 }

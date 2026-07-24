@@ -58,6 +58,27 @@ async function registerMedia(
     .run();
 }
 
+/**
+ * The `content-length` header is client-declared and cannot be trusted for
+ * quota/cap enforcement — a client can under-report it while streaming an
+ * arbitrarily large body. Enforce the cap against the object's ACTUAL size
+ * as reported by R2 after the write completes; if it's over, delete the
+ * object immediately so no oversized data lingers in storage.
+ */
+async function enforceActualSize(
+  c: Context<AppEnv>,
+  key: string,
+  maxBytes: number,
+): Promise<number> {
+  const head = await c.env.MEDIA.head(key);
+  const actualSize = head?.size ?? 0;
+  if (!head || actualSize > maxBytes) {
+    await c.env.MEDIA.delete(key).catch(() => undefined);
+    throw new ApiError(413, 'too_large', `max ${Math.floor(maxBytes / 1024 / 1024)}mb`);
+  }
+  return actualSize;
+}
+
 async function uploadProfileMedia(c: Context<AppEnv>, config: ProfileMediaConfig): Promise<Response> {
   const user = c.get('user') as AuthedUser;
   const size = Number(c.req.header('content-length') ?? 0);
@@ -75,9 +96,10 @@ async function uploadProfileMedia(c: Context<AppEnv>, config: ProfileMediaConfig
     httpMetadata: { contentType: type },
     customMetadata: { uploader: user.id, profileField: config.field },
   });
+  const actualSize = await enforceActualSize(c, key, config.maxBytes);
 
   try {
-    await registerMedia(c, key, user.id, config.field, type, size);
+    await registerMedia(c, key, user.id, config.field, type, actualSize);
     const avatarFields = config.field === 'avatar_key'
       ? ', avatar_original_key = ?, avatar_square_key = ?'
       : '';
@@ -99,7 +121,7 @@ async function uploadProfileMedia(c: Context<AppEnv>, config: ProfileMediaConfig
   }
 
   deletePreviousOwnedMedia(c, user.id, previous?.[config.field], config.prefix);
-
+  // `key` is the common Android upload contract; the named field keeps the
   // response self-describing for other clients.
   if (config.field === 'avatar_key') {
     return c.json({
@@ -129,6 +151,7 @@ async function removeProfileMedia(c: Context<AppEnv>, config: ProfileMediaConfig
   return c.json({ ok: true, [config.field]: null });
 }
 
+/** POST /media/upload?filename=&type= — raw body → R2, returns attachment descriptor. */
 mediaUpload.post('/upload', async (c) => {
   const user = c.get('user') as AuthedUser;
   const size = Number(c.req.header('content-length') ?? 0);
@@ -141,13 +164,14 @@ mediaUpload.post('/upload', async (c) => {
     httpMetadata: { contentType: type },
     customMetadata: { uploader: user.id },
   });
+  const actualSize = await enforceActualSize(c, key, MAX_UPLOAD);
   try {
-    await registerMedia(c, key, user.id, 'attachment', type, size);
+    await registerMedia(c, key, user.id, 'attachment', type, actualSize);
   } catch (error) {
     await c.env.MEDIA.delete(key).catch(() => undefined);
     throw error;
   }
-  return c.json({ attachment: { key, name: filename, type, size } }, 201);
+  return c.json({ attachment: { key, name: filename, type, size: actualSize } }, 201);
 });
 
 const AVATAR_MEDIA: ProfileMediaConfig = {
@@ -180,8 +204,9 @@ async function uploadAvatarVariant(c: Context<AppEnv>, variant: AvatarVariant): 
     httpMetadata: { contentType: type },
     customMetadata: { uploader: user.id, profileField: field, variant },
   });
+  const actualSize = await enforceActualSize(c, key, MAX_AVATAR);
   try {
-    await registerMedia(c, key, user.id, `avatar_${variant}`, type, size, originalKey);
+    await registerMedia(c, key, user.id, `avatar_${variant}`, type, actualSize, originalKey);
     const updated = variant === 'square'
       ? await c.env.DB.prepare(
           `UPDATE users SET avatar_square_key = ?, avatar_key = ?
@@ -265,8 +290,9 @@ async function uploadSpaceIcon(c: Context<AppEnv>, variant: AvatarVariant): Prom
     httpMetadata: { contentType: type },
     customMetadata: { uploader: user.id, spaceId, profileField: field, variant },
   });
+  const actualSize = await enforceActualSize(c, key, MAX_AVATAR);
   try {
-    await registerMedia(c, key, user.id, `space_icon_${variant}`, type, size, originalKey);
+    await registerMedia(c, key, user.id, `space_icon_${variant}`, type, actualSize, originalKey);
     const updated = variant === 'square'
       ? await c.env.DB.prepare(
           `UPDATE spaces SET icon_square_key = ?, icon_key = ?
@@ -289,6 +315,7 @@ async function uploadSpaceIcon(c: Context<AppEnv>, variant: AvatarVariant): Prom
   return c.json({ key, variant, space_id: spaceId, ...current }, 201);
 }
 
+/** Profile image mutation endpoints. DELETE resets to the generated fallback. */
 mediaUpload.post('/avatar', (c) => uploadProfileMedia(c, AVATAR_MEDIA));
 mediaUpload.delete('/avatar', (c) => removeProfileMedia(c, AVATAR_MEDIA));
 mediaUpload.post('/avatar/original', (c) => uploadAvatarVariant(c, 'original'));
@@ -301,6 +328,7 @@ mediaUpload.delete('/banner', (c) => removeProfileMedia(c, BANNER_MEDIA));
 mediaUpload.post('/spaces/:spaceId/icon/original', (c) => uploadSpaceIcon(c, 'original'));
 mediaUpload.post('/spaces/:spaceId/icon/square', (c) => uploadSpaceIcon(c, 'square'));
 
+/** Public read side (keys are unguessable snowflakes). */
 export const mediaServe = new Hono<AppEnv>();
 
 mediaServe.get('/*', async (c) => {
@@ -309,6 +337,7 @@ mediaServe.get('/*', async (c) => {
 
   const range = c.req.header('range');
   let object;
+  let rangeUnsatisfiable = false;
   if (range) {
     const m = /^bytes=(\d*)-(\d*)$/.exec(range.trim());
     if (m && m[1]) {
@@ -318,10 +347,26 @@ mediaServe.get('/*', async (c) => {
         range: { offset, length: end !== undefined ? end - offset + 1 : undefined },
       });
     } else if (m && m[2]) {
-
+      // suffix range (bytes=-N): last N bytes
       const suffix = parseInt(m[2], 10);
-      if (suffix > 0) object = await c.env.MEDIA.get(key, { range: { suffix } });
+      if (suffix > 0) {
+        object = await c.env.MEDIA.get(key, { range: { suffix } });
+      } else {
+        // bytes=-0 requests zero bytes, which is unsatisfiable
+        rangeUnsatisfiable = true;
+      }
+    } else {
+      // malformed range (e.g. "bytes=-" with no offset and no suffix digits)
+      rangeUnsatisfiable = true;
     }
+  }
+  if (rangeUnsatisfiable) {
+    const head = await c.env.MEDIA.head(key);
+    if (!head) throw new ApiError(404, 'not_found', 'gone');
+    return new Response(null, {
+      status: 416,
+      headers: { 'content-range': `bytes */${head.size}` },
+    });
   }
   object ??= await c.env.MEDIA.get(key);
   if (!object) throw new ApiError(404, 'not_found', 'gone');
@@ -335,7 +380,7 @@ mediaServe.get('/*', async (c) => {
     'x-content-type-options': 'nosniff',
   });
   if (contentType === 'image/svg+xml') {
-
+    // SVGs stay viewable inline but any scripts inside them never run
     headers.set('content-security-policy', 'sandbox');
   } else if (!/^(image|video|audio)\//.test(contentType)) {
     // anything else (html, pdf, unknown) must not render in our origin

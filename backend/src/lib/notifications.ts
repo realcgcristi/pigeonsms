@@ -45,6 +45,7 @@ export async function messageNotificationPlan(
   };
 }
 
+/** Persist one in-app notification per recipient; duplicate retries are ignored. */
 export async function storeMessageNotifications(
   c: Context<AppEnv>,
   channel: ChannelRow,

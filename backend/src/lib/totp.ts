@@ -1,3 +1,7 @@
+/** RFC 6238 TOTP (SHA-1, 6 digits, 30s) — enough for authenticator apps. */
+
+import { timingSafeEqualStrings } from './crypto';
+
 const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 
 export function base32Encode(bytes: Uint8Array): string {
@@ -57,11 +61,13 @@ async function hotp(secret: Uint8Array, counter: number): Promise<string> {
   return String(code % 1_000_000).padStart(6, '0');
 }
 
+/** Accepts current step ±1 for clock drift. */
 export async function verifyTotp(secretB32: string, code: string): Promise<boolean> {
   const secret = base32Decode(secretB32);
   const step = Math.floor(Date.now() / 30_000);
+  const trimmed = code.trim();
   for (const delta of [0, -1, 1]) {
-    if ((await hotp(secret, step + delta)) === code.trim()) return true;
+    if (await timingSafeEqualStrings(await hotp(secret, step + delta), trimmed)) return true;
   }
   return false;
 }

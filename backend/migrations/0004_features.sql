@@ -1,4 +1,5 @@
 -- v04: rich messages, mentions/notifications, polls, media ownership, and super pins.
+-- Existing columns remain authoritative for older clients; new columns are additive.
 
 ALTER TABLE messages ADD COLUMN kind TEXT NOT NULL DEFAULT 'text';
 ALTER TABLE messages ADD COLUMN metadata TEXT;
@@ -14,6 +15,7 @@ ALTER TABLE users ADD COLUMN avatar_square_key TEXT;
 CREATE INDEX idx_messages_thread_seq ON messages(channel_id, thread_id, seq);
 CREATE INDEX idx_messages_kind_seq ON messages(channel_id, kind, seq);
 
+-- Registry for every new upload. Legacy `m/`, `a/`, and `b/` objects remain
 -- readable and attachable by their original uploader while clients migrate.
 CREATE TABLE media_objects (
   key TEXT PRIMARY KEY,
@@ -29,6 +31,7 @@ CREATE TABLE media_objects (
 CREATE INDEX idx_media_objects_owner ON media_objects(owner_id, created_at);
 CREATE INDEX idx_media_objects_original ON media_objects(original_key);
 
+-- Mentions are expanded to concrete recipients at send time. `kind` is either
 -- `user` or `everyone`, which preserves why a member received a notification.
 CREATE TABLE message_mentions (
   message_id TEXT NOT NULL,
@@ -92,6 +95,8 @@ CREATE TABLE super_pins (
   created_at INTEGER NOT NULL
 );
 
+-- A dismissal applies only to the message that was current when dismissed, so
+-- replacing the Super Pin automatically makes the new one visible.
 CREATE TABLE super_pin_dismissals (
   channel_id TEXT NOT NULL,
   user_id TEXT NOT NULL,

@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { AppEnv } from '../types';
 
+/** Public: the in-app updater asks here. */
 const updates = new Hono<AppEnv>();
 
 updates.get('/latest', async (c) => {
