@@ -24,5 +24,5 @@ class AppContainer(context: Context) {
     val authRepository = AuthRepository(api, sessionStore, db)
     val socialRepository = SocialRepository(api)
     val chatRepository = ChatRepository(api, db)
-    val gateway = Gateway(api, appScope) { sessionStore.session.first()?.token }
+    val gateway = Gateway(api, appScope, tokenProvider = { sessionStore.session.first()?.token })
 }
