@@ -182,8 +182,9 @@ class ChatRepository(
         // (key exchange not done — see E2eeManager.requireRatchetState), so a null result
         // means "not established yet" and we fall back to sending plaintext rather than
         // dropping the message. Encryption is best-effort while experimental.
-        val cipher = if (e2eeEnabled && e2ee != null) {
-            runCatching { e2ee.encrypt(channelId, content) }.getOrNull()
+        val mgr = e2ee
+        val cipher = if (e2eeEnabled && mgr != null) {
+            runCatching { mgr.encrypt(channelId, content) }.getOrNull()
         } else {
             null
         }

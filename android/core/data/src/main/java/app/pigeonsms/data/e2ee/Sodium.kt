@@ -23,7 +23,7 @@ import java.security.SecureRandom
  * TODO(e2ee): every path here needs on-real-device validation. lazysodium loads a
  * native .so via JNA; on some ABIs / minified builds the loader needs a keep rule.
  */
-internal object Sodium {
+object Sodium {
     // LazySodiumAndroid is thread-safe for these stateless calls.
     val ls: LazySodiumAndroid by lazy { LazySodiumAndroid(SodiumAndroid()) }
 
