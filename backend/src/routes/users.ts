@@ -8,18 +8,20 @@ users.use(requireAuth);
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
 
+/** GET /users/search?q= — username prefix, for friend-adding. */
 users.get('/search', async (c) => {
   const q = (c.req.query('q') ?? '').trim().toLowerCase();
   if (q.length < 2) return c.json({ users: [] });
   const { results } = await c.env.DB.prepare(
     `SELECT id, username, display_name, avatar_key, avatar_original_key, avatar_square_key, accent FROM users
-     WHERE username LIKE ? AND deleted_at IS NULL LIMIT 10`,
+     WHERE username LIKE ? ESCAPE '\\' AND deleted_at IS NULL LIMIT 10`,
   )
-    .bind(`${q.replaceAll('%', '')}%`)
+    .bind(`${q.replaceAll('\\', '\\\\').replaceAll('%', '\\%').replaceAll('_', '\\_')}%`)
     .all();
   return c.json({ users: results });
 });
 
+/** GET /users/:id/profile */
 users.get('/:id/profile', async (c) => {
   const viewer = c.get('user') as AuthedUser;
   const profileId = c.req.param('id');
@@ -35,10 +37,12 @@ users.get('/:id/profile', async (c) => {
   const mutualSpaces = (
     await c.env.DB.prepare(
       `SELECT s.id, s.name, s.description, s.icon_key, s.icon_square_key,
-              (SELECT COUNT(*) FROM space_members x WHERE x.space_id = s.id) AS member_count
+              counts.member_count AS member_count
        FROM spaces s
        JOIN space_members target ON target.space_id = s.id AND target.user_id = ?
        JOIN space_members viewer ON viewer.space_id = s.id AND viewer.user_id = ?
+       JOIN (SELECT space_id, COUNT(*) AS member_count FROM space_members GROUP BY space_id) counts
+         ON counts.space_id = s.id
        WHERE s.deleted_at IS NULL ORDER BY s.name LIMIT 100`,
     )
       .bind(profileId, viewer.id)
@@ -57,6 +61,7 @@ users.get('/:id/profile', async (c) => {
   });
 });
 
+/** PATCH /users/me — profile fields. badges are server-granted, never here. */
 users.patch('/me', async (c) => {
   const user = c.get('user') as AuthedUser;
   const body = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);

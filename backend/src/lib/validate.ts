@@ -1,5 +1,7 @@
 import { ApiError } from '../middleware/errors';
 
+/** Blocks impersonation + route collisions. 'admin' intentionally absent: the
+ *  platform owner registers it (first come, single instance — invite-gated). */
 const RESERVED_USERNAMES = new Set([
   'pigeonsms', 'pigeon', 'system', 'root', 'api', 'support', 'help', 'staff',
   'official', 'moderator', 'mod', 'security', 'billing', 'me', 'you', 'everyone', 'here',

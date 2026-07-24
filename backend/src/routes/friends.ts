@@ -10,6 +10,7 @@ friends.use(requireAuth);
 const USER_COLS =
   'u.id, u.username, u.display_name, u.avatar_key, u.accent, u.status_text, u.last_online';
 
+/** GET /friends — accepted + incoming + outgoing. */
 friends.get('/', async (c) => {
   const user = c.get('user') as AuthedUser;
   const accepted = (
@@ -41,6 +42,7 @@ friends.get('/', async (c) => {
   return c.json({ friends: accepted, incoming, outgoing });
 });
 
+/** POST /friends/requests { username } */
 friends.post('/requests', async (c) => {
   const user = c.get('user') as AuthedUser;
   const body = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
@@ -91,6 +93,7 @@ friends.post('/requests', async (c) => {
   return c.json({ status: 'pending' }, 201);
 });
 
+/** POST /friends/:userId/accept */
 friends.post('/:userId/accept', async (c) => {
   const user = c.get('user') as AuthedUser;
   const requester = c.req.param('userId');
@@ -104,6 +107,7 @@ friends.post('/:userId/accept', async (c) => {
   return c.json({ ok: true });
 });
 
+/** DELETE /friends/:userId — unfriend / cancel / decline, whichever applies. */
 friends.delete('/:userId', async (c) => {
   const user = c.get('user') as AuthedUser;
   const other = c.req.param('userId');
@@ -115,6 +119,7 @@ friends.delete('/:userId', async (c) => {
   return c.json({ ok: true });
 });
 
+/** PATCH /friends/:userId { note?, close_friend? } */
 friends.patch('/:userId', async (c) => {
   const user = c.get('user') as AuthedUser;
   const other = c.req.param('userId');
@@ -135,6 +140,7 @@ friends.patch('/:userId', async (c) => {
   return c.json({ ok: true });
 });
 
+/** Blocks. */
 friends.post('/blocks/:userId', async (c) => {
   const user = c.get('user') as AuthedUser;
   const target = c.req.param('userId');

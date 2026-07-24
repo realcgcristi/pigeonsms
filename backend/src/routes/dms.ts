@@ -8,6 +8,7 @@ import type { AppEnv, AuthedUser } from '../types';
 const dms = new Hono<AppEnv>();
 dms.use(requireAuth);
 
+/** GET /dms — conversation list with peer, last message, unread count. */
 dms.get('/', async (c) => {
   const user = c.get('user') as AuthedUser;
   const { results } = await c.env.DB.prepare(
@@ -48,6 +49,7 @@ dms.get('/', async (c) => {
   });
 });
 
+/** POST /dms/open { user_id } — find or create the 1:1 channel. */
 dms.post('/open', async (c) => {
   const user = c.get('user') as AuthedUser;
   const body = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
@@ -71,29 +73,44 @@ dms.post('/open', async (c) => {
     .first();
   if (blocked) throw new ApiError(403, 'blocked', "you can't message this person");
 
+  // dm_key is the two participant ids sorted ascending and joined with ':'
+  // (e.g. "1234:5678") — a unique index on channels.dm_key (added in
+  // migration 0007) makes DM-channel creation atomic: two concurrent opens
+  // for the same pair race on the INSERT instead of both succeeding.
+  const dmKey = [user.id, peerId].sort().join(':');
+
   const existing = await c.env.DB.prepare(
-    `SELECT a.channel_id FROM channel_members a
-     JOIN channel_members b ON b.channel_id = a.channel_id AND b.user_id = ?
-     JOIN channels ch ON ch.id = a.channel_id AND ch.kind = 'dm' AND ch.deleted_at IS NULL
-     WHERE a.user_id = ?`,
+    `SELECT id AS channel_id FROM channels WHERE dm_key = ? AND deleted_at IS NULL`,
   )
-    .bind(peerId, user.id)
+    .bind(dmKey)
     .first<{ channel_id: string }>();
   if (existing) return c.json({ channel_id: existing.channel_id });
 
   const channelId = snowflake();
   const now = Date.now();
-  await c.env.DB.batch([
-    c.env.DB.prepare(
-      "INSERT INTO channels (id, kind, created_at) VALUES (?, 'dm', ?)",
-    ).bind(channelId, now),
-    c.env.DB.prepare(
-      'INSERT INTO channel_members (channel_id, user_id, joined_at) VALUES (?, ?, ?)',
-    ).bind(channelId, user.id, now),
-    c.env.DB.prepare(
-      'INSERT INTO channel_members (channel_id, user_id, joined_at) VALUES (?, ?, ?)',
-    ).bind(channelId, peerId, now),
-  ]);
+  try {
+    await c.env.DB.batch([
+      c.env.DB.prepare(
+        "INSERT INTO channels (id, kind, dm_key, created_at) VALUES (?, 'dm', ?, ?)",
+      ).bind(channelId, dmKey, now),
+      c.env.DB.prepare(
+        'INSERT INTO channel_members (channel_id, user_id, joined_at) VALUES (?, ?, ?)',
+      ).bind(channelId, user.id, now),
+      c.env.DB.prepare(
+        'INSERT INTO channel_members (channel_id, user_id, joined_at) VALUES (?, ?, ?)',
+      ).bind(channelId, peerId, now),
+    ]);
+  } catch (error) {
+    // Lost the race on the dm_key unique constraint — the other request's
+    // channel already exists; return it instead of failing.
+    const raced = await c.env.DB.prepare(
+      `SELECT id AS channel_id FROM channels WHERE dm_key = ? AND deleted_at IS NULL`,
+    )
+      .bind(dmKey)
+      .first<{ channel_id: string }>();
+    if (raced) return c.json({ channel_id: raced.channel_id });
+    throw error;
+  }
 
   fanout(c, [peerId], {
     t: 'channel.new',

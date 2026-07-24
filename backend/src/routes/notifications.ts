@@ -40,22 +40,42 @@ function serialize(row: NotificationRow) {
   try {
     data = row.data ? JSON.parse(row.data) as Record<string, unknown> : {};
   } catch {
-
+    // Preserve the notification even if an old producer stored malformed data.
   }
   return { ...row, data, read: row.read_at !== null };
 }
 
+/**
+ * GET /notifications?before=<created_at>&before_id=<id>&limit=50
+ *
+ * Ordered by (created_at DESC, id DESC) with a matching compound cursor so that
+ * rows sharing a created_at are never skipped across pages. `before` alone stays
+ * accepted for backward compatibility (older clients that only send the
+ * created_at token still page correctly, just without the tie-break); when
+ * paging, prefer sending back both next_before and next_before_id.
+ */
 notifications.get('/', async (c) => {
   const user = c.get('user') as AuthedUser;
   const before = Number(c.req.query('before'));
+  const beforeIdRaw = c.req.query('before_id');
+  const beforeId = beforeIdRaw ? String(beforeIdRaw) : null;
+  const hasBefore = Number.isFinite(before) && before > 0;
   const limit = Math.min(100, Math.max(1, Number(c.req.query('limit')) || 50));
+  // With an id tie-breaker: (created_at < ?) OR (created_at = ? AND id < ?).
+  // Without one (legacy caller): fall back to the plain created_at < ? window.
+  const where = hasBefore
+    ? (beforeId ? 'AND (created_at < ? OR (created_at = ? AND id < ?))' : 'AND created_at < ?')
+    : '';
+  const binds = hasBefore
+    ? (beforeId ? [user.id, before, before, beforeId, limit] : [user.id, before, limit])
+    : [user.id, limit];
   const rows = (
     await c.env.DB.prepare(
       `SELECT * FROM notifications WHERE user_id = ?
-       ${Number.isFinite(before) && before > 0 ? 'AND created_at < ?' : ''}
-       ORDER BY created_at DESC LIMIT ?`,
+       ${where}
+       ORDER BY created_at DESC, id DESC LIMIT ?`,
     )
-      .bind(...(Number.isFinite(before) && before > 0 ? [user.id, before, limit] : [user.id, limit]))
+      .bind(...binds)
       .all<NotificationRow>()
   ).results;
   const unread = await c.env.DB.prepare(
@@ -63,13 +83,15 @@ notifications.get('/', async (c) => {
   )
     .bind(user.id)
     .first<{ count: number }>();
+  const last = rows.at(-1);
   return c.json({
     notifications: rows.map(serialize),
     unread: Number(unread?.count ?? 0),
-    cursor: { next_before: rows.at(-1)?.created_at ?? null },
+    cursor: { next_before: last?.created_at ?? null, next_before_id: last?.id ?? null },
   });
 });
 
+/** PUT /notifications/read — mark every in-app notification read. */
 notifications.put('/read', async (c) => {
   const user = c.get('user') as AuthedUser;
   const result = await c.env.DB.prepare(
@@ -80,6 +102,7 @@ notifications.put('/read', async (c) => {
   return c.json({ ok: true, changed: result.meta.changes });
 });
 
+/** PUT /notifications/:id/read */
 notifications.put('/:id/read', async (c) => {
   const user = c.get('user') as AuthedUser;
   const now = Date.now();
@@ -94,6 +117,7 @@ notifications.put('/:id/read', async (c) => {
     : c.json({ error: { code: 'not_found', message: 'no such notification' } }, 404);
 });
 
+/** GET /notifications/preferences — global + per-user/channel/space overrides. */
 notifications.get('/preferences', async (c) => {
   const user = c.get('user') as AuthedUser;
   const rows = (await c.env.DB.prepare(
@@ -112,6 +136,7 @@ notifications.get('/preferences', async (c) => {
   });
 });
 
+/** PUT /notifications/preferences {scope_type, scope_id?, mode?, sound?, vibration?, badge?, quiet_start?, quiet_end?}. */
 notifications.put('/preferences', async (c) => {
   const user = c.get('user') as AuthedUser;
   const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
@@ -143,6 +168,7 @@ notifications.put('/preferences', async (c) => {
   return c.json({ ok: true, scope_type: scopeType, scope_id: scopeId, mode });
 });
 
+/** DELETE /notifications/preferences?scope_type=...&scope_id=... — restore inherited defaults. */
 notifications.delete('/preferences', async (c) => {
   const user = c.get('user') as AuthedUser;
   const scopeType = String(c.req.query('scope_type') ?? 'global');

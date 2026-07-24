@@ -5,6 +5,7 @@ import type { AppEnv, AuthedUser } from '../types';
 const push = new Hono<AppEnv>();
 push.use(requireAuth);
 
+/** POST /push/tokens { token } — register this device for FCM. */
 push.post('/tokens', async (c) => {
   const user = c.get('user') as AuthedUser;
   const body = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);

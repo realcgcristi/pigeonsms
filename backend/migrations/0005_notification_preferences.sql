@@ -1,3 +1,4 @@
+-- v05: notification controls. Specific scopes override global settings.
 CREATE TABLE IF NOT EXISTS notification_preferences (
   user_id TEXT NOT NULL,
   scope_type TEXT NOT NULL, -- global | user | channel | space

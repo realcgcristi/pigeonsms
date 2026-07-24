@@ -1,8 +1,14 @@
 import { Hono } from 'hono';
 import { ApiError } from '../middleware/errors';
 import { timingSafeEqualStrings, hashPassword } from '../lib/crypto';
+import { randomFromAlphabet } from '../lib/ids';
 import type { AppEnv } from '../types';
 
+/**
+ * Admin surface, gated by the ADMIN_TOKEN secret (bearer). Once user auth
+ * exists (M1) the admin *user* account will also pass this gate; the static
+ * token stays for scripts like gen.sh.
+ */
 const admin = new Hono<AppEnv>();
 
 admin.use(async (c, next) => {
@@ -14,16 +20,11 @@ admin.use(async (c, next) => {
   await next();
 });
 
+// No 0/O/1/I/L ambiguity in codes people read aloud.
 const CODE_ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
 
 function generateInviteCode(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(8));
-  let out = '';
-  for (let i = 0; i < 8; i++) {
-    if (i === 4) out += '-';
-    out += CODE_ALPHABET[(bytes[i] ?? 0) % CODE_ALPHABET.length];
-  }
-  return `PGN-${out}`;
+  return `PGN-${randomFromAlphabet(CODE_ALPHABET, 4)}-${randomFromAlphabet(CODE_ALPHABET, 4)}`;
 }
 
 function clampInt(value: unknown, min: number, max: number, fallback: number): number {
@@ -32,6 +33,7 @@ function clampInt(value: unknown, min: number, max: number, fallback: number): n
   return Math.min(max, Math.max(min, n));
 }
 
+/** POST /admin/invites { count?, uses?, expires_hours? } → { invites: [...] } */
 admin.post('/invites', async (c) => {
   const body = await c.req
     .json<Record<string, unknown>>()
@@ -58,6 +60,8 @@ admin.post('/invites', async (c) => {
   return c.json({ invites }, 201);
 });
 
+/** POST /admin/users/:username/password { password } — owner password reset.
+ *  Hashes server-side with PASSWORD_PEPPER and revokes the user's sessions. */
 admin.post('/users/:username/password', async (c) => {
   const username = c.req.param('username');
   const body = await c.req
@@ -79,6 +83,7 @@ admin.post('/users/:username/password', async (c) => {
   return c.json({ ok: true, username });
 });
 
+/** GET /admin/invites → list codes with remaining uses. */
 admin.get('/invites', async (c) => {
   const { results } = await c.env.DB.prepare(
     'SELECT code, max_uses, uses, created_at, expires_at FROM invites ORDER BY created_at DESC LIMIT 200',
@@ -86,6 +91,7 @@ admin.get('/invites', async (c) => {
   return c.json({ invites: results });
 });
 
+/** POST /admin/releases { version_code, version_name, url, notes? } — updater feed. */
 admin.post('/releases', async (c) => {
   const body = await c.req
     .json<Record<string, unknown>>()

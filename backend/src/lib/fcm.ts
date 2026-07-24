@@ -59,11 +59,23 @@ async function getAccessToken(sa: ServiceAccount): Promise<string> {
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body: `grant_type=${encodeURIComponent('urn:ietf:params:oauth:grant-type:jwt-bearer')}&assertion=${jwt}`,
   });
-  const body = await res.json<{ access_token: string; expires_in: number }>();
+  // A transient 5xx/error here must not poison the cache: caching an undefined
+  // token/expiry would make `expires = now + undefined = NaN`, so every
+  // subsequent send would use `Bearer undefined` and 401 until process restart.
+  // Throw instead so the caller's existing per-send error handling retries cleanly.
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new Error(`fcm token ${res.status}: ${detail.slice(0, 300)}`);
+  }
+  const body = await res.json<{ access_token?: string; expires_in?: number }>();
+  if (!body.access_token || !body.expires_in) {
+    throw new Error('fcm token response missing access_token/expires_in');
+  }
   cachedToken = { token: body.access_token, expires: now + body.expires_in };
   return body.access_token;
 }
 
+/** Returns false when the token is dead and should be pruned. */
 export async function sendPush(
   env: Env,
   deviceToken: string,
@@ -71,7 +83,10 @@ export async function sendPush(
 ): Promise<boolean> {
   const sa = JSON.parse(env.FCM_SERVICE_ACCOUNT) as ServiceAccount;
   const accessToken = await getAccessToken(sa);
-
+  // Data-only on purpose: a `notification` block would make Android render the
+  // notification itself when the app is backgrounded/killed and PushService's
+  // onMessageReceived (prefs, quick-reply actions, dedup IDs) would be skipped.
+  // FCM v1 requires every data value to be a string; coerce defensively so a
   // stray number/null from a caller can't 400 the whole send.
   const data: Record<string, string> = { title: payload.title, body: payload.body, kind: 'sync' };
   for (const [key, value] of Object.entries(payload.data ?? {})) {
@@ -89,7 +104,8 @@ export async function sendPush(
         message: {
           token: deviceToken,
           data,
-
+          // HIGH priority exempts delivery from Doze batching; a 24h TTL keeps
+          // messages deliverable after long offline stretches instead of FCM
           // silently discarding them, without replaying week-old chatter.
           android: { priority: 'HIGH', ttl: '86400s' },
         },
@@ -98,7 +114,8 @@ export async function sendPush(
   );
   if (res.ok) return true;
   const detail = await res.text().catch(() => '');
-
+  // Only prune a token when FCM explicitly says that registration is dead.
+  // Authentication, quota, payload, and 5xx failures are transient/operator
   // errors and must retry without destroying otherwise valid device tokens.
   if (isDefinitivelyInvalidFcmResponse(res.status, detail)) {
     return false;

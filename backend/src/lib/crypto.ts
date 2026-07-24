@@ -1,3 +1,10 @@
+/**
+ * Password hashing, session tokens, and comparison primitives.
+ * WebCrypto only — no wasm, no dependencies.
+ */
+
+// Cloudflare Workers hard-caps PBKDF2 at 100k iterations. We compensate with a
+// server-side pepper (HMAC pre-hash with a secret that never touches the DB).
 const PBKDF2_ITERATIONS = 100_000;
 const SALT_BYTES = 16;
 const KEY_BYTES = 32;
@@ -35,6 +42,7 @@ async function pbkdf2(peppered: Uint8Array, salt: Uint8Array, iterations: number
   return new Uint8Array(bits);
 }
 
+/** Format: pbkdf2$<iterations>$<saltB64>$<hashB64> */
 export async function hashPassword(password: string, pepper: string): Promise<string> {
   const salt = crypto.getRandomValues(new Uint8Array(SALT_BYTES));
   const dk = await pbkdf2(await hmacPepper(password, pepper), salt, PBKDF2_ITERATIONS);
@@ -54,6 +62,7 @@ export async function verifyPassword(
   return timingSafeEqual(dk, fromBase64(hashB64));
 }
 
+/** Opaque session token: 32 random bytes, base64url. Only its SHA-256 is stored. */
 export function generateToken(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(32));
   return toBase64(bytes).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
@@ -71,6 +80,7 @@ export function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean {
   return diff === 0;
 }
 
+/** Constant-time string comparison (hashes both sides first so length never leaks). */
 export async function timingSafeEqualStrings(a: string, b: string): Promise<boolean> {
   const [ha, hb] = await Promise.all([sha256Hex(a), sha256Hex(b)]);
   return timingSafeEqual(encoder.encode(ha), encoder.encode(hb));

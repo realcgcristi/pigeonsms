@@ -12,20 +12,33 @@ interface CacheEntry {
   cachedAt: number;
 }
 
-const CACHE_TTL_MS = 60_000;
+// Kept short to bound the stale-session window: invalidateSessionCache only
+// clears the CURRENT isolate, so a revoked session can still be honored by
+// OTHER isolates until their cached entry ages out. There is no distributed
+// revocation signal, so this TTL is the only cross-isolate bound.
+const CACHE_TTL_MS = 10_000;
 const SLIDING_TOUCH_MS = 60 * 60_000; // refresh last_seen/expiry at most hourly
 const SESSION_LIFETIME_MS = 90 * 24 * 60 * 60_000;
 
+// Per-isolate; instant revocation still holds within TTL_MS for other isolates.
 const sessionCache = new Map<string, CacheEntry>();
 
 export function invalidateSessionCache(tokenHash: string): void {
   sessionCache.delete(tokenHash);
 }
 
+/** Resolves bearer token → user + session; 401 on anything else. */
 export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
   const header = c.req.header('authorization') ?? '';
-
-  const token = header.startsWith('Bearer ') ? header.slice(7) : (c.req.query('token') ?? '');
+  // ?token= leaks into access logs, so only honor it for WebSocket upgrades
+  // (browsers can't set Authorization on a WS handshake). All other requests
+  // must use the Authorization header.
+  const isWebSocket = c.req.header('upgrade')?.toLowerCase() === 'websocket';
+  const token = header.startsWith('Bearer ')
+    ? header.slice(7)
+    : isWebSocket
+      ? (c.req.query('token') ?? '')
+      : '';
   if (!token) throw new ApiError(401, 'unauthorized', 'missing token');
 
   const tokenHash = await sha256Hex(token);
@@ -57,7 +70,15 @@ export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
       cachedAt: now,
     };
     sessionCache.set(tokenHash, entry);
-    if (sessionCache.size > 5000) sessionCache.clear(); // crude bound; refills on demand
+    if (sessionCache.size > 5000) {
+      // LRU-ish: evict the oldest ~10% (Map preserves insertion order) instead
+      // of clearing everything, which would stampede the DB on the next request.
+      let toEvict = Math.ceil(sessionCache.size * 0.1);
+      for (const key of sessionCache.keys()) {
+        if (toEvict-- <= 0) break;
+        sessionCache.delete(key);
+      }
+    }
 
     if (now - row.last_seen > SLIDING_TOUCH_MS) {
       c.executionCtx.waitUntil(

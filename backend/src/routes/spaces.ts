@@ -104,6 +104,7 @@ function audit(c: Context<AppEnv>, actor: string, action: string, target: string
   );
 }
 
+/** POST /spaces { name, description? } — creates space + #general. */
 spaces.post('/', async (c) => {
   const user = c.get('user') as AuthedUser;
   const body = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
@@ -138,7 +139,7 @@ spaces.post('/', async (c) => {
       ).bind(channelId, spaceId, now),
     ]);
   } catch (error) {
-
+    // A concurrent retry can win the unique key. Replay its completed result.
     const raced = await loadCreatedSpace(c, user.id, creationKey, legacyName);
     if (raced) return c.json(createdSpaceResponse(raced));
     throw error;
@@ -159,6 +160,7 @@ spaces.post('/', async (c) => {
   }), 201);
 });
 
+/** GET /spaces — my spaces with channels + unread hints. */
 spaces.get('/', async (c) => {
   const user = c.get('user') as AuthedUser;
   const mine = (
@@ -205,6 +207,7 @@ spaces.get('/', async (c) => {
   });
 });
 
+/** GET /spaces/:id — space information, channel summary, and active count. */
 spaces.get('/:id', async (c) => {
   const user = c.get('user') as AuthedUser;
   const spaceId = c.req.param('id');
@@ -248,6 +251,7 @@ spaces.get('/:id', async (c) => {
   });
 });
 
+/** PATCH /spaces/:id { name?, description? } — owner/admin. */
 spaces.patch('/:id', async (c) => {
   const user = c.get('user') as AuthedUser;
   const spaceId = c.req.param('id');
@@ -291,6 +295,11 @@ spaces.patch('/:id', async (c) => {
   return c.json({ space: updated });
 });
 
+/**
+ * PATCH /spaces/:id/icon { key } — owner/admin. `key` is a media object the
+ * caller already uploaded via POST /media/upload; null clears the icon back
+ * to the generated fallback.
+ */
 spaces.patch('/:id/icon', async (c) => {
   const user = c.get('user') as AuthedUser;
   const spaceId = c.req.param('id');
@@ -325,6 +334,7 @@ spaces.patch('/:id/icon', async (c) => {
   return c.json({ space: updated });
 });
 
+/** POST /spaces/:id/channels { name, kind?, topic? } — admin+. */
 spaces.post('/:id/channels', async (c) => {
   const user = c.get('user') as AuthedUser;
   const spaceId = c.req.param('id');
@@ -347,6 +357,7 @@ spaces.post('/:id/channels', async (c) => {
   return c.json({ channel: { id, name, topic, kind } }, 201);
 });
 
+/** PATCH /spaces/:id/channels/:channelId { name } — owner only. Also renames a forum's title. */
 spaces.patch('/:id/channels/:channelId', async (c) => {
   const user = c.get('user') as AuthedUser;
   const spaceId = c.req.param('id');
@@ -378,6 +389,7 @@ spaces.patch('/:id/channels/:channelId', async (c) => {
   return c.json({ channel: updated });
 });
 
+/** DELETE /spaces/:id/channels/:channelId — owner only. Soft delete; refuses the last channel. */
 spaces.delete('/:id/channels/:channelId', async (c) => {
   const user = c.get('user') as AuthedUser;
   const spaceId = c.req.param('id');
@@ -421,6 +433,7 @@ spaces.delete('/:id/channels/:channelId', async (c) => {
   return c.json({ ok: true, deleted: true, deleted_at: deleted.deleted_at });
 });
 
+/** POST /spaces/:id/invites { max_uses?, expires_hours? } — admin+. */
 spaces.post('/:id/invites', async (c) => {
   const user = c.get('user') as AuthedUser;
   const spaceId = c.req.param('id');
@@ -439,10 +452,34 @@ spaces.post('/:id/invites', async (c) => {
   return c.json({ code, max_uses: maxUses, expires_at: expiresAt }, 201);
 });
 
+/** POST /spaces/join { code } */
 spaces.post('/join', async (c) => {
   const user = c.get('user') as AuthedUser;
   const body = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
   const code = String(body['code'] ?? '').trim().toUpperCase();
+
+  // Resolve the invite (read-only) before touching `uses`, so an
+  // already-member submitter never burns a use — check membership first,
+  // and only consume the invite once we know this is a real join.
+  const invite = await c.env.DB.prepare(
+    `SELECT space_invites.space_id AS space_id FROM space_invites
+     WHERE code = ? AND (max_uses IS NULL OR uses < max_uses)
+       AND (expires_at IS NULL OR expires_at > ?)
+       AND EXISTS (
+         SELECT 1 FROM spaces s WHERE s.id = space_invites.space_id AND s.deleted_at IS NULL
+       )`,
+  )
+    .bind(code, Date.now())
+    .first<{ space_id: string }>();
+  if (!invite) throw new ApiError(400, 'invalid_invite', 'that invite is not valid');
+
+  const already = await c.env.DB.prepare(
+    'SELECT 1 FROM space_members WHERE space_id = ? AND user_id = ?',
+  )
+    .bind(invite.space_id, user.id)
+    .first();
+  if (already) return c.json({ space_id: invite.space_id });
+
   const consumed = await c.env.DB.prepare(
     `UPDATE space_invites SET uses = uses + 1
      WHERE code = ? AND (max_uses IS NULL OR uses < max_uses)
@@ -456,22 +493,16 @@ spaces.post('/join', async (c) => {
     .first<{ space_id: string }>();
   if (!consumed) throw new ApiError(400, 'invalid_invite', 'that invite is not valid');
 
-  const already = await c.env.DB.prepare(
-    'SELECT 1 FROM space_members WHERE space_id = ? AND user_id = ?',
+  await c.env.DB.prepare(
+    "INSERT INTO space_members (space_id, user_id, role, joined_at) VALUES (?, ?, 'member', ?)",
   )
-    .bind(consumed.space_id, user.id)
-    .first();
-  if (!already) {
-    await c.env.DB.prepare(
-      "INSERT INTO space_members (space_id, user_id, role, joined_at) VALUES (?, ?, 'member', ?)",
-    )
-      .bind(consumed.space_id, user.id, Date.now())
-      .run();
-    audit(c, user.id, 'space.join', consumed.space_id);
-  }
+    .bind(consumed.space_id, user.id, Date.now())
+    .run();
+  audit(c, user.id, 'space.join', consumed.space_id);
   return c.json({ space_id: consumed.space_id });
 });
 
+/** GET /spaces/:id/members */
 spaces.get('/:id/members', async (c) => {
   const user = c.get('user') as AuthedUser;
   const spaceId = c.req.param('id');
@@ -493,6 +524,7 @@ spaces.get('/:id/members', async (c) => {
   });
 });
 
+/** PUT /spaces/:id/members/:uid/role { role } — owner only. */
 spaces.put('/:id/members/:uid/role', async (c) => {
   const user = c.get('user') as AuthedUser;
   const spaceId = c.req.param('id');
@@ -509,12 +541,14 @@ spaces.put('/:id/members/:uid/role', async (c) => {
   return c.json({ ok: true });
 });
 
+/** POST /spaces/:id/transfer { user_id } — ownership transfer. */
 spaces.post('/:id/transfer', async (c) => {
   const user = c.get('user') as AuthedUser;
   const spaceId = c.req.param('id');
   await requireRole(c, spaceId, user.id, ['owner']);
   const body = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
   const targetId = String(body['user_id'] ?? '');
+  if (targetId === user.id) throw new ApiError(400, 'bad_target', 'cannot transfer to yourself');
   await requireRole(c, spaceId, targetId, ['owner', 'admin', 'member']);
   await c.env.DB.batch([
     c.env.DB.prepare("UPDATE space_members SET role = 'owner' WHERE space_id = ? AND user_id = ?").bind(spaceId, targetId),
@@ -525,6 +559,7 @@ spaces.post('/:id/transfer', async (c) => {
   return c.json({ ok: true });
 });
 
+/** DELETE /spaces/:id/members/me — leave (owner must transfer first). */
 spaces.delete('/:id/members/me', async (c) => {
   const user = c.get('user') as AuthedUser;
   const spaceId = c.req.param('id');
@@ -536,6 +571,7 @@ spaces.delete('/:id/members/me', async (c) => {
   return c.json({ ok: true });
 });
 
+/** DELETE /spaces/:id — owner, idempotent soft delete including child channels. */
 spaces.delete('/:id', async (c) => {
   const user = c.get('user') as AuthedUser;
   const spaceId = c.req.param('id');
@@ -576,11 +612,12 @@ spaces.delete('/:id', async (c) => {
   return c.json({ ok: true, deleted: true, deleted_at: deletedAt });
 });
 
+/** GET /spaces/:id/audit — admin+. */
 spaces.get('/:id/audit', async (c) => {
   const user = c.get('user') as AuthedUser;
   const spaceId = c.req.param('id');
   await requireRole(c, spaceId, user.id, ['owner', 'admin']);
-
+  // Scoped to this space's own rows: the space itself or its channels. Rows
   // whose target is a bare user id (role.*, space.transfer) carry no space
   // linkage, so they are excluded rather than leaking other spaces' activity.
   const { results } = await c.env.DB.prepare(

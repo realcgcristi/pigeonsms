@@ -1,6 +1,7 @@
 import type { Context, MiddlewareHandler } from 'hono';
 import type { AppEnv } from '../types';
 
+/** Throw anywhere in a handler; the onError hook renders the envelope. */
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
@@ -18,6 +19,7 @@ export const requestId: MiddlewareHandler<AppEnv> = async (c, next) => {
   await next();
 };
 
+/** Every error leaves as { error: { code, message, request_id } }. */
 export function onError(err: Error, c: Context<AppEnv>): Response {
   const requestId = c.get('requestId');
   if (err instanceof ApiError) {
