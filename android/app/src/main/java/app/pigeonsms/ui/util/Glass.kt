@@ -372,7 +372,7 @@ fun LiquidSegmented(
                         .clip(CircleShape)
                         .semantics {
                             role = Role.Tab
-                            selected = isSelected
+                            this.selected = isSelected
                         }
                         .pointerInput(i) { detectTapGestures { haptics.tap(); onSelect(i) } },
                     contentAlignment = Alignment.Center,
