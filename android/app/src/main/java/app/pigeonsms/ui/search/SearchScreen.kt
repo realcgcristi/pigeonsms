@@ -49,6 +49,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewModelScope
 import app.pigeonsms.design.components.NovaSectionLabel
 import app.pigeonsms.design.theme.Corners
 import app.pigeonsms.design.theme.LocalUiSkin
@@ -342,7 +343,7 @@ class SearchViewModel(
     fun loadSpaces() {
         if (_ui.value.spaces.isNotEmpty() || _ui.value.loadingSpaces) return
         _ui.update { it.copy(loadingSpaces = true) }
-        androidx.lifecycle.viewModelScope.launch {
+        viewModelScope.launch {
             runCatching { repo.spaces() }
                 .onSuccess { spaces ->
                     val mapped = spaces.map { s ->
@@ -386,7 +387,7 @@ class SearchViewModel(
         }
         searchJob?.cancel()
         _ui.update { it.copy(searching = true, error = null) }
-        searchJob = androidx.lifecycle.viewModelScope.launch {
+        searchJob = viewModelScope.launch {
             runCatching { api.searchSpace(spaceId, q) }
                 .onSuccess { resp ->
                     _ui.update { it.copy(searching = false, results = resp.results, error = null) }

@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -240,7 +241,7 @@ fun AboutScreen(username: String, onBack: () -> Unit) {
                                                 val version = (update as? UpdateState.Available)?.release?.version_code
                                                     ?: api?.latestRelease()?.version_code
                                                     ?: BuildConfig.VERSION_CODE
-                                                api?.notifyRelease(version)
+                                                api?.notifyAllOfRelease(version)
                                                 "sent — everyone was notified"
                                             } catch (e: app.pigeonsms.network.PigeonApiException) {
                                                 if (e.code == "http_403") "not allowed" else e.message
