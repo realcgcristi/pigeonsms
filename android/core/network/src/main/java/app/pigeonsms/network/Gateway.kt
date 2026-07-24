@@ -15,6 +15,8 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.serialization.builtins.MapSerializer
+import kotlinx.serialization.builtins.serializer
 
 enum class GatewayStatus { Connecting, Connected, Disconnected }
 
@@ -31,6 +33,13 @@ class Gateway(
     private val scope: CoroutineScope,
     private val tokenProvider: suspend () -> String?,
     private val onAuthFailure: suspend () -> Unit = {},
+    /** 2.8.0 resume protocol (contract): supplies the highest message `seq` the app has
+     *  durably applied per channel — `{ channelId -> lastSeq }`. Invoked fresh on every
+     *  (re)connect; the map is sent as a base64url `?resume=` param so the server (B8)
+     *  can replay only the message-shaped events newer than each cursor. Default is a
+     *  no-op provider: absent/empty/failing cursors simply omit the param, leaving the
+     *  connect identical to prior (2.7.0) behavior. */
+    private val cursorProvider: suspend () -> Map<String, Long>? = { null },
 ) {
     private val _events = MutableSharedFlow<GatewayEvent>(
         extraBufferCapacity = 64,
@@ -65,8 +74,12 @@ class Gateway(
                 }
                 _status.value = GatewayStatus.Connecting
                 var reachedConnected = false
+                // Per-channel resume cursors (2.8.0). Built fresh each connect and kept
+                // strictly additive: any failure or absence yields an empty suffix, so the
+                // upgrade URL degrades to the plain token-only form. Never let this throw.
+                val resumeSuffix = runCatching { buildResumeSuffix() }.getOrNull().orEmpty()
                 try {
-                    api.client.webSocket("$PIGEON_WS?token=$token") {
+                    api.client.webSocket("$PIGEON_WS?token=$token$resumeSuffix") {
                         reachedConnected = true
                         _status.value = GatewayStatus.Connected
                         backoff = 1000L
@@ -98,6 +111,27 @@ class Gateway(
                 backoff = (backoff * 2).coerceAtMost(30_000)
             }
         }
+    }
+
+    /**
+     * Ask [cursorProvider] for the current per-channel `{ channelId -> lastSeq }` map and
+     * encode it as a `&resume=<base64url>` query suffix the server understands (JSON object,
+     * base64url without padding). Returns "" for null/empty cursors so the caller can append
+     * it unconditionally. Only positive seqs are sent — a 0/negative cursor carries no
+     * information and would just bloat the param.
+     */
+    private suspend fun buildResumeSuffix(): String {
+        val cursors = cursorProvider()?.filterValues { it > 0 }
+        if (cursors.isNullOrEmpty()) return ""
+        val jsonStr = api.json.encodeToString(
+            MapSerializer(String.serializer(), Long.serializer()),
+            cursors,
+        )
+        val encoded = android.util.Base64.encodeToString(
+            jsonStr.toByteArray(Charsets.UTF_8),
+            android.util.Base64.URL_SAFE or android.util.Base64.NO_PADDING or android.util.Base64.NO_WRAP,
+        )
+        return "&resume=$encoded"
     }
 
     fun stop() {

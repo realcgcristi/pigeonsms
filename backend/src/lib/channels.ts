@@ -85,6 +85,16 @@ export interface GatewayEvent {
   d: unknown;
 }
 
+/**
+ * The only slice of `ExecutionContext` the delivery core needs. Typed structurally
+ * so it accepts BOTH Hono's `c.executionCtx` and the Workers runtime's
+ * `ExecutionContext` (the cron handler's `ctx`) without nominal-type friction
+ * between the bundled Hono types and @cloudflare/workers-types.
+ */
+export interface WaitUntilCtx {
+  waitUntil(promise: Promise<unknown>): void;
+}
+
 interface PreferenceMatch {
   mode: string;
   quiet_start: string | null;
@@ -105,29 +115,86 @@ function inQuietHours(start: string | null | undefined, end: string | null | und
   return from < to ? current >= from && current < to : current >= from || current < to;
 }
 
+interface FanoutOpts {
+  exclude?: string;
+  suppressPushFor?: string[];
+  push?: PushPayload;
+  mentionOnly?: boolean;
+  // E2EE: the stored content is ciphertext, so the plaintext preview would leak
+  // (or be garbage). Replace the push body with a generic notice — the gateway
+  // event still carries the ciphertext for the recipient's own devices to decrypt.
+  encrypted?: boolean;
+}
+
+/** A Hono Context exposes `.req`; a bare Env binding object does not. */
+function isHonoContext(x: Context<AppEnv> | Env): x is Context<AppEnv> {
+  return typeof (x as Context<AppEnv>).req === 'object' && (x as Context<AppEnv>).req !== null;
+}
+
 /**
  * Deliver an event to every recipient's UserGateway DO. A gateway holding no
  * sockets reports 0 delivered; those users get queued for FCM if `push` set.
+ *
+ * The delivery core is context-free — it runs on `(env, executionCtx)` — so both
+ * the HTTP send path and the cron dispatcher call the exact same fanout (no
+ * drift). For ergonomics the HTTP handlers may still pass a Hono `Context` as
+ * the first argument; it is unwrapped to `(c.env, c.executionCtx)` internally.
  */
 export function fanout(
-  c: Context<AppEnv>,
+  ctx: Context<AppEnv>,
   recipients: string[],
   event: GatewayEvent,
-  opts: { exclude?: string; suppressPushFor?: string[]; push?: PushPayload; mentionOnly?: boolean } = {},
+  opts?: FanoutOpts,
+): void;
+export function fanout(
+  env: Env,
+  executionCtx: WaitUntilCtx,
+  recipients: string[],
+  event: GatewayEvent,
+  opts?: FanoutOpts,
+): void;
+export function fanout(
+  a: Context<AppEnv> | Env,
+  b: string[] | WaitUntilCtx,
+  c: GatewayEvent | string[],
+  d?: FanoutOpts | GatewayEvent,
+  e?: FanoutOpts,
 ): void {
+  let env: Env;
+  let executionCtx: WaitUntilCtx;
+  let recipients: string[];
+  let event: GatewayEvent;
+  let opts: FanoutOpts;
+  if (isHonoContext(a)) {
+    env = a.env;
+    executionCtx = a.executionCtx;
+    recipients = b as string[];
+    event = c as GatewayEvent;
+    opts = (d as FanoutOpts) ?? {};
+  } else {
+    env = a;
+    executionCtx = b as WaitUntilCtx;
+    recipients = c as string[];
+    event = d as GatewayEvent;
+    opts = e ?? {};
+  }
+
   const payload = JSON.stringify(event);
   const targets = recipients.filter((uid) => uid !== opts.exclude);
-  c.executionCtx.waitUntil(
+  const push = opts.push && opts.encrypted
+    ? { ...opts.push, body: 'sent a message' }
+    : opts.push;
+  executionCtx.waitUntil(
     (async () => {
       // Prefetch every recipient's relevant preferences in ONE query instead of
       // one round-trip per recipient. The most-specific matching scope wins, so
       // keep them ordered global < space < channel and take the last per user.
       const prefsByUser = new Map<string, PreferenceMatch>();
-      if (opts.push) {
+      if (push) {
         const pushTargets = targets.filter((uid) => !opts.suppressPushFor?.includes(uid));
         if (pushTargets.length) {
           const placeholders = pushTargets.map(() => '?').join(', ');
-          const rows = (await c.env.DB.prepare(
+          const rows = (await env.DB.prepare(
             `SELECT user_id, scope_type, scope_id, mode, quiet_start, quiet_end
              FROM notification_preferences
              WHERE user_id IN (${placeholders}) AND (scope_type = 'global' OR
@@ -135,7 +202,7 @@ export function fanout(
                (scope_type = 'channel' AND scope_id = ?))
              ORDER BY user_id, CASE scope_type WHEN 'global' THEN 0 WHEN 'space' THEN 1 ELSE 2 END`,
           ).bind(
-            ...pushTargets, (opts.push.data?.space_id ?? ''), (opts.push.data?.channel_id ?? ''),
+            ...pushTargets, (push.data?.space_id ?? ''), (push.data?.channel_id ?? ''),
           ).all<{
             user_id: string; scope_type: string; scope_id: string; mode: string;
             quiet_start: string | null; quiet_end: string | null;
@@ -146,16 +213,16 @@ export function fanout(
       }
       await Promise.allSettled(
         targets.map(async (uid) => {
-          const stub = c.env.USER_GATEWAY.get(c.env.USER_GATEWAY.idFromName(uid));
+          const stub = env.USER_GATEWAY.get(env.USER_GATEWAY.idFromName(uid));
           const res = await stub.fetch('https://gateway/notify', { method: 'POST', body: payload });
           const { delivered } = await res.json<{ delivered: number }>();
-          if (delivered === 0 && opts.push && !opts.suppressPushFor?.includes(uid)) {
+          if (delivered === 0 && push && !opts.suppressPushFor?.includes(uid)) {
             const preference = prefsByUser.get(uid);
         // A mentions-only scope suppresses ordinary messages but still allows
         // notifications explicitly marked as mention fanout.  Mute always wins.
             const muted = preference?.mode === 'mute' || (!opts.mentionOnly && preference?.mode === 'mentions') ||
               (!opts.mentionOnly && inQuietHours(preference?.quiet_start, preference?.quiet_end));
-            if (!muted) await c.env.PUSH_QUEUE.send({ user_id: uid, ...opts.push });
+            if (!muted) await env.PUSH_QUEUE.send({ user_id: uid, ...push });
           }
         }),
       );

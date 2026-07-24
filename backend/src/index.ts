@@ -6,8 +6,13 @@ import auth from './routes/auth';
 import security from './routes/security';
 import friends from './routes/friends';
 import dms from './routes/dms';
-import messagesRoutes from './routes/messages';
+import messagesRoutes, {
+  softDeleteExpiredMessages,
+  dispatchDueScheduledMessages,
+} from './routes/messages';
 import spaces from './routes/spaces';
+import search from './routes/search';
+import devices from './routes/devices';
 import { mediaUpload, mediaServe } from './routes/media';
 import users from './routes/users';
 import push from './routes/push';
@@ -49,7 +54,15 @@ app.route('/auth', security);
 app.route('/friends', friends);
 app.route('/dms', dms);
 app.route('/', messagesRoutes);
+// B4 devices/key-envelopes/key-backup: owns /auth/devices, /auth/key-backup,
+// /users/:id/devices, /channels/:id/key-envelopes — root-mounted like messages
+// because its paths span several top-level prefixes. requireAuth is applied
+// inside the router (none of its routes are public).
+app.route('/', devices);
 app.route('/spaces', spaces);
+// B3 message search: GET /spaces/:id/search. Composes onto the same /spaces
+// prefix as the spaces router; requireAuth is applied inside the search router.
+app.route('/spaces', search);
 app.route('/media', mediaUpload);
 app.route('/media', mediaServe);
 app.route('/users', users);
@@ -77,6 +90,26 @@ app.notFound(notFound);
 
 export default {
   fetch: app.fetch,
+  // Cron entry point (schedule set in wrangler.toml, out of scope here). Runs
+  // two independent sweeps every tick; each is wrapped so a failure in one never
+  // aborts the other. Both helpers are context-free (no Hono Context) and reuse
+  // the message module's normal delete/send path — seq alloc + fanout + FCM.
+  async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    // (a) disappearing messages: soft-delete anything past its expires_at via the
+    // existing deleted path (sets deleted_at, tombstone fanout).
+    try {
+      await softDeleteExpiredMessages(env, ctx);
+    } catch (err) {
+      console.error('cron: soft-delete expired messages failed', err);
+    }
+    // (b) scheduled sends: dispatch every due scheduled_messages row through the
+    // normal send path, then delete the scheduled row.
+    try {
+      await dispatchDueScheduledMessages(env, ctx);
+    } catch (err) {
+      console.error('cron: dispatch scheduled messages failed', err);
+    }
+  },
   async queue(batch: MessageBatch, env: Env): Promise<void> {
     for (const msg of batch.messages) {
       const { user_id, title, body, data } = msg.body as PushJob;

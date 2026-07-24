@@ -7,7 +7,6 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
@@ -20,6 +19,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -43,10 +43,12 @@ import androidx.compose.ui.graphics.isSpecified
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.pigeonsms.design.theme.novaSurface
@@ -286,7 +288,7 @@ fun LiquidSwitch(
     val thumb = trackH - pad * 2
     val onColor = MaterialTheme.colorScheme.primary
     val offColor = MaterialTheme.colorScheme.surfaceContainerHighest
-    val haptics = LocalHapticFeedback.current
+    val haptics = rememberReducedHaptics()
     val bg by animateColorAsState(if (checked) onColor else offColor, label = "switchBg")
     val pos by animateFloatAsState(
         if (checked) 1f else 0f,
@@ -298,7 +300,11 @@ fun LiquidSwitch(
             .size(trackW, trackH)
             .clip(CircleShape)
             .background(bg)
-            .clickable { haptics.performHapticFeedback(HapticFeedbackType.LongPress); onCheckedChange(!checked) }
+            .toggleable(
+                value = checked,
+                role = Role.Switch,
+                onValueChange = { haptics.tap(); onCheckedChange(it) },
+            )
             .padding(pad),
         contentAlignment = Alignment.CenterStart,
     ) {
@@ -321,7 +327,7 @@ fun LiquidSegmented(
     height: Dp = 44.dp,
 ) {
     val count = options.size.coerceAtLeast(1)
-    val haptics = LocalHapticFeedback.current
+    val haptics = rememberReducedHaptics()
     BoxWithConstraints(
         modifier
             .fillMaxWidth()
@@ -358,12 +364,17 @@ fun LiquidSegmented(
         )
         Row(Modifier.fillMaxWidth().fillMaxHeight()) {
             options.forEachIndexed { i, label ->
+                val isSelected = i == selected
                 Box(
                     Modifier
                         .weight(1f)
                         .fillMaxHeight()
                         .clip(CircleShape)
-                        .pointerInput(i) { detectTapGestures { haptics.performHapticFeedback(HapticFeedbackType.LongPress); onSelect(i) } },
+                        .semantics {
+                            role = Role.Tab
+                            selected = isSelected
+                        }
+                        .pointerInput(i) { detectTapGestures { haptics.tap(); onSelect(i) } },
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
@@ -396,7 +407,7 @@ fun LiquidSlider(
     val trackOff = MaterialTheme.colorScheme.surfaceContainerHighest
     var stretch by remember { mutableStateOf(1f) }
     val animStretch by animateFloatAsState(stretch, spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessMedium), label = "sliderStretch")
-    val haptics = LocalHapticFeedback.current
+    val haptics = rememberReducedHaptics()
 
     BoxWithConstraints(modifier.fillMaxWidth().height(40.dp)) {
         val widthPx = with(density) { maxWidth.toPx() }
@@ -425,7 +436,7 @@ fun LiquidSlider(
                 .pointerInput(widthPx) { detectTapGestures { emit(it.x) } }
                 .pointerInput(widthPx) {
                     detectHorizontalDragGestures(
-                        onDragStart = { haptics.performHapticFeedback(HapticFeedbackType.LongPress); emit(it.x) },
+                        onDragStart = { haptics.tap(); emit(it.x) },
                         onDragEnd = { stretch = 1f },
                         onDragCancel = { stretch = 1f },
                     ) { change, drag ->

@@ -32,6 +32,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -39,6 +42,26 @@ import app.pigeonsms.design.theme.LocalLiquidGlass
 import app.pigeonsms.design.theme.LocalReducedMotion
 import app.pigeonsms.design.theme.PigeonMotion
 import app.pigeonsms.design.theme.Spacing
+
+/**
+ * Reduced-motion-aware haptics. Returns the current [HapticFeedback] plus the
+ * current reduced-motion flag; call [tap] to fire a haptic only when the user
+ * hasn't opted out of motion/feedback. Existing `haptics.performHapticFeedback`
+ * call sites can migrate to this so accessibility prefs are respected without
+ * changing any visual behavior.
+ */
+class ReducedHaptics(val haptics: HapticFeedback, val reduced: Boolean) {
+    fun tap(type: HapticFeedbackType = HapticFeedbackType.LongPress) {
+        if (!reduced) haptics.performHapticFeedback(type)
+    }
+}
+
+@Composable
+fun rememberReducedHaptics(): ReducedHaptics {
+    val haptics = LocalHapticFeedback.current
+    val reduced = LocalReducedMotion.current
+    return ReducedHaptics(haptics, reduced)
+}
 
 @Composable
 fun ScreenHeader(title: String, subtitle: String? = null, action: (@Composable () -> Unit)? = null) {

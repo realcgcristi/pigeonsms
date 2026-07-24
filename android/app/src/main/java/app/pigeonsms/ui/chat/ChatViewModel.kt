@@ -152,7 +152,13 @@ class ChatViewModel(
         }
     }
 
-    fun send(text: String) {
+    /**
+     * Composer send. [ttl] (seconds) marks a disappearing message, [sendAt] (epoch ms)
+     * schedules it, and [encrypted] is the composer's per-message E2EE intent (already
+     * gated on the beta flag, default OFF, in the UI layer) — the repository still
+     * verifies keys are established before actually encrypting. Edits ignore all three.
+     */
+    fun send(text: String, ttl: Long? = null, sendAt: Long? = null, encrypted: Boolean = false) {
         val content = text.trim()
         val editing = _ui.value.editing
         if (editing != null) {
@@ -184,7 +190,7 @@ class ChatViewModel(
         val reply = _ui.value.replyTo?.id
         _ui.update { it.copy(sending = true, error = null) }
         viewModelScope.launch {
-            runCatching { repo.send(channelId, content, reply, null, selfName) }
+            runCatching { repo.send(channelId, content, reply, null, selfName, ttl = ttl, sendAt = sendAt, e2eeEnabled = encrypted) }
                 .onSuccess {
                     _ui.update { state ->
                         state.copy(replyTo = null, composerClearToken = state.composerClearToken + 1)
@@ -197,14 +203,22 @@ class ChatViewModel(
         }
     }
 
-    fun sendAttachment(bytes: ByteArray, filename: String, type: String, caption: String) {
+    fun sendAttachment(
+        bytes: ByteArray,
+        filename: String,
+        type: String,
+        caption: String,
+        ttl: Long? = null,
+        sendAt: Long? = null,
+        encrypted: Boolean = false,
+    ) {
         if (_ui.value.sending) return
         val reply = _ui.value.replyTo?.id
         viewModelScope.launch {
             _ui.update { it.copy(sending = true, error = null) }
             runCatching {
                 val attachment = repo.uploadFile(bytes, filename, type)
-                repo.send(channelId, caption.trim(), reply, attachment, selfName)
+                repo.send(channelId, caption.trim(), reply, attachment, selfName, ttl = ttl, sendAt = sendAt, e2eeEnabled = encrypted)
             }.onSuccess {
                 _ui.update {
                     it.copy(replyTo = null, composerClearToken = it.composerClearToken + 1)
@@ -332,6 +346,15 @@ class ChatViewModel(
             _ui.update { it.copy(searching = false) }
         }
     }
+
+    /**
+     * Space-wide FTS5 search passthrough (2.8.0) to [ChatRepository.searchSpace] →
+     * [app.pigeonsms.network.PigeonApi.searchSpace]. Paginate with [before]; the server
+     * skips encrypted messages. Kept as a thin repo passthrough so callers that already
+     * hold a spaceId (e.g. the nest search screen) can route through the repository layer.
+     */
+    suspend fun searchSpace(spaceId: String, query: String, before: Long? = null) =
+        repo.searchSpace(spaceId, query.trim(), before)
 
     /** Debounced Room LIKE search over the locally cached history (conversation info screen). */
     fun localSearch(query: String) {

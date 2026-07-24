@@ -16,6 +16,67 @@ const REPLAY_BUFFER_SIZE = 100;
  *  than a DO-local buffer seq (buffer seqs start at 1 and rarely reach this). */
 const SINCE_TIMESTAMP_THRESHOLD = 1_000_000_000_000; // 2001-09-09 in ms
 
+/** Hard cap on how many buffered events a single resume request may replay to a
+ *  reconnecting socket, regardless of how many channels it asked about. Prevents
+ *  a client with a very stale cursor set from being flooded (and from us walking
+ *  the buffer once per channel). If we would exceed it, we stop replaying and
+ *  tell the client to backfill from D1 instead (see `resume` frame below). */
+const MAX_REPLAY_EVENTS = REPLAY_BUFFER_SIZE;
+
+/** A per-channel resume cursor map the client may send on connect: the highest
+ *  message `seq` it has durably applied for each channel. We replay buffered
+ *  message-shaped events whose `d.channel_id` matches and `d.seq` is greater. */
+type ResumeCursors = Record<string, number>;
+
+/** Best-effort extraction of `{ channel_id, seq }` from a buffered event's `d`.
+ *  Only message-shaped events (message.new/edit/delete, mention.new, …) carry
+ *  a per-channel seq; everything else returns null and is ignored by per-channel
+ *  resume (those still flow through the DO-local `?since=` buffer path). */
+function channelSeqOf(payload: string): { channelId: string; seq: number } | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(payload) as unknown;
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== 'object' || parsed === null) return null;
+  const d = (parsed as { d?: unknown }).d;
+  if (typeof d !== 'object' || d === null) return null;
+  const channelId = (d as { channel_id?: unknown }).channel_id;
+  const seq = (d as { seq?: unknown }).seq;
+  if (typeof channelId !== 'string' || typeof seq !== 'number' || !Number.isFinite(seq)) {
+    return null;
+  }
+  return { channelId, seq };
+}
+
+/** Parse the optional `?resume=` query value: a base64url- or plain-encoded JSON
+ *  object of `{ [channelId]: lastSeq }`. Malformed input yields null (no resume),
+ *  never an error — resume is strictly additive and must never break connect. */
+function parseResumeCursors(raw: string | null): ResumeCursors | null {
+  if (!raw) return null;
+  let text = raw;
+  // Accept a base64(url) blob too, since a cursor map can grow past what fits
+  // comfortably in a bare query param; fall back to treating it as raw JSON.
+  try {
+    text = atob(raw.replace(/-/g, '+').replace(/_/g, '/'));
+  } catch {
+    text = raw;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text) as unknown;
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
+  const cursors: ResumeCursors = {};
+  for (const [channelId, value] of Object.entries(parsed as Record<string, unknown>)) {
+    if (typeof value === 'number' && Number.isFinite(value)) cursors[channelId] = value;
+  }
+  return Object.keys(cursors).length ? cursors : null;
+}
+
 /**
  * One per user; owns every device WebSocket (Hibernation API, so idle
  * connections cost nothing). Other handlers POST /notify to push events;
@@ -57,9 +118,15 @@ export class UserGateway {
       // touchPresence is a no-op if /bind has not landed yet on a cold DO; the
       // /bind handler re-touches once the uid is known, so presence is not lost.
       await this.touchPresence();
-      // Optional gap replay: if the client passed ?since=, resend buffered events
-      // newer than that. Absent ?since => no replay, identical to prior behavior.
-      this.replaySince(pair[1], url.searchParams.get('since'));
+      // Optional gap replay. Two complementary, additive mechanisms — a client
+      // may use either, both, or neither (absent => identical to prior behavior):
+      //   ?since=  — DO-local buffer cursor / unix-ms (2.7.0). Whole-buffer replay.
+      //   ?resume= — per-channel { channelId: lastSeq } map (2.8.0). Replays only
+      //              message-shaped events newer than each channel's cursor.
+      // We run resume first (targeted, seq-aware) then since (catch-all); dedup is
+      // the client's job via the per-event seq it already tracks.
+      const replayedByResume = this.replayResume(pair[1], parseResumeCursors(url.searchParams.get('resume')));
+      if (!replayedByResume) this.replaySince(pair[1], url.searchParams.get('since'));
       return new Response(null, { status: 101, webSocket: pair[0] });
     }
 
@@ -125,6 +192,89 @@ export class UserGateway {
         }
       }
     }
+  }
+
+  /**
+   * Per-channel resume: replay buffered message-shaped events whose
+   * `d.channel_id` is present in `cursors` and whose `d.seq` exceeds the client's
+   * last-applied seq for that channel. Returns true iff resume was attempted
+   * (i.e. the client sent a usable cursor map) so the caller can skip the
+   * whole-buffer `?since=` path and avoid double-sending.
+   *
+   * Best-effort and capped: the buffer is empty after DO eviction (so this can
+   * legitimately send nothing even when events were missed), and we never send
+   * more than MAX_REPLAY_EVENTS. On either shortfall we emit a single
+   * `gateway.resume` control frame telling the client the replay was incomplete
+   * so it backfills the affected channels from D1 (the durable source of truth).
+   */
+  private replayResume(ws: WebSocket, cursors: ResumeCursors | null): boolean {
+    if (!cursors) return false;
+
+    // The buffer only holds the tail of history. If the client's cursor for a
+    // channel is older than the oldest thing we still have, we cannot prove we
+    // have every gap event — flag that channel as needing a D1 backfill.
+    const gappy = new Set<string>();
+    let sent = 0;
+    let capped = false;
+
+    for (const evt of this.recent) {
+      if (sent >= MAX_REPLAY_EVENTS) {
+        capped = true;
+        break;
+      }
+      const info = channelSeqOf(evt.payload);
+      if (!info) continue;
+      const cursor = cursors[info.channelId];
+      if (cursor === undefined) continue; // client did not ask about this channel
+      if (info.seq <= cursor) continue; // already applied
+      try {
+        ws.send(evt.payload);
+        sent += 1;
+      } catch {
+        // socket died mid-replay; stop and let the client reconnect+backfill.
+        capped = true;
+        break;
+      }
+    }
+
+    // Any requested channel whose cursor sits below the buffer's retained floor
+    // (or that got truncated by the cap) can have silently missed events between
+    // its cursor and what we replayed. We cannot cheaply prove otherwise from an
+    // in-memory ring, so conservatively tell the client to backfill every channel
+    // it asked about when we hit the cap; when uncapped, only flag ones whose
+    // cursor predates our oldest buffered event for that channel.
+    if (capped) {
+      for (const channelId of Object.keys(cursors)) gappy.add(channelId);
+    } else {
+      const oldestSeqByChannel = new Map<string, number>();
+      for (const evt of this.recent) {
+        const info = channelSeqOf(evt.payload);
+        if (!info) continue;
+        const prev = oldestSeqByChannel.get(info.channelId);
+        if (prev === undefined || info.seq < prev) oldestSeqByChannel.set(info.channelId, info.seq);
+      }
+      for (const [channelId, cursor] of Object.entries(cursors)) {
+        const oldest = oldestSeqByChannel.get(channelId);
+        // If we have buffered events for this channel but the oldest one is more
+        // than one past the client's cursor, there is a hole below our window.
+        if (oldest !== undefined && oldest > cursor + 1) gappy.add(channelId);
+        // If we hold NOTHING for this channel we cannot tell whether it was idle
+        // or evicted; leave it un-flagged to avoid forcing needless backfills on
+        // the common quiet-channel case — the client's own reconnect fetch covers it.
+      }
+    }
+
+    if (gappy.size > 0) {
+      try {
+        ws.send(JSON.stringify({
+          t: 'gateway.resume',
+          d: { incomplete: true, backfill: [...gappy] },
+        }));
+      } catch {
+        // socket already gone; the client will reconnect and try again.
+      }
+    }
+    return true;
   }
 
   async webSocketClose(): Promise<void> {

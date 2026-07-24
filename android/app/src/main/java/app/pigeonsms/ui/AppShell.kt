@@ -80,6 +80,7 @@ import app.pigeonsms.ui.friends.FriendsScreen
 import app.pigeonsms.ui.profile.EditProfileScreen
 import app.pigeonsms.ui.profile.ProfileScreen
 import app.pigeonsms.ui.profile.ProfileViewModel
+import app.pigeonsms.ui.settings.AboutScreen
 import app.pigeonsms.ui.settings.AppIconScreen
 import app.pigeonsms.ui.settings.AppearanceScreen
 import app.pigeonsms.ui.settings.BlockedScreen
@@ -91,6 +92,7 @@ import app.pigeonsms.ui.settings.SettingsScreen
 import app.pigeonsms.ui.settings.NestSettingsScreen
 import app.pigeonsms.ui.settings.NotificationSettingsScreen
 import app.pigeonsms.ui.forum.ForumScreen
+import app.pigeonsms.ui.search.SearchScreen
 import app.pigeonsms.ui.spaces.NestChannelsScreen
 import app.pigeonsms.ui.spaces.SpacesScreen
 import app.pigeonsms.ui.util.Avatar
@@ -270,6 +272,7 @@ fun AppShell(session: LocalSession) {
                     onPrivacy = { nav.navigate("privacy") },
                     onNotifications = { nav.navigate("notifications") },
                     onNests = { nav.navigate("nestsettings") },
+                    onAbout = { nav.navigate("about") },
                     onSignOut = { app.viewModelScopeSignOut() },
                 )
             }
@@ -319,6 +322,16 @@ fun AppShell(session: LocalSession) {
             composable("privacy") { PrivacyScreen(username = session.username, onBack = { nav.popBackStack() }, onBlocked = { nav.navigate("blocked") }) }
             composable("notifications") { NotificationSettingsScreen(onBack = { nav.popBackStack() }) }
             composable("nestsettings") { NestSettingsScreen(app, onBack = { nav.popBackStack() }) }
+            composable("about") {
+                AboutScreen(username = session.username, onBack = { nav.popBackStack() })
+            }
+            composable("search") {
+                SearchScreen(
+                    onBack = { nav.popBackStack() },
+                    onOpenChat = { ch, name -> nav.navigate("chat/$ch/${enc(name)}") },
+                    onOpenProfile = { id -> nav.navigate("profile/$id") },
+                )
+            }
         }
         }
         }
@@ -487,7 +500,7 @@ private fun BottomBar(current: String, profileName: String, profileAvatar: Any?,
 @Composable
 private fun NavPill(tab: Tab, selected: Boolean, profileName: String, profileAvatar: Any?, badgeCount: Int, onSelect: () -> Unit) {
     val glass = LocalLiquidGlass.current
-    val haptics = androidx.compose.ui.platform.LocalHapticFeedback.current
+    val haptics = app.pigeonsms.ui.util.rememberReducedHaptics()
     val bg by animateColorAsState(
         if (selected) MaterialTheme.colorScheme.primary else Color.Transparent,
         PigeonMotion.snappy(), label = "navPillBg",
@@ -509,7 +522,7 @@ private fun NavPill(tab: Tab, selected: Boolean, profileName: String, profileAva
                 indication = ripple(bounded = true),
                 role = Role.Tab,
                 onClick = {
-                    if (!selected) haptics.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+                    if (!selected) haptics.tap()
                     onSelect()
                 },
             )

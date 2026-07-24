@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { ApiError } from '../middleware/errors';
 import { requireAuth } from '../middleware/auth';
-import { assertChannelAccess, bumpSeq, channelRecipients, fanout, releaseSeq } from '../lib/channels';
+import { assertChannelAccess, bumpSeq, channelRecipients, fanout, releaseSeq, type ChannelRow, type WaitUntilCtx } from '../lib/channels';
 import { snowflake } from '../lib/ids';
 import { assertOwnedAttachment, type AttachmentInput } from '../lib/media';
 import { autocompleteMentions, resolveMentions, type ResolvedMention } from '../lib/mentions';
@@ -16,12 +16,15 @@ import {
 } from '../lib/messageFeatures';
 import { messageNotificationPlan, storeMessageNotifications } from '../lib/notifications';
 import { normalizeReactionEmoji } from '../lib/social';
+import { enforceRateLimit } from '../middleware/ratelimit';
 import type { AppEnv, AuthedUser, Env } from '../types';
 
 const messages = new Hono<AppEnv>();
 // scoped: this router mounts at '/', a bare use() would guard the whole app
 messages.use('/channels/*', requireAuth);
 messages.use('/messages/*', requireAuth);
+messages.use('/scheduled', requireAuth);
+messages.use('/scheduled/*', requireAuth);
 
 const MAX_CONTENT = 4000;
 
@@ -45,7 +48,15 @@ export interface MessageRow {
   thread_id: string | null;
   forum_tag_id: string | null;
   marked_at: number | null;
+  // v2.8.0 — disappearing messages (null = never expires) + E2EE flag (1 = content
+  // is base64 ciphertext the server never decrypts). Optional on the type so old
+  // callers building rows without them still compile.
+  expires_at?: number | null;
+  encrypted?: number;
 }
+
+/** SQL fragment: excludes messages whose disappearing TTL has elapsed. */
+const NOT_EXPIRED = '(expires_at IS NULL OR expires_at >= ?)';
 
 /**
  * Serialize a page of messages with authors, reactions, and (admin) revisions.
@@ -127,9 +138,10 @@ export async function serializeMessages(
                 m.attachment_name, m.attachment_type, m.deleted_at,
                 u.username, u.display_name
          FROM messages m LEFT JOIN users u ON u.id = m.author_id
-         WHERE m.id IN (${ph(replyIds.length)})`,
+         WHERE m.id IN (${ph(replyIds.length)})
+           AND (m.expires_at IS NULL OR m.expires_at >= ?)`,
       )
-        .bind(...replyIds)
+        .bind(...replyIds, Date.now())
         .all<{
           id: string; channel_id: string; author_id: string; content: string; kind: string;
           attachment_key: string | null; attachment_name: string | null; attachment_type: string | null;
@@ -280,6 +292,9 @@ export async function serializeMessages(
       created_at: m.created_at,
       edited_at: m.edited_at,
       deleted,
+      // v2.8.0 disappearing/E2EE surface (undefined for legacy rows so the DTO stays lean)
+      expires_at: m.expires_at ?? null,
+      encrypted: (m.encrypted ?? 0) === 1,
       reactions: reactions.get(m.id) ?? [],
       poll: polls.get(m.id) ?? null,
       revisions: isAdmin ? (revisions.get(m.id) ?? []) : undefined,
@@ -294,8 +309,10 @@ export async function serializeMessages(
 }
 
 async function loadMessage(c: Context<AppEnv>, id: string): Promise<MessageRow> {
-  const row = await c.env.DB.prepare('SELECT * FROM messages WHERE id = ?')
-    .bind(id)
+  // Expired disappearing messages read as gone (404) — the cron sweeper soft-deletes
+  // them shortly after, but reads must not surface them in the interim window.
+  const row = await c.env.DB.prepare(`SELECT * FROM messages WHERE id = ? AND ${NOT_EXPIRED}`)
+    .bind(id, Date.now())
     .first<MessageRow>();
   if (!row) throw new ApiError(404, 'not_found', 'no such message');
   return row;
@@ -373,24 +390,25 @@ messages.get('/channels/:id/messages', async (c) => {
   }
   const limit = Math.min(100, Math.max(1, parseInt(c.req.query('limit') ?? '50', 10) || 50));
 
+  const now = Date.now();
   let rows: MessageRow[];
   if (Number.isInteger(after)) {
     rows = (
       await c.env.DB.prepare(
-        `SELECT * FROM messages WHERE channel_id = ? AND seq > ?
+        `SELECT * FROM messages WHERE channel_id = ? AND seq > ? AND ${NOT_EXPIRED}
          ORDER BY seq ASC LIMIT ?`,
       )
-        .bind(channel.id, after, limit)
+        .bind(channel.id, after, now, limit)
         .all<MessageRow>()
     ).results;
   } else {
     rows = (
       await c.env.DB.prepare(
-        `SELECT * FROM messages WHERE channel_id = ?
+        `SELECT * FROM messages WHERE channel_id = ? AND ${NOT_EXPIRED}
          ${Number.isInteger(before) ? 'AND seq < ?' : ''}
          ORDER BY seq DESC LIMIT ?`,
       )
-        .bind(...(Number.isInteger(before) ? [channel.id, before, limit] : [channel.id, limit]))
+        .bind(...(Number.isInteger(before) ? [channel.id, now, before, limit] : [channel.id, now, limit]))
         .all<MessageRow>()
     ).results.reverse();
   }
@@ -445,12 +463,23 @@ messages.get('/channels/:id/mentions', async (c) => {
 messages.post('/channels/:id/messages', async (c) => {
   const user = c.get('user') as AuthedUser;
   const channel = await assertChannelAccess(c.env, user.id, c.req.param('id'));
+  // Per-endpoint message rate limit, keyed per sender+channel so one hot channel
+  // can't starve a user's other conversations.
+  await enforceRateLimit(c.env.RL_GENERAL, `msg:${user.id}:${channel.id}`);
   const body = await c.req.json<Record<string, unknown>>().catch(() => {
     throw new ApiError(400, 'bad_json', 'body must be json');
   });
 
   let content = String(body['content'] ?? '').slice(0, MAX_CONTENT);
   const kind = normalizeMessageKind(body['kind']);
+  // v2.8.0 send options. ttl (seconds) -> disappearing; send_at (epoch ms in the
+  // future) -> schedule instead of send now; encrypted (0/1) -> content is E2EE
+  // ciphertext stored verbatim, never decrypted server-side.
+  const ttl = Number(body['ttl']);
+  const ttlMs = Number.isFinite(ttl) && ttl > 0 ? Math.floor(ttl) * 1000 : null;
+  const sendAtRaw = Number(body['send_at']);
+  const sendAt = Number.isFinite(sendAtRaw) && sendAtRaw > 0 ? Math.floor(sendAtRaw) : null;
+  const encrypted = body['encrypted'] === 1 || body['encrypted'] === '1' || body['encrypted'] === true;
   if (channel.kind === 'forum') {
     throw new ApiError(400, 'forum_endpoint_required', 'use the forum post and reply endpoints');
   }
@@ -492,6 +521,54 @@ messages.post('/channels/:id/messages', async (c) => {
   }
 
   const nonce = body['nonce'] ? String(body['nonce']).slice(0, 64) : null;
+
+  // Scheduled send: a future send_at means we stash the payload and return without
+  // fanning out. The cron scheduled() handler dispatches it through the normal send
+  // path once send_at <= now. Validation above (blocks, content, attachment) has
+  // already run so we reject bad payloads at schedule time, not dispatch time.
+  if (sendAt !== null && sendAt > Date.now()) {
+    // scheduled_messages (migration 0008) persists only content/metadata/nonce/
+    // encrypted/send_at — it has NO columns for attachment, poll, reply target,
+    // rich kinds or ttl. Rather than silently drop them at dispatch, refuse to
+    // schedule anything but plain (or encrypted-plain) text here. Metadata is not
+    // stored for a plain-text message, so it too must be absent.
+    if (
+      attachment !== null ||
+      poll !== null ||
+      (body['reply_to'] !== undefined && body['reply_to'] !== null && body['reply_to'] !== '') ||
+      kind !== 'text' ||
+      ttlMs !== null
+    ) {
+      throw new ApiError(
+        400,
+        'unsupported_scheduled',
+        'only plain text messages can be scheduled — no attachments, polls, replies, ttl, or rich kinds',
+      );
+    }
+    const scheduledId = snowflake();
+    const scheduledNow = Date.now();
+    await c.env.DB.prepare(
+      `INSERT INTO scheduled_messages
+        (id, channel_id, author_id, content, metadata, nonce, encrypted, send_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+      .bind(
+        scheduledId, channel.id, user.id, content,
+        metadata ? JSON.stringify(metadata) : null, nonce, encrypted ? 1 : 0,
+        sendAt, scheduledNow,
+      )
+      .run();
+    return c.json({
+      scheduled: {
+        id: scheduledId,
+        channel_id: channel.id,
+        content,
+        send_at: sendAt,
+        created_at: scheduledNow,
+      },
+    }, 202);
+  }
+
   if (nonce) {
     const dupe = await c.env.DB.prepare(
       'SELECT * FROM messages WHERE channel_id = ? AND author_id = ? AND nonce = ?',
@@ -512,15 +589,60 @@ messages.post('/channels/:id/messages', async (c) => {
     }
     if (reply.deleted_at !== null) throw new ApiError(400, 'bad_reply', 'reply target is deleted');
   }
-  const mentions = await resolveMentions(c.env, channel, user, content);
+  const serialized = await deliverMessage(c.env, c.executionCtx, channel, user, {
+    content,
+    replyTo,
+    threadId: reply?.thread_id ?? null,
+    nonce,
+    attachment,
+    kind,
+    metadata,
+    poll,
+    ttlMs,
+    encrypted,
+  });
 
-  const seq = await bumpSeq(c.env, channel.id);
+  return c.json({ message: serialized }, 201);
+});
+
+/**
+ * Context-free message-delivery core: seq alloc + insert (message/poll/mentions)
+ * + fanout + FCM. Runs on `(env, executionCtx)` so both the HTTP send handler and
+ * the cron scheduled-message dispatcher drive the exact same delivery — no drift.
+ * Callers are responsible for auth, validation, blocks, nonce dedup and reply
+ * validation before calling; this only persists + broadcasts the resolved payload.
+ * Returns the viewer-neutral serialized message.
+ */
+export interface MessageDeliveryInput {
+  content: string;
+  replyTo: string | null;
+  threadId: string | null;
+  nonce: string | null;
+  attachment: AttachmentInput | null;
+  kind: MessageKind;
+  metadata: Record<string, unknown> | null;
+  poll: PollInput | null;
+  ttlMs: number | null;
+  encrypted: boolean;
+}
+
+export async function deliverMessage(
+  env: Env,
+  executionCtx: WaitUntilCtx,
+  channel: ChannelRow,
+  author: AuthedUser,
+  input: MessageDeliveryInput,
+): Promise<Record<string, unknown>> {
+  const { content, replyTo, threadId, nonce, attachment, kind, metadata, poll, ttlMs, encrypted } = input;
+  const mentions = await resolveMentions(env, channel, author, content);
+
+  const seq = await bumpSeq(env, channel.id);
   const now = Date.now();
   const row: MessageRow = {
     id: snowflake(),
     channel_id: channel.id,
     seq,
-    author_id: user.id,
+    author_id: author.id,
     content,
     reply_to: replyTo,
     nonce,
@@ -533,69 +655,80 @@ messages.post('/channels/:id/messages', async (c) => {
     deleted_at: null,
     kind,
     metadata: metadata ? JSON.stringify(metadata) : null,
-    thread_id: reply?.thread_id ?? null,
+    thread_id: threadId,
     forum_tag_id: null,
     marked_at: null,
+    expires_at: ttlMs !== null ? now + ttlMs : null,
+    encrypted: encrypted ? 1 : 0,
   };
   const statements = [
-    c.env.DB.prepare(
+    env.DB.prepare(
       `INSERT INTO messages (id, channel_id, seq, author_id, content, reply_to, nonce,
         attachment_key, attachment_name, attachment_type, attachment_size, created_at,
-        kind, metadata, thread_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        kind, metadata, thread_id, expires_at, encrypted)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(
       row.id, row.channel_id, row.seq, row.author_id, row.content, row.reply_to, row.nonce,
       row.attachment_key, row.attachment_name, row.attachment_type, row.attachment_size, row.created_at,
-      row.kind, row.metadata, row.thread_id,
+      row.kind, row.metadata, row.thread_id, row.expires_at ?? null, row.encrypted ?? 0,
     ),
   ];
   if (poll) {
     statements.push(
-      c.env.DB.prepare(
+      env.DB.prepare(
         `INSERT INTO polls (message_id, question, anonymous, multiple_choice, created_at)
          VALUES (?, ?, ?, 0, ?)`,
       ).bind(row.id, poll.question, poll.anonymous ? 1 : 0, now),
-      ...poll.options.map((option, position) => c.env.DB.prepare(
+      ...poll.options.map((option, position) => env.DB.prepare(
         'INSERT INTO poll_options (id, message_id, position, text) VALUES (?, ?, ?, ?)',
       ).bind(snowflake(), row.id, position, option)),
     );
   }
-  statements.push(...mentions.map((mention) => c.env.DB.prepare(
+  statements.push(...mentions.map((mention) => env.DB.prepare(
     `INSERT OR IGNORE INTO message_mentions (message_id, user_id, kind, created_at)
      VALUES (?, ?, ?, ?)`,
   ).bind(row.id, mention.userId, mention.kind, now)));
   try {
     // seq was allocated by bumpSeq in a separate statement; if the insert batch
     // fails, hand the number back so it doesn't burn a permanent gap.
-    await c.env.DB.batch(statements);
+    await env.DB.batch(statements);
   } catch (err) {
-    await releaseSeq(c.env, channel.id, seq);
+    await releaseSeq(env, channel.id, seq);
     throw err;
   }
 
-  const serialized = (await serializeMessages(c.env, [row], user.id, false))[0];
-  const recipients = await channelRecipients(c.env, channel);
-  const plan = await messageNotificationPlan(c, channel, user, row.id, content);
+  // Viewer-neutral copy: fanout reaches many recipients, so no `me` flags baked in.
+  // Exactly one row in -> exactly one serialized row out; `?? {}` only satisfies
+  // the optional-index type.
+  const serialized = (await serializeMessages(env, [row], null, false))[0] ?? {};
+  const recipients = await channelRecipients(env, channel);
+  // E2EE: never feed ciphertext to the notification preview. Persist + push a
+  // generic body; fanout's `encrypted` flag enforces the same on the queued push.
+  const plan = await messageNotificationPlan(
+    env, channel, author, row.id, encrypted ? 'sent a message' : content,
+  );
   await storeMessageNotifications(
-    c,
+    env,
     channel,
-    user,
+    author,
     row.id,
     recipients,
     new Map(mentions.map((mention) => [mention.userId, mention.kind])),
     plan,
   );
   const mentionIds = mentions.map((mention) => mention.userId);
-  fanout(c, recipients, { t: 'message.new', d: serialized }, {
+  fanout(env, executionCtx, recipients, { t: 'message.new', d: serialized }, {
     // Include the sender's gateway so their other devices converge immediately.
     // Mentioned users are pushed by the mention fanout below instead.
-    suppressPushFor: [user.id, ...mentionIds],
+    suppressPushFor: [author.id, ...mentionIds],
     push: plan.push,
+    encrypted,
   });
   if (mentionIds.length) {
-    fanout(c, mentionIds, { t: 'mention.new', d: serialized }, {
-      suppressPushFor: [user.id],
+    fanout(env, executionCtx, mentionIds, { t: 'mention.new', d: serialized }, {
+      suppressPushFor: [author.id],
       mentionOnly: true,
+      encrypted,
       push: {
         ...plan.push,
         data: { ...plan.push.data, mention: '1' },
@@ -603,8 +736,8 @@ messages.post('/channels/:id/messages', async (c) => {
     });
   }
 
-  return c.json({ message: serialized }, 201);
-});
+  return serialized;
+}
 
 /** PATCH /messages/:id { content } — author only, old content kept as a revision. */
 messages.patch('/messages/:id', async (c) => {
@@ -656,10 +789,10 @@ messages.patch('/messages/:id', async (c) => {
   ]);
   fanout(c, await channelRecipients(c.env, channel), { t: 'message.edit', d: broadcast });
   if (mentions.length) {
-    const plan = await messageNotificationPlan(c, channel, user, row.id, content);
+    const plan = await messageNotificationPlan(c.env, channel, user, row.id, content);
     const recipients = mentions.map((mention) => mention.userId);
     await storeMessageNotifications(
-      c,
+      c.env,
       channel,
       user,
       row.id,
@@ -891,9 +1024,11 @@ messages.get('/channels/:id/pins', async (c) => {
   const rows = (
     await c.env.DB.prepare(
       `SELECT m.* FROM pins p JOIN messages m ON m.id = p.message_id
-       WHERE p.channel_id = ? AND m.deleted_at IS NULL ORDER BY p.created_at DESC LIMIT 50`,
+       WHERE p.channel_id = ? AND m.deleted_at IS NULL
+         AND (m.expires_at IS NULL OR m.expires_at >= ?)
+       ORDER BY p.created_at DESC LIMIT 50`,
     )
-      .bind(channel.id)
+      .bind(channel.id, Date.now())
       .all<MessageRow>()
   ).results;
   return c.json({ messages: await serializeMessages(c.env, rows, user.id, user.isAdmin) });
@@ -1111,9 +1246,9 @@ async function createForumMessage(
 
   const serialized = (await serializeMessages(c.env, [row], user.id, user.isAdmin))[0];
   const recipients = await channelRecipients(c.env, channel);
-  const plan = await messageNotificationPlan(c, channel, user, row.id, content || String(metadata?.['title'] ?? 'Forum post'));
+  const plan = await messageNotificationPlan(c.env, channel, user, row.id, content || String(metadata?.['title'] ?? 'Forum post'));
   await storeMessageNotifications(
-    c, channel, user, row.id, recipients,
+    c.env, channel, user, row.id, recipients,
     new Map(mentions.map((mention) => [mention.userId, mention.kind])), plan,
   );
   const mentionIds = mentions.map((mention) => mention.userId);
@@ -1179,16 +1314,21 @@ messages.get('/channels/:id/forum/posts', async (c) => {
          SELECT id FROM forum_tags WHERE channel_id = ? AND (id = ? OR lower(name) = lower(?))
        )`
     : '';
+  const now = Date.now();
+  // Params in SQL order: r.expires_at (JOIN), p.channel_id, p.expires_at,
+  // [tag subquery: channel.id, tagFilter, tagFilter], limit.
   const bindings: unknown[] = tagFilter
-    ? [channel.id, channel.id, tagFilter, tagFilter, limit]
-    : [channel.id, limit];
+    ? [now, channel.id, now, channel.id, tagFilter, tagFilter, limit]
+    : [now, channel.id, now, limit];
   const rows = (
     await c.env.DB.prepare(
       `SELECT p.*, COUNT(r.id) AS reply_count,
               COALESCE(MAX(r.created_at), p.created_at) AS last_activity_at
        FROM messages p LEFT JOIN messages r
          ON r.thread_id = p.id AND r.kind = 'forum_reply' AND r.deleted_at IS NULL
-       WHERE p.channel_id = ? AND p.kind = 'forum_post' AND p.deleted_at IS NULL ${tagClause}
+            AND (r.expires_at IS NULL OR r.expires_at >= ?)
+       WHERE p.channel_id = ? AND p.kind = 'forum_post' AND p.deleted_at IS NULL
+         AND (p.expires_at IS NULL OR p.expires_at >= ?) ${tagClause}
        GROUP BY p.id ORDER BY ${order} LIMIT ?`,
     )
       .bind(...bindings)
@@ -1217,9 +1357,9 @@ messages.get('/channels/:id/forum/posts/:postId', async (c) => {
   const replies = (
     await c.env.DB.prepare(
       `SELECT * FROM messages WHERE channel_id = ? AND thread_id = ? AND kind = 'forum_reply'
-       AND seq > ? ORDER BY seq ASC LIMIT ?`,
+       AND seq > ? AND ${NOT_EXPIRED} ORDER BY seq ASC LIMIT ?`,
     )
-      .bind(channel.id, root.id, after, limit)
+      .bind(channel.id, root.id, after, Date.now(), limit)
       .all<MessageRow>()
   ).results;
   return c.json({
@@ -1379,10 +1519,11 @@ messages.get('/channels/:id/search', async (c) => {
   const deletedFilter = user.isAdmin ? '' : 'AND deleted_at IS NULL';
   const rows = (
     await c.env.DB.prepare(
-      `SELECT * FROM messages WHERE channel_id = ? AND content LIKE ? ESCAPE '\\' ${deletedFilter}
+      `SELECT * FROM messages WHERE channel_id = ? AND content LIKE ? ESCAPE '\\'
+       AND ${NOT_EXPIRED} ${deletedFilter}
        ORDER BY seq DESC LIMIT 25`,
     )
-      .bind(channel.id, `%${q.replaceAll('\\', '\\\\').replaceAll('%', '\\%').replaceAll('_', '\\_')}%`)
+      .bind(channel.id, `%${q.replaceAll('\\', '\\\\').replaceAll('%', '\\%').replaceAll('_', '\\_')}%`, Date.now())
       .all<MessageRow>()
   ).results;
   return c.json({ messages: await serializeMessages(c.env, rows, user.id, user.isAdmin) });
@@ -1423,5 +1564,123 @@ messages.put('/channels/:id/read', async (c) => {
   }
   return c.json({ ok: true });
 });
+
+/** GET /scheduled — the caller's pending scheduled messages, soonest first. */
+messages.get('/scheduled', async (c) => {
+  const user = c.get('user') as AuthedUser;
+  const rows = (
+    await c.env.DB.prepare(
+      `SELECT id, channel_id, content, send_at, created_at
+       FROM scheduled_messages WHERE author_id = ? ORDER BY send_at ASC LIMIT 100`,
+    )
+      .bind(user.id)
+      .all<{ id: string; channel_id: string; content: string; send_at: number; created_at: number }>()
+  ).results;
+  return c.json({ scheduled: rows });
+});
+
+/** DELETE /scheduled/:id — cancel one of the caller's own scheduled messages. */
+messages.delete('/scheduled/:id', async (c) => {
+  const user = c.get('user') as AuthedUser;
+  const result = await c.env.DB.prepare(
+    'DELETE FROM scheduled_messages WHERE id = ? AND author_id = ?',
+  )
+    .bind(c.req.param('id'), user.id)
+    .run();
+  if (result.meta.changes === 0) throw new ApiError(404, 'not_found', 'no such scheduled message');
+  return c.json({ ok: true });
+});
+
+// ---------------------------------------------------------------------------
+// Cron sweeps (driven by index.ts scheduled()). Both are context-free: they run
+// on (env, ctx) only — no Hono Context — and reuse the same delivery/serialize
+// paths the HTTP handlers use, so behavior can't drift between them.
+// ---------------------------------------------------------------------------
+
+/**
+ * Soft-delete every disappearing message whose TTL has elapsed. Reads already
+ * exclude expired rows (NOT_EXPIRED filter on every query), so clients never see
+ * them in the interim; this just makes the tombstone durable. A single bulk
+ * UPDATE keeps it cheap. Live tombstone fanout is intentionally omitted — clients
+ * exclude expired rows on read/sync, so no gateway event is required.
+ */
+export async function softDeleteExpiredMessages(env: Env, _ctx: ExecutionContext): Promise<void> {
+  const now = Date.now();
+  await env.DB.prepare(
+    'UPDATE messages SET deleted_at = ? WHERE expires_at IS NOT NULL AND expires_at < ? AND deleted_at IS NULL',
+  )
+    .bind(now, now)
+    .run();
+}
+
+/**
+ * Dispatch every scheduled_messages row whose send_at has passed through the
+ * shared deliverMessage core, then delete the row. Each row is wrapped so one
+ * failure never aborts the batch; a row that throws is deleted and logged rather
+ * than retried forever (no dead-loop). Deleting only after a successful dispatch
+ * guards against the row being picked up twice, and the DELETE-guarded change
+ * count means a concurrent tick can't double-send the same row.
+ */
+export async function dispatchDueScheduledMessages(env: Env, ctx: ExecutionContext): Promise<void> {
+  const now = Date.now();
+  const due = (
+    await env.DB.prepare(
+      `SELECT id, channel_id, author_id, content, metadata, nonce, encrypted, send_at
+       FROM scheduled_messages WHERE send_at <= ? ORDER BY send_at ASC LIMIT 100`,
+    )
+      .bind(now)
+      .all<{
+        id: string; channel_id: string; author_id: string; content: string;
+        metadata: string | null; nonce: string | null; encrypted: number; send_at: number;
+      }>()
+  ).results;
+
+  for (const row of due) {
+    // Claim the row first: DELETE returns changes>0 only for the tick that wins,
+    // so a concurrent cron invocation can never dispatch the same row twice.
+    const claimed = await env.DB.prepare('DELETE FROM scheduled_messages WHERE id = ?')
+      .bind(row.id)
+      .run();
+    if (claimed.meta.changes === 0) continue;
+    try {
+      // Author must still be a member of a live channel; assertChannelAccess throws
+      // (404/403) otherwise and we simply drop the message (row is already deleted).
+      const channel = await assertChannelAccess(env, row.author_id, row.channel_id);
+      const author = await env.DB.prepare(
+        'SELECT id, username, email, display_name FROM users WHERE id = ? AND deleted_at IS NULL',
+      )
+        .bind(row.author_id)
+        .first<{ id: string; username: string; email: string; display_name: string | null }>();
+      if (!author) continue;
+      const authedUser: AuthedUser = {
+        id: author.id,
+        username: author.username,
+        email: author.email,
+        displayName: author.display_name,
+        // Mirrors the auth middleware: admin status is derived from the username.
+        isAdmin: author.username === 'admin',
+      };
+      // Only plain (or encrypted-plain) text is ever scheduled — the schedule-time
+      // guard rejects attachments/polls/replies/ttl/rich kinds — so we reconstruct
+      // a minimal delivery input from the persisted columns.
+      await deliverMessage(env, ctx, channel, authedUser, {
+        content: row.content,
+        replyTo: null,
+        threadId: null,
+        nonce: row.nonce,
+        attachment: null,
+        kind: 'text',
+        metadata: null,
+        poll: null,
+        ttlMs: null,
+        encrypted: row.encrypted === 1,
+      });
+    } catch (err) {
+      // Row is already deleted, so this is not retried — log and move on so one
+      // bad row can't stall the rest of the batch.
+      console.error('cron: scheduled message dispatch failed', { id: row.id, err });
+    }
+  }
+}
 
 export default messages;
