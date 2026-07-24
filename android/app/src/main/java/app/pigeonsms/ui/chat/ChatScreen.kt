@@ -671,8 +671,9 @@ fun ChatScreen(
             mediaUrl = vm::mediaUrl,
             onCreatePoll = { showCreatePoll = true },
             onCreateEvent = { showCreateEvent = true },
-            // E2EE toggle is gated on the beta flag (default off) — flag owned by the data agent
-            e2eeEnabled = themePrefs.e2ee,
+            // E2EE ships flag-off/experimental for 2.8.0 and there's no user-facing
+            // toggle in ThemePrefs yet, so the composer's encrypt affordance stays off.
+            e2eeEnabled = false,
         )
         }
     }
@@ -1729,11 +1730,13 @@ private fun MessageBubble(
                 }
 
                 // encrypted-lock + disappearing-countdown indicators, aligned to the
-                // bubble's sending side. Rendered for both own and others' messages
-                // (they are properties of the message, not the viewer).
+                // bubble's sending side. MessageEntity doesn't yet surface encrypted/
+                // expiresAt (E2EE is flag-off and disappearing TTL is enforced
+                // server-side for 2.8.0), so this degrades to a no-op until those
+                // fields land on the cached message. The row self-guards on defaults.
                 MessageSecurityRow(
-                    encrypted = message.encrypted,
-                    expiresAt = message.expiresAt,
+                    encrypted = false,
+                    expiresAt = null,
                     self = self,
                 )
 
