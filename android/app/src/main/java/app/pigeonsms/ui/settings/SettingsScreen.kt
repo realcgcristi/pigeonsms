@@ -755,6 +755,8 @@ fun PrivacyScreen(username: String, onBack: () -> Unit, onBlocked: () -> Unit) {
             ToggleRow("read receipts", prefs.readReceipts, vm::setReadReceipts)
             ToggleDivider()
             ToggleRow("invisible mode", prefs.invisible, vm::setInvisible)
+            ToggleDivider()
+            ToggleRow("end-to-end encryption", "experimental — encrypts your DMs", prefs.e2ee, vm::setE2ee)
         }
         Spacer(Modifier.height(Spacing.l))
         GroupCard {

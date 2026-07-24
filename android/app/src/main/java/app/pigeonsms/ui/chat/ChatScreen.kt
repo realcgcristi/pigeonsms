@@ -671,9 +671,10 @@ fun ChatScreen(
             mediaUrl = vm::mediaUrl,
             onCreatePoll = { showCreatePoll = true },
             onCreateEvent = { showCreateEvent = true },
-            // E2EE ships flag-off/experimental for 2.8.0 and there's no user-facing
-            // toggle in ThemePrefs yet, so the composer's encrypt affordance stays off.
-            e2eeEnabled = false,
+            // E2EE (experimental): the composer's encrypt affordance is offered only for
+            // DMs (never spaces/forums) and only when the user's `e2ee` pref is on. The
+            // repository still verifies keys are established before actually encrypting.
+            e2eeEnabled = themePrefs.e2ee && !isSpace,
         )
         }
     }
@@ -2696,11 +2697,14 @@ private fun Composer(
     var ttlSeconds by rememberSaveable { mutableStateOf<Long?>(null) }
     // schedule-send timestamp in epoch ms (null = send immediately)
     var scheduledAt by rememberSaveable { mutableStateOf<Long?>(null) }
-    // per-message E2EE flag; only ever settable when the beta flag is on
+    // per-message E2EE flag; only ever settable when the e2ee pref is on (DMs only).
     var encryptOn by rememberSaveable { mutableStateOf(false) }
     var showScheduleDialog by remember { mutableStateOf(false) }
-    // encrypt can never linger on once the flag is turned off
-    LaunchedEffect(e2eeEnabled) { if (!e2eeEnabled) encryptOn = false }
+    // E2EE defaults ON for DMs when the pref is on (owner's test build): sync encryptOn to
+    // availability — on when the affordance appears, and force off when it goes away so it
+    // can never linger for a space channel or after the pref is turned off. The user can
+    // still toggle it off per message via the composer's encrypt button.
+    LaunchedEffect(e2eeEnabled) { encryptOn = e2eeEnabled }
     // Recent device gallery items surfaced inside the attachment sheet.
     val recentMedia = remember { mutableStateListOf<RecentMediaItem>() }
     // An image currently sitting on the clipboard, if any — drives a "paste image" affordance.

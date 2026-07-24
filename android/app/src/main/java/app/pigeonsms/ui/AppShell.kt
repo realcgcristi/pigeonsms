@@ -121,8 +121,15 @@ fun AppShell(session: LocalSession) {
             session.token,
         )
     }
+    val e2eeBootstrapContext = androidx.compose.ui.platform.LocalContext.current
     LaunchedEffect(session.userId, session.token) {
         app.activateSession(session.userId, session.token)
+        // Publish this device's E2EE identity key now that we're authenticated, so DM
+        // peers can wrap keys to it. Idempotent + non-fatal (see AppContainer).
+        runCatching {
+            (e2eeBootstrapContext.applicationContext as app.pigeonsms.PigeonApp)
+                .container.bootstrapE2ee()
+        }
     }
 
     // Push: ask for the notification permission once, then hand the FCM token to

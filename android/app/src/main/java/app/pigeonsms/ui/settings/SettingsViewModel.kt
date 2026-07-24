@@ -32,6 +32,7 @@ class SettingsViewModel(private val auth: AuthRepository, val theme: ThemeStore)
     fun setReducedMotion(v: Boolean) = viewModelScope.launch { theme.setReducedMotion(v) }
     fun setReadReceipts(v: Boolean) = viewModelScope.launch { theme.setReadReceipts(v) }
     fun setInvisible(v: Boolean) = viewModelScope.launch { theme.setInvisible(v) }
+    fun setE2ee(v: Boolean) = viewModelScope.launch { theme.setE2ee(v) }
     fun setWallpaper(key: String?) = viewModelScope.launch { theme.setWallpaper(key) }
     fun setWallpaperDim(v: Float) = viewModelScope.launch { theme.setWallpaperDim(v) }
     fun setLiquidGlass(v: Boolean) = viewModelScope.launch { theme.setLiquidGlass(v) }
