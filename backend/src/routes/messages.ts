@@ -545,6 +545,37 @@ messages.post('/channels/:id/messages', async (c) => {
         'only plain text messages can be scheduled — no attachments, polls, replies, ttl, or rich kinds',
       );
     }
+    // Nonce dedup (belt-and-suspenders): a stray outbox retry with the same nonce must
+    // not insert a second scheduled row. The scheduled_messages branch returns before the
+    // normal-path dedup below, so mirror it here — check both an already-scheduled row and
+    // an already-delivered message (in case the earlier attempt raced past scheduling).
+    if (nonce) {
+      const dupeScheduled = await c.env.DB.prepare(
+        'SELECT * FROM scheduled_messages WHERE channel_id = ? AND author_id = ? AND nonce = ?',
+      )
+        .bind(channel.id, user.id, nonce)
+        .first<{ id: string; channel_id: string; content: string; send_at: number; created_at: number }>();
+      if (dupeScheduled) {
+        return c.json({
+          scheduled: {
+            id: dupeScheduled.id,
+            channel_id: dupeScheduled.channel_id,
+            content: dupeScheduled.content,
+            send_at: dupeScheduled.send_at,
+            created_at: dupeScheduled.created_at,
+          },
+        }, 202);
+      }
+      const dupeMessage = await c.env.DB.prepare(
+        'SELECT * FROM messages WHERE channel_id = ? AND author_id = ? AND nonce = ?',
+      )
+        .bind(channel.id, user.id, nonce)
+        .first<MessageRow>();
+      if (dupeMessage) {
+        return c.json({ message: (await serializeMessages(c.env, [dupeMessage], user.id, user.isAdmin))[0] });
+      }
+    }
+
     const scheduledId = snowflake();
     const scheduledNow = Date.now();
     await c.env.DB.prepare(

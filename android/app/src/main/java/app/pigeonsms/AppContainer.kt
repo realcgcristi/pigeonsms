@@ -57,7 +57,7 @@ class AppContainer(context: Context) {
         if (deviceBootstrapped) return
         val loggedIn = runCatching { sessionStore.session.first() != null }.getOrDefault(false)
         if (!loggedIn) return
-        val e2eeOn = runCatching { themeStore.prefs.first().e2ee }.getOrDefault(true)
+        val e2eeOn = runCatching { themeStore.prefs.first().e2ee }.getOrDefault(false)
         if (!e2eeOn) return
         runCatching {
             kotlinx.coroutines.withContext(Dispatchers.IO) { e2eeManager.publishDevice() }

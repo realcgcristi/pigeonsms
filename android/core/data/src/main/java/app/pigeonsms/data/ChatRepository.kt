@@ -15,6 +15,7 @@ import app.pigeonsms.network.PollOptionCountDto
 import app.pigeonsms.network.ReactionDto
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.decodeFromString
@@ -55,6 +56,15 @@ class ChatRepository(
     private val reactionMutex = Mutex()
     private val pollMutex = Mutex()
     private val flushMutex = Mutex()
+
+    /**
+     * Long-lived scope for fire-and-forget E2EE key-exchange kicked off from [send]. Using
+     * a repo-owned SupervisorJob (not the caller's) means the composer coroutine returns
+     * immediately and a failing exchange can't cancel or fail the send. Best-effort only.
+     */
+    private val repoScope = kotlinx.coroutines.CoroutineScope(
+        kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO,
+    )
 
     /**
      * DM channels whose E2EE session (DM key exchanged + ratchet seeded) is established
@@ -195,13 +205,22 @@ class ChatRepository(
         val nonce = "${System.currentTimeMillis()}-${(0..9999).random()}"
         val now = System.currentTimeMillis()
         // E2EE hook (EXPERIMENTAL): encrypt only for DMs, only when the flag is on and the
-        // manager is present. ensureE2eeSession does the key exchange (idempotent, best
-        // effort) and returns false on any failure; encrypt itself is also wrapped so a
-        // failure at ANY step degrades to a plaintext send rather than dropping the
-        // message. We NEVER encrypt space/forum messages (isDm gates that).
+        // manager is present. CRITICAL: never run the key exchange (ensureE2eeSession does
+        // blocking network round-trips) on the send path — that stalled/failed sends in
+        // 2.8.0. Only encrypt when the session is ALREADY established for this channel;
+        // otherwise send PLAINTEXT immediately and kick off the exchange in the background
+        // (fire-and-forget) so a LATER message in this DM can encrypt. Every E2EE call is
+        // wrapped so ANY failure degrades to plaintext — a send NEVER fails because of
+        // E2EE. We NEVER encrypt space/forum messages (isDm gates that).
         val mgr = e2ee
-        val cipher = if (e2eeEnabled && isDm && mgr != null && ensureE2eeSession(channelId, mgr)) {
-            runCatching { mgr.encrypt(channelId, content) }.getOrNull()
+        val cipher = if (e2eeEnabled && isDm && mgr != null) {
+            if (channelId in establishedSessions) {
+                runCatching { mgr.encrypt(channelId, content) }.getOrNull()
+            } else {
+                // Not established yet: don't block. Establish in the background for next time.
+                repoScope.launch { runCatching { ensureE2eeSession(channelId, mgr) } }
+                null
+            }
         } else {
             null
         }
@@ -239,10 +258,24 @@ class ChatRepository(
                 // carry them until A10 extends OutboxEntity); absent meta = a plain send,
                 // which is also the correct post-restart fallback.
                 val meta = pendingSendMeta[item.nonce]
-                val sent = api.sendMessage(
+                val response = api.sendMessage(
                     item.channelId, item.content, item.nonce, item.replyTo, att,
                     ttl = meta?.ttl, sendAt = meta?.sendAt, encrypted = meta?.encrypted ?: false,
                 )
+                val sent = response.message
+                if (sent == null) {
+                    // Scheduled send (server 202 { scheduled }): the message won't arrive
+                    // now — it fires later via the cron dispatcher and lands through the
+                    // gateway/sync path then. Treat as SUCCESS: drop the optimistic row and
+                    // the outbox entry so it isn't marked FAILED or re-POSTed (which would
+                    // insert a duplicate scheduled row on every reflush).
+                    db.withTransaction {
+                        db.messages().delete("pending-${item.nonce}")
+                        db.outbox().remove(item.nonce)
+                    }
+                    pendingSendMeta.remove(item.nonce)
+                    continue
+                }
                 db.withTransaction {
                     db.messages().delete("pending-${item.nonce}")
                     db.messages().upsertOne(sent.toEntity())
