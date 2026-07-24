@@ -43,6 +43,8 @@ data class ThemePrefs(
     val reducedMotion: Boolean = false,
     val readReceipts: Boolean = true,
     val invisible: Boolean = false,
+    /** Experimental end-to-end encryption for DMs. DEFAULT ON (owner's personal test build). */
+    val e2ee: Boolean = true,
     val wallpaper: String? = null,
     val wallpaperDim: Float = 0.3f,
     val liquidGlass: Boolean = false,
@@ -63,6 +65,7 @@ class ThemeStore(private val context: Context) {
         val reducedMotion = booleanPreferencesKey("reduced_motion")
         val readReceipts = booleanPreferencesKey("read_receipts")
         val invisible = booleanPreferencesKey("invisible")
+        val e2ee = booleanPreferencesKey("e2ee")
         val wallpaper = stringPreferencesKey("app_wallpaper")
         val wallpaperDim = floatPreferencesKey("app_wallpaper_dim")
         val liquidGlass = booleanPreferencesKey("liquid_glass")
@@ -82,6 +85,7 @@ class ThemeStore(private val context: Context) {
             reducedMotion = p[K.reducedMotion] ?: false,
             readReceipts = p[K.readReceipts] ?: true,
             invisible = p[K.invisible] ?: false,
+            e2ee = p[K.e2ee] ?: true,
             wallpaper = p[K.wallpaper],
             wallpaperDim = p[K.wallpaperDim] ?: 0.3f,
             liquidGlass = p[K.liquidGlass] ?: false,
@@ -94,6 +98,7 @@ class ThemeStore(private val context: Context) {
     suspend fun setReducedMotion(v: Boolean) = context.dataStore.edit { it[K.reducedMotion] = v }
     suspend fun setReadReceipts(v: Boolean) = context.dataStore.edit { it[K.readReceipts] = v }
     suspend fun setInvisible(v: Boolean) = context.dataStore.edit { it[K.invisible] = v }
+    suspend fun setE2ee(v: Boolean) = context.dataStore.edit { it[K.e2ee] = v }
     suspend fun setWallpaper(key: String?) = context.dataStore.edit {
         if (key == null) it.remove(K.wallpaper) else it[K.wallpaper] = key
     }

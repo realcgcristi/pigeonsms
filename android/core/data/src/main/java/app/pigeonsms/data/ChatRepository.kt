@@ -5,6 +5,7 @@ import app.pigeonsms.db.ChannelCursorEntity
 import app.pigeonsms.db.MessageEntity
 import app.pigeonsms.db.OutboxEntity
 import app.pigeonsms.db.PigeonDatabase
+import app.pigeonsms.data.e2ee.DevicePub
 import app.pigeonsms.data.e2ee.E2eeManager
 import app.pigeonsms.network.AttachmentDto
 import app.pigeonsms.network.MessageDto
@@ -54,6 +55,21 @@ class ChatRepository(
     private val reactionMutex = Mutex()
     private val pollMutex = Mutex()
     private val flushMutex = Mutex()
+
+    /**
+     * DM channels whose E2EE session (DM key exchanged + ratchet seeded) is established
+     * on THIS device, so we only run the exchange once per channel per process. A
+     * channelId present here means encrypt/decrypt can be attempted; absence means we'll
+     * (re)try [ensureE2eeSession] on the next send/receive. In-memory only — the durable
+     * key material lives in the ratchet-state DAO (E2eeManager), so a restart just
+     * re-derives "established" from the server envelopes + stored keys idempotently.
+     */
+    private val establishedSessions = java.util.Collections.newSetFromMap(
+        java.util.concurrent.ConcurrentHashMap<String, Boolean>(),
+    )
+
+    /** Serializes the per-channel key-exchange so two concurrent sends don't both initiate. */
+    private val e2eeSessionMutex = Mutex()
 
     /** Placeholder shown for an encrypted message we can't decrypt (keys missing / not yet established). */
     private val lockedPlaceholder = "🔒 encrypted message"
@@ -174,16 +190,17 @@ class ChatRepository(
         ttl: Long? = null,
         sendAt: Long? = null,
         e2eeEnabled: Boolean = false,
+        isDm: Boolean = false,
     ) {
         val nonce = "${System.currentTimeMillis()}-${(0..9999).random()}"
         val now = System.currentTimeMillis()
-        // E2EE hook (flag-OFF by default): encrypt only when the flag is on and the A9
-        // manager is present. The manager throws when no key material exists for the DM
-        // (key exchange not done — see E2eeManager.requireRatchetState), so a null result
-        // means "not established yet" and we fall back to sending plaintext rather than
-        // dropping the message. Encryption is best-effort while experimental.
+        // E2EE hook (EXPERIMENTAL): encrypt only for DMs, only when the flag is on and the
+        // manager is present. ensureE2eeSession does the key exchange (idempotent, best
+        // effort) and returns false on any failure; encrypt itself is also wrapped so a
+        // failure at ANY step degrades to a plaintext send rather than dropping the
+        // message. We NEVER encrypt space/forum messages (isDm gates that).
         val mgr = e2ee
-        val cipher = if (e2eeEnabled && mgr != null) {
+        val cipher = if (e2eeEnabled && isDm && mgr != null && ensureE2eeSession(channelId, mgr)) {
             runCatching { mgr.encrypt(channelId, content) }.getOrNull()
         } else {
             null
@@ -399,16 +416,78 @@ class ChatRepository(
      * (encrypted=false) this is a safe no-op — we never attempt to decrypt (and thus
      * never clobber) plaintext.
      */
+    /**
+     * Establish (once per channel per process) the E2EE session for a DM so encrypt/
+     * decrypt can run. This is the orchestration the manager can't do itself — it needs
+     * the API to move device keys + envelopes around. EXPERIMENTAL, best-effort:
+     * returns true only if key material is in place, false on ANY failure so callers
+     * fall back to plaintext (send) or the locked placeholder (receive). Never throws.
+     *
+     * Flow (idempotent, both sides converge on the same DM key):
+     *  1. RECEIVE first — GET /channels/:id/key-envelopes. If an envelope addressed to
+     *     one of our devices exists, unwrapDmKey installs the key + seeds the ratchet as
+     *     responder. This wins so a peer who already initiated doesn't get re-initiated.
+     *  2. INITIATE — no envelope yet: resolve the DM peer (api.dms()), fetch the peer's
+     *     device pub keys (+ our own other devices) and wrapDmKeyFor mints/warps the DM
+     *     key to all of them, then POST the envelopes. wrapDmKeyFor also seeds our
+     *     ratchet as initiator.
+     *
+     * [manager] is passed in so the null-check happens once at the call site.
+     */
+    private suspend fun ensureE2eeSession(channelId: String, manager: E2eeManager): Boolean {
+        if (channelId in establishedSessions) return true
+        return e2eeSessionMutex.withLock {
+            if (channelId in establishedSessions) return@withLock true
+            val ok = runCatching {
+                // 1. Receive path: is there already a key wrapped to us?
+                val envelopes = runCatching { api.getKeyEnvelopes(channelId) }.getOrDefault(emptyList())
+                val mine = envelopes.firstOrNull { it.wrapped_key.isNotEmpty() }
+                if (mine != null) {
+                    manager.unwrapDmKey(channelId, mine.wrapped_key)
+                    return@runCatching true
+                }
+                // 2. Initiate path: find the DM peer and wrap the key to every device.
+                val peerId = api.dms().firstOrNull { it.channel_id == channelId }?.peer?.id
+                    ?: return@runCatching false // not a resolvable DM (or group/space) — no E2EE
+                val peerDevices = api.userDevices(peerId)
+                    .filter { it.pub_key.isNotEmpty() }
+                    .map { DevicePub(it.id, it.pub_key) }
+                // Include our OWN other devices so multi-device self can decrypt too.
+                val myDevices = runCatching { api.myDevices() }.getOrDefault(emptyList())
+                    .filter { it.pub_key.isNotEmpty() }
+                    .map { DevicePub(it.id, it.pub_key) }
+                val targets = (peerDevices + myDevices).distinctBy { it.deviceId }
+                if (targets.isEmpty()) return@runCatching false // peer has no registered device keys
+                val envelopesToSend = manager.wrapDmKeyFor(channelId, targets)
+                if (envelopesToSend.isNotEmpty()) api.postKeyEnvelopes(channelId, envelopesToSend)
+                true
+            }.getOrDefault(false)
+            if (ok) establishedSessions.add(channelId)
+            ok
+        }
+    }
+
     private suspend fun decryptForDisplay(channelId: String, content: String, isEncrypted: Boolean): String {
         val manager = e2ee ?: return content
         if (!isEncrypted || content.isEmpty()) return content
+        // First-encrypted-message-in receive path: if we haven't established the session
+        // for this DM yet, try now (unwraps the peer's envelope + seeds the ratchet).
+        // Best-effort — on failure decrypt below just yields the locked placeholder.
+        if (channelId !in establishedSessions) {
+            runCatching { ensureE2eeSession(channelId, manager) }
+        }
         return runCatching { manager.decrypt(channelId, content) }.getOrNull() ?: lockedPlaceholder
     }
 
-    private suspend fun mergeEvent(dto: MessageDto) = db.withTransaction {
-        // The server's `encrypted` flag drives decryptForDisplay: for encrypted rows we
-        // decrypt to plaintext (or [lockedPlaceholder]); plaintext rows are a no-op.
+    private suspend fun mergeEvent(dto: MessageDto) {
+        // Decrypt BEFORE opening the transaction: for an encrypted row this may run the
+        // key exchange (network), which must not happen while holding the DB write lock.
+        // The server's `encrypted` flag drives it — plaintext rows are a no-op.
         val display = decryptForDisplay(dto.channel_id, dto.content, isEncrypted = dto.encrypted)
+        mergeEventDecrypted(dto, display)
+    }
+
+    private suspend fun mergeEventDecrypted(dto: MessageDto, display: String) = db.withTransaction {
         val incoming = dto.toEntity().let { if (display !== dto.content) it.copy(content = display) else it }
         // Reconcile with our own optimistic send: the gateway echo (and the send
         // API response) carry the nonce we minted locally. The optimistic row was

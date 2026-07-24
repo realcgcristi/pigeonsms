@@ -190,7 +190,7 @@ class ChatViewModel(
         val reply = _ui.value.replyTo?.id
         _ui.update { it.copy(sending = true, error = null) }
         viewModelScope.launch {
-            runCatching { repo.send(channelId, content, reply, null, selfName, ttl = ttl, sendAt = sendAt, e2eeEnabled = encrypted) }
+            runCatching { repo.send(channelId, content, reply, null, selfName, ttl = ttl, sendAt = sendAt, e2eeEnabled = encrypted, isDm = !isSpace) }
                 .onSuccess {
                     _ui.update { state ->
                         state.copy(replyTo = null, composerClearToken = state.composerClearToken + 1)
@@ -218,7 +218,7 @@ class ChatViewModel(
             _ui.update { it.copy(sending = true, error = null) }
             runCatching {
                 val attachment = repo.uploadFile(bytes, filename, type)
-                repo.send(channelId, caption.trim(), reply, attachment, selfName, ttl = ttl, sendAt = sendAt, e2eeEnabled = encrypted)
+                repo.send(channelId, caption.trim(), reply, attachment, selfName, ttl = ttl, sendAt = sendAt, e2eeEnabled = encrypted, isDm = !isSpace)
             }.onSuccess {
                 _ui.update {
                     it.copy(replyTo = null, composerClearToken = it.composerClearToken + 1)
