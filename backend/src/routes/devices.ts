@@ -16,10 +16,13 @@ import type { AppEnv, AuthedUser } from '../types';
 // not collide with the existing `/auth` (auth+security) or `/channels`-less
 // message routes. requireAuth is applied inside this router.
 const devices = new Hono<AppEnv>();
-devices.use(requireAuth);
+// requireAuth is applied PER-ROUTE below (not a bare `devices.use`): this router is
+// root-mounted (`app.route('/', devices)`), and a bare `.use` there leaks the auth
+// middleware onto every route registered after it in index.ts — including the public
+// /updates feed and /media serving. Per-route keeps it scoped to these endpoints.
 
 /** POST /auth/devices { pub_key, name? } — register one of the caller's devices. */
-devices.post('/auth/devices', async (c) => {
+devices.post('/auth/devices', requireAuth, async (c) => {
   const user = c.get('user') as AuthedUser;
   const body = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
   const pubKey = String(body['pub_key'] ?? '').trim();
@@ -40,7 +43,7 @@ devices.post('/auth/devices', async (c) => {
 });
 
 /** GET /auth/devices — the caller's own devices. */
-devices.get('/auth/devices', async (c) => {
+devices.get('/auth/devices', requireAuth, async (c) => {
   const user = c.get('user') as AuthedUser;
   const { results } = await c.env.DB.prepare(
     `SELECT id, pub_key, name, created_at, last_seen FROM user_devices
@@ -65,7 +68,7 @@ devices.get('/auth/devices', async (c) => {
  * relationship exists — an accepted friendship OR a shared DM channel. Returns
  * only { id, pub_key } (no names / timestamps for other users).
  */
-devices.get('/users/:id/devices', async (c) => {
+devices.get('/users/:id/devices', requireAuth, async (c) => {
   const user = c.get('user') as AuthedUser;
   const targetId = c.req.param('id');
 
@@ -104,7 +107,7 @@ devices.get('/users/:id/devices', async (c) => {
 });
 
 /** GET /auth/key-backup — the caller's encrypted key backup, or null. */
-devices.get('/auth/key-backup', async (c) => {
+devices.get('/auth/key-backup', requireAuth, async (c) => {
   const user = c.get('user') as AuthedUser;
   const row = await c.env.DB.prepare(
     'SELECT blob, kdf_salt, kdf_params, updated_at FROM key_backups WHERE user_id = ?',
@@ -128,7 +131,7 @@ devices.get('/auth/key-backup', async (c) => {
  * password-derived (Argon2id/scrypt) encrypted key backup. Server never reads
  * inside `blob`; kdf_params is opaque JSON produced by the client.
  */
-devices.put('/auth/key-backup', async (c) => {
+devices.put('/auth/key-backup', requireAuth, async (c) => {
   const user = c.get('user') as AuthedUser;
   const body = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
   const blob = String(body['blob'] ?? '');
@@ -158,7 +161,7 @@ devices.put('/auth/key-backup', async (c) => {
  * public key. The caller must have access to the channel; `from_user` is
  * stamped server-side to the authenticated caller.
  */
-devices.post('/channels/:id/key-envelopes', async (c) => {
+devices.post('/channels/:id/key-envelopes', requireAuth, async (c) => {
   const user = c.get('user') as AuthedUser;
   const channelId = c.req.param('id');
   await assertChannelAccess(c.env, user.id, channelId);
@@ -189,7 +192,7 @@ devices.post('/channels/:id/key-envelopes', async (c) => {
  * GET /channels/:id/key-envelopes — envelopes addressed to any of the caller's
  * own devices for this channel. Access to the channel is required.
  */
-devices.get('/channels/:id/key-envelopes', async (c) => {
+devices.get('/channels/:id/key-envelopes', requireAuth, async (c) => {
   const user = c.get('user') as AuthedUser;
   const channelId = c.req.param('id');
   await assertChannelAccess(c.env, user.id, channelId);
