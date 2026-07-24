@@ -25,6 +25,29 @@ jobs:
       - name: set up android sdk
         uses: android-actions/setup-android@v3
 
+      - name: signing keystore
+        working-directory: android
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > pigeon-debug.keystore
+          else
+            keytool -genkey -v -keystore pigeon-debug.keystore \
+              -storepass android -keypass android -alias androiddebugkey \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
+
+      - name: firebase config
+        working-directory: android
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -n "$GOOGLE_SERVICES_JSON" ]; then
+            echo "$GOOGLE_SERVICES_JSON" | base64 -d > app/google-services.json
+          fi
+
       - name: build release apk
         working-directory: android
         run: ./gradlew :app:assembleRelease --no-daemon --stacktrace
