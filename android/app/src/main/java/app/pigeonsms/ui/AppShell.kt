@@ -241,6 +241,7 @@ fun AppShell(session: LocalSession) {
                     NestChannelsScreen(
                         app = app,
                         spaceId = spaceId,
+                        onOpenEmoji = { nav.navigate("nestemoji/$spaceId") },
                         onBack = { nav.popBackStack() },
                         onOpenChannel = { ch, name, kind ->
                             if (kind == "forum") {
@@ -329,6 +330,14 @@ fun AppShell(session: LocalSession) {
             composable("privacy") { PrivacyScreen(username = session.username, onBack = { nav.popBackStack() }, onBlocked = { nav.navigate("blocked") }) }
             composable("notifications") { NotificationSettingsScreen(onBack = { nav.popBackStack() }) }
             composable("nestsettings") { NestSettingsScreen(app, onBack = { nav.popBackStack() }) }
+            // 2.9.5: per-nest custom emoji + stickers. Reachable from a nest's
+            // channel list; the API enforces MANAGE_EMOJI regardless of who gets here.
+            composable("nestemoji/{spaceId}") { entry ->
+                val spaceId = entry.arguments?.getString("spaceId") ?: return@composable
+                val emojiVm: app.pigeonsms.ui.spaces.NestEmojiViewModel =
+                    pigeonVm { c, _ -> app.pigeonsms.ui.spaces.NestEmojiViewModel(c.socialRepository) }
+                app.pigeonsms.ui.spaces.NestEmojiScreen(spaceId = spaceId, vm = emojiVm)
+            }
             composable("about") {
                 AboutScreen(username = session.username, onBack = { nav.popBackStack() })
             }
