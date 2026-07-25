@@ -351,6 +351,21 @@ async function mutateReaction(c: Context<AppEnv>, action: 'add' | 'remove'): Pro
   const emoji = normalizeReactionEmoji(c.req.param('emoji') ?? '');
   if (!emoji) throw new ApiError(400, 'bad_emoji', 'choose one emoji');
 
+  // A custom emoji is only usable where it lives (2.9.5). Without this check any
+  // emoji id would react anywhere, including in DMs and in nests that never
+  // created it — which would render as a broken image for everyone else.
+  if (emoji.startsWith('custom:')) {
+    if (!channel.space_id) {
+      throw new ApiError(400, 'bad_emoji', 'custom emoji only work inside a nest');
+    }
+    const known = await c.env.DB.prepare(
+      'SELECT 1 FROM space_emojis WHERE id = ? AND space_id = ?',
+    )
+      .bind(emoji.slice('custom:'.length), channel.space_id)
+      .first();
+    if (!known) throw new ApiError(400, 'bad_emoji', 'that emoji is not in this nest');
+  }
+
   const result = action === 'add'
     ? await c.env.DB.prepare(
         'INSERT OR IGNORE INTO reactions (message_id, user_id, emoji, created_at) VALUES (?, ?, ?, ?)',
