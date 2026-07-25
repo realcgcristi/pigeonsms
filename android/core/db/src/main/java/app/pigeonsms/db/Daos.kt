@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -199,4 +200,93 @@ interface KeyEnvelopeDao {
 
     @Query("DELETE FROM key_envelopes WHERE channelId = :channelId")
     suspend fun clearChannel(channelId: String)
+}
+
+/**
+ * The offline cache for the app shell: nests + their channels, the DM list, and
+ * the friends lists (v2.9.0).
+ *
+ * Each list is written with a `replace*` transaction rather than an upsert: the
+ * server response *is* the complete set, so a plain upsert would leave behind
+ * nests you left and friends you removed, which is worse than showing nothing.
+ * Wrapping the wipe + insert in `@Transaction` means a reader never observes the
+ * empty window in between.
+ *
+ * Everything is a snapshot read (`suspend fun`, not `Flow`) because the callers
+ * are refresh-driven view models that already own the emitted state; a Flow here
+ * would fight them for control of when the UI updates.
+ */
+@Dao
+interface ShellCacheDao {
+    // ── nests ──────────────────────────────────────────────────────────────
+    @Query("SELECT * FROM spaces_cache ORDER BY position ASC")
+    suspend fun spaces(): List<SpaceEntity>
+
+    @Query("SELECT * FROM channels_cache ORDER BY position ASC")
+    suspend fun channels(): List<ChannelEntity>
+
+    @Query("DELETE FROM spaces_cache")
+    suspend fun clearSpaces()
+
+    @Query("DELETE FROM channels_cache")
+    suspend fun clearChannels()
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertSpaces(spaces: List<SpaceEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertChannels(channels: List<ChannelEntity>)
+
+    @Transaction
+    suspend fun replaceSpaces(spaces: List<SpaceEntity>, channels: List<ChannelEntity>) {
+        clearSpaces()
+        clearChannels()
+        insertSpaces(spaces)
+        insertChannels(channels)
+    }
+
+    // ── dms ────────────────────────────────────────────────────────────────
+    @Query("SELECT * FROM dms_cache ORDER BY position ASC")
+    suspend fun dms(): List<DmEntity>
+
+    @Query("DELETE FROM dms_cache")
+    suspend fun clearDms()
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertDms(dms: List<DmEntity>)
+
+    @Transaction
+    suspend fun replaceDms(dms: List<DmEntity>) {
+        clearDms()
+        insertDms(dms)
+    }
+
+    // ── friends ────────────────────────────────────────────────────────────
+    @Query("SELECT * FROM friends_cache ORDER BY position ASC")
+    suspend fun friends(): List<FriendEntity>
+
+    @Query("DELETE FROM friends_cache")
+    suspend fun clearFriends()
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertFriends(friends: List<FriendEntity>)
+
+    @Transaction
+    suspend fun replaceFriends(friends: List<FriendEntity>) {
+        clearFriends()
+        insertFriends(friends)
+    }
+
+    /**
+     * Drop every cached list. Called on sign-out and on a session switch — this
+     * cache is per-account, and showing the previous user's nests and DMs to the
+     * next one would be a privacy leak, not just a stale-data bug.
+     */
+    @Transaction
+    suspend fun clearAll() {
+        clearSpaces()
+        clearChannels()
+        clearDms()
+        clearFriends()
+    }
 }

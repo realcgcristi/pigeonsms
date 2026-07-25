@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { requireAuth } from '../middleware/auth';
 import type { AppEnv, AuthedUser } from '../types';
+import { readJsonBody } from '../lib/validate';
 
 const notifications = new Hono<AppEnv>();
 notifications.use(requireAuth);
@@ -139,7 +140,7 @@ notifications.get('/preferences', async (c) => {
 /** PUT /notifications/preferences {scope_type, scope_id?, mode?, sound?, vibration?, badge?, quiet_start?, quiet_end?}. */
 notifications.put('/preferences', async (c) => {
   const user = c.get('user') as AuthedUser;
-  const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
+  const body = await readJsonBody(c);
   const scopeType = String(body.scope_type ?? 'global');
   const scopeId = scopeType === 'global' ? '' : String(body.scope_id ?? '').slice(0, 128);
   if (!preferenceScopes.has(scopeType) || (scopeType !== 'global' && !scopeId)) {

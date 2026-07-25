@@ -7,6 +7,7 @@ import { fanout } from '../lib/channels';
 import { assertOwnedAttachment } from '../lib/media';
 import { normalizeProfileImageType, spaceCreationKey } from '../lib/social';
 import type { AppEnv, AuthedUser } from '../types';
+import { readJsonBody } from '../lib/validate';
 
 const spaces = new Hono<AppEnv>();
 spaces.use(requireAuth);
@@ -107,7 +108,7 @@ function audit(c: Context<AppEnv>, actor: string, action: string, target: string
 /** POST /spaces { name, description? } — creates space + #general. */
 spaces.post('/', async (c) => {
   const user = c.get('user') as AuthedUser;
-  const body = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
+  const body = await readJsonBody(c);
   const name = String(body['name'] ?? '').trim().slice(0, 48);
   const description = body['description'] === undefined
     ? null
@@ -256,7 +257,7 @@ spaces.patch('/:id', async (c) => {
   const user = c.get('user') as AuthedUser;
   const spaceId = c.req.param('id');
   await requireRole(c, spaceId, user.id, ['owner', 'admin']);
-  const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
+  const body = await readJsonBody(c);
   const sets: string[] = [];
   const binds: unknown[] = [];
   if (body['name'] !== undefined) {
@@ -304,7 +305,7 @@ spaces.patch('/:id/icon', async (c) => {
   const user = c.get('user') as AuthedUser;
   const spaceId = c.req.param('id');
   await requireRole(c, spaceId, user.id, ['owner', 'admin']);
-  const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>));
+  const body = await readJsonBody(c);
 
   let iconKey: string | null = null;
   if (body['key'] !== undefined && body['key'] !== null) {
@@ -339,7 +340,7 @@ spaces.post('/:id/channels', async (c) => {
   const user = c.get('user') as AuthedUser;
   const spaceId = c.req.param('id');
   await requireRole(c, spaceId, user.id, ['owner', 'admin']);
-  const body = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
+  const body = await readJsonBody(c);
   const name = String(body['name'] ?? '').trim().toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 32);
   if (name.length < 2) throw new ApiError(400, 'bad_name', 'channel name needs 2+ characters');
   const kind = String(body['kind'] ?? 'text').trim().toLowerCase();
@@ -363,7 +364,7 @@ spaces.patch('/:id/channels/:channelId', async (c) => {
   const spaceId = c.req.param('id');
   const channelId = c.req.param('channelId');
   await requireRole(c, spaceId, user.id, ['owner']);
-  const body = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
+  const body = await readJsonBody(c);
   if (body['name'] === undefined) throw new ApiError(400, 'bad_name', 'name is required');
   const name = String(body['name']).trim().toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 32);
   if (name.length < 2) throw new ApiError(400, 'bad_name', 'channel name needs 2+ characters');
@@ -438,7 +439,7 @@ spaces.post('/:id/invites', async (c) => {
   const user = c.get('user') as AuthedUser;
   const spaceId = c.req.param('id');
   await requireRole(c, spaceId, user.id, ['owner', 'admin']);
-  const body = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
+  const body = await readJsonBody(c);
   const code = inviteCode();
   const maxUses = body['max_uses'] ? Math.min(500, Math.max(1, Number(body['max_uses']))) : null;
   const expiresAt = body['expires_hours']
@@ -455,7 +456,7 @@ spaces.post('/:id/invites', async (c) => {
 /** POST /spaces/join { code } */
 spaces.post('/join', async (c) => {
   const user = c.get('user') as AuthedUser;
-  const body = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
+  const body = await readJsonBody(c);
   const code = String(body['code'] ?? '').trim().toUpperCase();
 
   // Resolve the invite (read-only) before touching `uses`, so an
@@ -530,7 +531,7 @@ spaces.put('/:id/members/:uid/role', async (c) => {
   const spaceId = c.req.param('id');
   const targetId = c.req.param('uid');
   await requireRole(c, spaceId, user.id, ['owner']);
-  const body = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
+  const body = await readJsonBody(c);
   const role = String(body['role'] ?? '');
   if (!['admin', 'member'].includes(role)) throw new ApiError(400, 'bad_role', 'role must be admin or member');
   if (targetId === user.id) throw new ApiError(400, 'bad_request', 'owner role is transferred, not set');
@@ -546,7 +547,7 @@ spaces.post('/:id/transfer', async (c) => {
   const user = c.get('user') as AuthedUser;
   const spaceId = c.req.param('id');
   await requireRole(c, spaceId, user.id, ['owner']);
-  const body = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
+  const body = await readJsonBody(c);
   const targetId = String(body['user_id'] ?? '');
   if (targetId === user.id) throw new ApiError(400, 'bad_target', 'cannot transfer to yourself');
   await requireRole(c, spaceId, targetId, ['owner', 'admin', 'member']);

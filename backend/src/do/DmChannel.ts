@@ -1,6 +1,7 @@
 import { assertChannelAccess } from '../lib/channels';
 import { sha256Hex } from '../lib/crypto';
 import { ApiError } from '../middleware/errors';
+import { ChannelSequencer, seqPath } from './seq';
 import type { Env } from '../types';
 
 /**
@@ -11,14 +12,16 @@ import type { Env } from '../types';
  * signals — plus fanout of those ephemeral events to connected sockets. It is a
  * hibernation-aware signaling room, modeled on CallRoom.
  *
- * IMPORTANT — message sequencing is deliberately NOT owned here yet.
- * TODO(2.9.0): move per-channel message `seq` allocation off the D1 single-row
- * `channels.last_seq` bump (`lib/channels.ts#bumpSeq`) and into this DO's
- * storage so ordering is owned by the same actor that fans messages out. For now
- * D1 remains the single source of truth for `seq`: doing otherwise would fork the
- * counter (DO storage vs. the D1 row every read path and `bumpSeq` still use) and
- * corrupt ordering / unread counts. This DO must therefore NOT allocate, persist,
- * or mutate any message `seq` — it only relays ephemeral presence/typing.
+ * 2.9.0: this DO now also owns **message sequence allocation** for the channel
+ * (see `do/seq.ts`). `seq` used to come from a single-row read-modify-write on
+ * `channels.last_seq`, which serialized every send in the conversation on one D1
+ * row; the DO is already the single-threaded actor here, so allocation is serial
+ * for free. D1's `channels.last_seq` is kept as a mirror, advanced to the highest
+ * *inserted* seq in the message's own write batch, so every existing read path
+ * (unread counts, `has_more_after`, the DM last-message join) keeps working — and
+ * gets more accurate, since a failed insert no longer burns a permanent gap.
+ *
+ * Typing/presence remain ephemeral and are never tied to `seq`.
  */
 
 const MAX_CLIENT_FRAME_BYTES = 8 * 1024;
@@ -103,17 +106,29 @@ function parseClientFrame(raw: string): ClientFrame | null {
 export class DmChannel {
   /** Departure dedup: webSocketClose and webSocketError can both fire. */
   private readonly departed = new WeakSet<WebSocket>();
+  private readonly sequencer: ChannelSequencer;
 
   constructor(
     private readonly state: DurableObjectState,
     private readonly env: Env,
-  ) {}
+  ) {
+    this.sequencer = new ChannelSequencer(state, env);
+  }
 
   async fetch(req: Request): Promise<Response> {
     try {
+      const url = new URL(req.url);
+
+      // Sequence allocation is an internal Worker->DO call, handled before the
+      // socket/presence routing below: it is a POST (not a GET) and carries no
+      // user session, because a DO namespace is only addressable from the Worker
+      // that binds it. Membership was already enforced by the caller's
+      // assertChannelAccess before it ever got here.
+      const seqChannelId = seqPath(url.pathname);
+      if (seqChannelId) return this.sequencer.handle(req, seqChannelId);
+
       if (req.method !== 'GET') return errorResponse(405, 'method_not_allowed', 'GET required');
 
-      const url = new URL(req.url);
       const path = dmPath(url.pathname);
       if (!path) return errorResponse(404, 'not_found', 'dm endpoint not found');
 

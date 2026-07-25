@@ -3077,7 +3077,7 @@ private fun Composer(
                         ),
                     ) { Icon(Icons.Outlined.Send, "send voice message") }
                 }
-            } else Row(verticalAlignment = Alignment.CenterVertically) {
+            } else Row(verticalAlignment = Alignment.Bottom) {
                 IconButton(
                     onClick = { showAttachmentOptions = true },
                     enabled = !readingAttachment && !ui.sending && ui.editing == null,

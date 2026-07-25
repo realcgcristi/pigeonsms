@@ -5,6 +5,7 @@ import { requireAuth } from '../middleware/auth';
 import { snowflake } from '../lib/ids';
 import { normalizeProfileImageType } from '../lib/social';
 import type { AppEnv, AuthedUser } from '../types';
+import { logSwallowed } from '../lib/validate';
 
 const MAX_UPLOAD = 50 * 1024 * 1024;
 const MAX_AVATAR = 8 * 1024 * 1024;
@@ -35,8 +36,9 @@ function deletePreviousOwnedMedia(
 ): void {
   if (!key?.startsWith(`${prefix}/${ownerSegment}/`)) return;
   c.executionCtx.waitUntil(Promise.all([
-    c.env.MEDIA.delete(key).catch(() => undefined),
-    c.env.DB.prepare('DELETE FROM media_objects WHERE key = ?').bind(key).run().catch(() => undefined),
+    c.env.MEDIA.delete(key).catch((err) => logSwallowed('media.deletePrevious.r2', err)),
+    c.env.DB.prepare('DELETE FROM media_objects WHERE key = ?').bind(key).run()
+      .catch((err) => logSwallowed('media.deletePrevious.d1', err)),
   ]));
 }
 
@@ -73,7 +75,7 @@ async function enforceActualSize(
   const head = await c.env.MEDIA.head(key);
   const actualSize = head?.size ?? 0;
   if (!head || actualSize > maxBytes) {
-    await c.env.MEDIA.delete(key).catch(() => undefined);
+    await c.env.MEDIA.delete(key).catch((err) => logSwallowed('media.rollback.r2', err));
     throw new ApiError(413, 'too_large', `max ${Math.floor(maxBytes / 1024 / 1024)}mb`);
   }
   return actualSize;
@@ -115,8 +117,9 @@ async function uploadProfileMedia(c: Context<AppEnv>, config: ProfileMediaConfig
       .first<{ id: string }>();
     if (!updated) throw new ApiError(409, 'profile_media_conflict', 'profile image changed; try again');
   } catch (error) {
-    await c.env.MEDIA.delete(key).catch(() => undefined);
-    await c.env.DB.prepare('DELETE FROM media_objects WHERE key = ?').bind(key).run().catch(() => undefined);
+    await c.env.MEDIA.delete(key).catch((err) => logSwallowed('media.rollback.r2', err));
+    await c.env.DB.prepare('DELETE FROM media_objects WHERE key = ?').bind(key).run()
+      .catch((err) => logSwallowed('media.rollback.d1', err));
     throw error;
   }
 
@@ -168,7 +171,7 @@ mediaUpload.post('/upload', async (c) => {
   try {
     await registerMedia(c, key, user.id, 'attachment', type, actualSize);
   } catch (error) {
-    await c.env.MEDIA.delete(key).catch(() => undefined);
+    await c.env.MEDIA.delete(key).catch((err) => logSwallowed('media.rollback.r2', err));
     throw error;
   }
   return c.json({ attachment: { key, name: filename, type, size: actualSize } }, 201);
@@ -218,8 +221,9 @@ async function uploadAvatarVariant(c: Context<AppEnv>, variant: AvatarVariant): 
         ).bind(key, key, user.id, previousKey ?? null).first<{ id: string }>();
     if (!updated) throw new ApiError(409, 'profile_media_conflict', 'avatar changed; try again');
   } catch (error) {
-    await c.env.MEDIA.delete(key).catch(() => undefined);
-    await c.env.DB.prepare('DELETE FROM media_objects WHERE key = ?').bind(key).run().catch(() => undefined);
+    await c.env.MEDIA.delete(key).catch((err) => logSwallowed('media.rollback.r2', err));
+    await c.env.DB.prepare('DELETE FROM media_objects WHERE key = ?').bind(key).run()
+      .catch((err) => logSwallowed('media.rollback.d1', err));
     throw error;
   }
   deletePreviousOwnedMedia(c, user.id, previousKey, prefix);
@@ -304,8 +308,9 @@ async function uploadSpaceIcon(c: Context<AppEnv>, variant: AvatarVariant): Prom
         ).bind(key, key, spaceId, previousKey ?? null).first<{ id: string }>();
     if (!updated) throw new ApiError(409, 'space_media_conflict', 'space icon changed; try again');
   } catch (error) {
-    await c.env.MEDIA.delete(key).catch(() => undefined);
-    await c.env.DB.prepare('DELETE FROM media_objects WHERE key = ?').bind(key).run().catch(() => undefined);
+    await c.env.MEDIA.delete(key).catch((err) => logSwallowed('media.rollback.r2', err));
+    await c.env.DB.prepare('DELETE FROM media_objects WHERE key = ?').bind(key).run()
+      .catch((err) => logSwallowed('media.rollback.d1', err));
     throw error;
   }
   deletePreviousOwnedMedia(c, user.id, previousKey, prefix, spaceId);

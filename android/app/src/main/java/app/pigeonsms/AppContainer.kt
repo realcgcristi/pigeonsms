@@ -26,7 +26,10 @@ class AppContainer(context: Context) {
     private val db = PigeonDatabase.get(context)
 
     val authRepository = AuthRepository(api, sessionStore, db)
-    val socialRepository = SocialRepository(api)
+    // Passing the database in gives the home lists (nests, DMs, friends) an
+    // offline cache — without it they are network-only and a cold start with no
+    // connection shows an empty app.
+    val socialRepository = SocialRepository(api, db)
     /**
      * EXPERIMENTAL E2EE for DMs. The concrete manager is wired here (Keystore-backed
      * identity + Room ratchet-state DAO) so ChatRepository can encrypt/decrypt when the

@@ -4,6 +4,7 @@ import { timingSafeEqualStrings, hashPassword } from '../lib/crypto';
 import { randomFromAlphabet } from '../lib/ids';
 import { broadcastRelease } from '../lib/notifications';
 import type { AppEnv } from '../types';
+import { readJsonBody } from '../lib/validate';
 
 /**
  * Admin surface, gated by the ADMIN_TOKEN secret (bearer). Once user auth
@@ -36,9 +37,7 @@ function clampInt(value: unknown, min: number, max: number, fallback: number): n
 
 /** POST /admin/invites { count?, uses?, expires_hours? } → { invites: [...] } */
 admin.post('/invites', async (c) => {
-  const body = await c.req
-    .json<Record<string, unknown>>()
-    .catch(() => ({}) as Record<string, unknown>);
+  const body = await readJsonBody(c);
   const count = clampInt(body['count'], 1, 50, 1);
   const uses = clampInt(body['uses'], 1, 100, 1);
   const expiresAt =
@@ -65,9 +64,7 @@ admin.post('/invites', async (c) => {
  *  Hashes server-side with PASSWORD_PEPPER and revokes the user's sessions. */
 admin.post('/users/:username/password', async (c) => {
   const username = c.req.param('username');
-  const body = await c.req
-    .json<Record<string, unknown>>()
-    .catch(() => ({}) as Record<string, unknown>);
+  const body = await readJsonBody(c);
   const password = String(body['password'] ?? '');
   if (password.length < 6) throw new ApiError(400, 'weak_password', 'password must be at least 6 characters');
   const user = await c.env.DB.prepare(
@@ -94,9 +91,7 @@ admin.get('/invites', async (c) => {
 
 /** POST /admin/releases { version_code, version_name, url, notes? } — updater feed. */
 admin.post('/releases', async (c) => {
-  const body = await c.req
-    .json<Record<string, unknown>>()
-    .catch(() => ({}) as Record<string, unknown>);
+  const body = await readJsonBody(c);
   const versionCode = Number(body['version_code']);
   const versionName = String(body['version_name'] ?? '');
   const url = String(body['url'] ?? '');

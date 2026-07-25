@@ -230,23 +230,54 @@ class AppViewModel(
         spacesJob?.cancelAndJoin()
         selfId = userId
         sessionIdentity = identity
+        // The shell cache is per-account: without this the incoming session would
+        // briefly render the previous user's nests, DMs and friends from Room
+        // before the first network refresh lands.
+        social.clearCache()
+        _home.update { it.copy(dms = emptyList(), spaces = emptyList(), friends = emptyList(), incoming = emptyList(), outgoing = emptyList()) }
         chat.clearReads()
         gateway.stop()
         gateway.start()
         refresh()
     }
 
+    /**
+     * The three refreshes below all follow the same offline-first shape (v2.9.0):
+     *
+     *  1. if we're holding nothing yet, paint the Room cache immediately, so a cold
+     *     start shows the user's actual nests/DMs/friends instead of a spinner over
+     *     an empty screen;
+     *  2. hit the network and replace on success (which also rewrites the cache);
+     *  3. on failure, fall back to the cache — and only surface an error if there
+     *     is genuinely nothing to show, since an error banner over a perfectly good
+     *     cached list is just noise on a flaky connection.
+     */
     fun refreshDms() {
         dmsJob?.cancel()
         dmsJob = viewModelScope.launch {
             _home.update { it.copy(dmsLoading = true, dmsError = null) }
+            if (_home.value.dms.isEmpty()) {
+                val cached = social.cachedDms()
+                if (cached.isNotEmpty()) _home.update { it.copy(dms = cached) }
+            }
             try {
                 val dms = social.dms()
                 _home.update { it.copy(dms = dms, dmsLoading = false, dmsError = null) }
             } catch (error: kotlinx.coroutines.CancellationException) {
                 throw error
             } catch (error: Throwable) {
-                _home.update { it.copy(dmsLoading = false, dmsError = userMessage(error, "couldn't load messages")) }
+                val cached = social.cachedDms()
+                _home.update {
+                    it.copy(
+                        dms = it.dms.ifEmpty { cached },
+                        dmsLoading = false,
+                        dmsError = if (it.dms.isEmpty() && cached.isEmpty()) {
+                            userMessage(error, "couldn't load messages")
+                        } else {
+                            null
+                        },
+                    )
+                }
             }
         }
     }
@@ -255,6 +286,14 @@ class AppViewModel(
         friendsJob?.cancel()
         friendsJob = viewModelScope.launch {
             _home.update { it.copy(friendsLoading = true, friendsError = null) }
+            if (_home.value.friends.isEmpty() && _home.value.incoming.isEmpty() && _home.value.outgoing.isEmpty()) {
+                val cached = social.cachedFriends()
+                if (cached.friends.isNotEmpty() || cached.incoming.isNotEmpty() || cached.outgoing.isNotEmpty()) {
+                    _home.update {
+                        it.copy(friends = cached.friends, incoming = cached.incoming, outgoing = cached.outgoing)
+                    }
+                }
+            }
             try {
                 val friends = social.friends()
                 _home.update {
@@ -269,7 +308,22 @@ class AppViewModel(
             } catch (error: kotlinx.coroutines.CancellationException) {
                 throw error
             } catch (error: Throwable) {
-                _home.update { it.copy(friendsLoading = false, friendsError = userMessage(error, "couldn't load friends")) }
+                val cached = social.cachedFriends()
+                _home.update {
+                    val holding = it.friends.isNotEmpty() || it.incoming.isNotEmpty() || it.outgoing.isNotEmpty()
+                    val cachedEmpty = cached.friends.isEmpty() && cached.incoming.isEmpty() && cached.outgoing.isEmpty()
+                    it.copy(
+                        friends = if (holding) it.friends else cached.friends,
+                        incoming = if (holding) it.incoming else cached.incoming,
+                        outgoing = if (holding) it.outgoing else cached.outgoing,
+                        friendsLoading = false,
+                        friendsError = if (!holding && cachedEmpty) {
+                            userMessage(error, "couldn't load friends")
+                        } else {
+                            null
+                        },
+                    )
+                }
             }
         }
     }
@@ -278,13 +332,28 @@ class AppViewModel(
         spacesJob?.cancel()
         spacesJob = viewModelScope.launch {
             _home.update { it.copy(spacesLoading = true, spacesError = null) }
+            if (_home.value.spaces.isEmpty()) {
+                val cached = social.cachedSpaces()
+                if (cached.isNotEmpty()) _home.update { it.copy(spaces = cached) }
+            }
             try {
                 val spaces = social.spaces()
                 _home.update { it.copy(spaces = spaces, spacesLoading = false, spacesError = null) }
             } catch (error: kotlinx.coroutines.CancellationException) {
                 throw error
             } catch (error: Throwable) {
-                _home.update { it.copy(spacesLoading = false, spacesError = userMessage(error, "couldn't load spaces")) }
+                val cached = social.cachedSpaces()
+                _home.update {
+                    it.copy(
+                        spaces = it.spaces.ifEmpty { cached },
+                        spacesLoading = false,
+                        spacesError = if (it.spaces.isEmpty() && cached.isEmpty()) {
+                            userMessage(error, "couldn't load spaces")
+                        } else {
+                            null
+                        },
+                    )
+                }
             }
         }
     }
@@ -297,6 +366,9 @@ class AppViewModel(
             friendsJob?.cancelAndJoin()
             spacesJob?.cancelAndJoin()
             gateway.stop()
+            // Signing out must leave nothing of this account on disk for the next
+            // person to open the app — the cached nests/DMs/friends included.
+            social.clearCache()
             runCatching { auth.logout() }
         }
     }

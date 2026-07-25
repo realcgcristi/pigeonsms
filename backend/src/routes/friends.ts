@@ -3,6 +3,7 @@ import { ApiError } from '../middleware/errors';
 import { requireAuth } from '../middleware/auth';
 import { fanout } from '../lib/channels';
 import type { AppEnv, AuthedUser } from '../types';
+import { readJsonBody } from '../lib/validate';
 
 const friends = new Hono<AppEnv>();
 friends.use(requireAuth);
@@ -45,7 +46,7 @@ friends.get('/', async (c) => {
 /** POST /friends/requests { username } */
 friends.post('/requests', async (c) => {
   const user = c.get('user') as AuthedUser;
-  const body = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
+  const body = await readJsonBody(c);
   const username = String(body['username'] ?? '').trim().toLowerCase();
   const target = await c.env.DB.prepare(
     'SELECT id, username FROM users WHERE username = ? AND deleted_at IS NULL',
@@ -123,7 +124,7 @@ friends.delete('/:userId', async (c) => {
 friends.patch('/:userId', async (c) => {
   const user = c.get('user') as AuthedUser;
   const other = c.req.param('userId');
-  const body = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
+  const body = await readJsonBody(c);
   const note = body['note'] === undefined ? undefined : String(body['note'] ?? '').slice(0, 200);
   const close = body['close_friend'] === undefined ? undefined : (body['close_friend'] ? 1 : 0);
   if (note === undefined && close === undefined) return c.json({ ok: true });

@@ -133,3 +133,87 @@ data class KeyEnvelopeEntity(
     val wrappedKey: String,      // base64 sealed-box ciphertext of the channel key
     @ColumnInfo(defaultValue = "0") val createdAt: Long = 0,
 )
+
+// ── v2.9.0: offline cache for the shell (nests, channels, DMs, friends) ─────
+//
+// Until now Room held *only* messages, so a cold start without network showed an
+// empty app even though every conversation was cached: the DM list, nest list and
+// friends list were fetched live on every open. These four tables close that gap.
+//
+// They are a **cache, not a source of truth** — each refresh replaces the whole
+// set for that list (see the `replaceAll` DAO methods), which is why every row
+// carries a `position` mirroring the server's ordering rather than the client
+// re-sorting. Anything the server stops returning simply disappears on the next
+// refresh, so a left nest or removed friend can't linger.
+
+/** One row per nest the user belongs to. Mirrors the network `SpaceDto`. */
+@Entity(tableName = "spaces_cache")
+data class SpaceEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    val ownerId: String,
+    val iconKey: String?,
+    val iconOriginalKey: String?,
+    val iconSquareKey: String?,
+    val description: String?,
+    val role: String,
+    val memberCount: Int,
+    /** Server ordering; the list is rendered in ascending position. */
+    val position: Int,
+)
+
+/** Channels belonging to a cached nest. Mirrors the network `ChannelDto`. */
+@Entity(tableName = "channels_cache", indices = [Index("spaceId")])
+data class ChannelEntity(
+    @PrimaryKey val id: String,
+    val spaceId: String,
+    val name: String?,
+    val topic: String?,
+    val lastSeq: Long,
+    val unread: Int,
+    val kind: String,
+    val position: Int,
+)
+
+/**
+ * The conversation list. Keyed by channel id (what every downstream screen
+ * navigates by) with the peer flattened inline — a DM has exactly one peer, so a
+ * join table would buy nothing.
+ */
+@Entity(tableName = "dms_cache")
+data class DmEntity(
+    @PrimaryKey val channelId: String,
+    val peerId: String,
+    val peerUsername: String,
+    val peerDisplayName: String?,
+    val peerAvatarKey: String?,
+    val peerAccent: String?,
+    val peerStatusText: String?,
+    val peerLastOnline: Long?,
+    val lastSeq: Long,
+    val unread: Int,
+    val lastMessageContent: String?,
+    val lastMessageCreatedAt: Long?,
+    val lastMessageDeleted: Boolean,
+    val position: Int,
+)
+
+/**
+ * Friends and pending requests. `bucket` is which list the row came from
+ * (`friends` / `incoming` / `outgoing`) and is part of the key, because the same
+ * user can legitimately appear in more than one list mid-flow.
+ */
+@Entity(tableName = "friends_cache", primaryKeys = ["id", "bucket"])
+data class FriendEntity(
+    val id: String,
+    val bucket: String,
+    val username: String,
+    val displayName: String?,
+    val avatarKey: String?,
+    val accent: String?,
+    val statusText: String?,
+    val lastOnline: Long?,
+    val note: String?,
+    val closeFriend: Int,
+    val position: Int,
+)
