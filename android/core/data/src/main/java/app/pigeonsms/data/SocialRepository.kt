@@ -1,6 +1,7 @@
 package app.pigeonsms.data
 
 import app.pigeonsms.db.PigeonDatabase
+import app.pigeonsms.network.AttachmentDto
 import app.pigeonsms.network.DmDto
 import app.pigeonsms.network.FriendsResponse
 import app.pigeonsms.network.PigeonApi
@@ -10,6 +11,13 @@ import java.util.UUID
 import app.pigeonsms.network.SpaceEmojiDto
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+
+/**
+ * Files at or above this size go through the resumable multipart path. 8 MB is
+ * comfortably above a typical photo (which should stay a single request) and
+ * below the point where a failed upload is genuinely painful to repeat.
+ */
+private const val RESUMABLE_THRESHOLD_BYTES = 8 * 1024 * 1024
 
 /**
  * Friends, DMs, spaces, profiles.
@@ -87,6 +95,56 @@ class SocialRepository(
     suspend fun leaveSpace(spaceId: String) = api.leaveSpace(spaceId)
     suspend fun deleteSpace(spaceId: String) = api.deleteSpace(spaceId)
     suspend fun uploadFile(bytes: ByteArray, filename: String, type: String) = api.uploadFile(bytes, filename, type)
+
+    /**
+     * Upload a file, switching to the resumable multipart path once it's big
+     * enough to be worth the extra round trips (2.9.5).
+     *
+     * Below the threshold the single-shot endpoint is strictly better: one
+     * request, no session bookkeeping. Above it, a dropped connection at 95% used
+     * to mean starting over — and the old 50 MB ceiling existed largely because
+     * of that. Chunked upload raises the ceiling to 500 MB and only re-sends the
+     * chunk that failed.
+     *
+     * [onProgress] receives 0f..1f so a caller can show a real progress bar
+     * instead of an indeterminate spinner.
+     */
+    suspend fun uploadLargeFile(
+        bytes: ByteArray,
+        filename: String,
+        type: String,
+        onProgress: (Float) -> Unit = {},
+    ): AttachmentDto {
+        if (bytes.size < RESUMABLE_THRESHOLD_BYTES) {
+            onProgress(1f)
+            return api.uploadFile(bytes, filename, type)
+        }
+
+        val session = api.openUpload(filename, type, bytes.size.toLong())
+        try {
+            // Ask what already landed: on a retry after a crash this is non-empty
+            // and those chunks are skipped entirely.
+            val done = runCatching { api.uploadStatus(session.id).uploaded_parts.toSet() }
+                .getOrDefault(emptySet())
+
+            for (part in 1..session.part_count) {
+                if (part in done) {
+                    onProgress(part.toFloat() / session.part_count)
+                    continue
+                }
+                val start = (part - 1) * session.part_size
+                val end = minOf(start + session.part_size, bytes.size)
+                api.uploadPart(session.id, part, bytes.copyOfRange(start, end))
+                onProgress(part.toFloat() / session.part_count)
+            }
+            return api.completeUpload(session.id)
+        } catch (error: Throwable) {
+            // Release the R2 storage rather than leaving it against the caller's
+            // open-session cap. Best-effort: the original error is what matters.
+            runCatching { api.abortUpload(session.id) }
+            throw error
+        }
+    }
     suspend fun setSpaceIcon(spaceId: String, key: String?) = api.setSpaceIcon(spaceId, key)
 
     // ── v2.9.5: custom emoji + stickers ────────────────────────────────────
