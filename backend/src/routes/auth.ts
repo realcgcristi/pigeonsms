@@ -12,10 +12,11 @@ import { hashPassword, verifyPassword, generateToken, sha256Hex } from '../lib/c
 import { verifyTotp } from '../lib/totp';
 import { snowflake } from '../lib/ids';
 import {
-  validateUsername,
+  optionalDeviceName,
+  readJsonBody,
   validateEmail,
   validatePassword,
-  optionalDeviceName,
+  validateUsername,
 } from '../lib/validate';
 import type { AppEnv } from '../types';
 
@@ -116,9 +117,7 @@ auth.get('/invite/:code', async (c) => {
 /** POST /auth/signup { invite, username, email, password, device_name? } */
 auth.post('/signup', async (c) => {
   await enforceRateLimit(c.env.RL_AUTH, `signup:${clientIp(c)}`);
-  const body = await c.req.json<Record<string, unknown>>().catch(() => {
-    throw new ApiError(400, 'bad_json', 'body must be json');
-  });
+  const body = await readJsonBody(c);
 
   const invite = String(body['invite'] ?? '').trim().toUpperCase();
   if (!invite) throw new ApiError(400, 'invalid_invite', 'invite code required');
@@ -183,9 +182,7 @@ auth.post('/signup', async (c) => {
 auth.post('/login', async (c) => {
   const ip = clientIp(c);
   await enforceRateLimit(c.env.RL_AUTH, `login:${ip}`);
-  const body = await c.req.json<Record<string, unknown>>().catch(() => {
-    throw new ApiError(400, 'bad_json', 'body must be json');
-  });
+  const body = await readJsonBody(c);
 
   const login = String(body['login'] ?? '').trim().toLowerCase();
   const password = String(body['password'] ?? '');

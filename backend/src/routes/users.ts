@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { ApiError } from '../middleware/errors';
 import { requireAuth } from '../middleware/auth';
 import type { AppEnv, AuthedUser } from '../types';
+import { readJsonBody } from '../lib/validate';
 
 const users = new Hono<AppEnv>();
 users.use(requireAuth);
@@ -64,7 +65,7 @@ users.get('/:id/profile', async (c) => {
 /** PATCH /users/me — profile fields. badges are server-granted, never here. */
 users.patch('/me', async (c) => {
   const user = c.get('user') as AuthedUser;
-  const body = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
+  const body = await readJsonBody(c);
 
   const fields: Record<string, { max: number; hex?: boolean }> = {
     display_name: { max: 48 },

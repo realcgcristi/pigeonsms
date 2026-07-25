@@ -1,6 +1,7 @@
 import { assertChannelAccess } from '../lib/channels';
 import { sha256Hex } from '../lib/crypto';
 import { ApiError } from '../middleware/errors';
+import { ChannelSequencer, seqPath } from './seq';
 import type { Env } from '../types';
 
 /**
@@ -11,14 +12,13 @@ import type { Env } from '../types';
  * signals — and fans those ephemeral events out to connected sockets. It is a
  * hibernation-aware signaling room, modeled on CallRoom / DmChannel.
  *
- * IMPORTANT — message sequencing is deliberately NOT owned here yet.
- * TODO(2.9.0): move per-channel message `seq` allocation off the D1 single-row
- * `channels.last_seq` bump (`lib/channels.ts#bumpSeq`) into this DO's storage so
- * fanout ordering is owned by the same actor. For now D1 stays the single source
- * of truth for `seq`: forking the counter (DO storage vs. the D1 row that every
- * read path and `bumpSeq` still use) would corrupt ordering and unread counts.
- * This DO therefore must NOT allocate, persist, or mutate any message `seq` — it
- * only relays ephemeral presence/typing.
+ * 2.9.0: this DO now also owns **message sequence allocation** for the channel
+ * (see `do/seq.ts`), replacing the single-row `channels.last_seq` read-modify-write
+ * that serialized every send in a busy channel on one D1 row. D1 keeps a mirror of
+ * the highest *inserted* seq, advanced inside the message's own write batch, so
+ * unread counts and pagination cursors keep working unchanged.
+ *
+ * Typing/presence remain ephemeral and are never tied to `seq`.
  */
 
 const MAX_CLIENT_FRAME_BYTES = 8 * 1024;
@@ -100,17 +100,27 @@ function parseClientFrame(raw: string): ClientFrame | null {
 
 export class Space {
   private readonly departed = new WeakSet<WebSocket>();
+  private readonly sequencer: ChannelSequencer;
 
   constructor(
     private readonly state: DurableObjectState,
     private readonly env: Env,
-  ) {}
+  ) {
+    this.sequencer = new ChannelSequencer(state, env);
+  }
 
   async fetch(req: Request): Promise<Response> {
     try {
+      const url = new URL(req.url);
+
+      // Internal Worker->DO sequence allocation (POST, no session): a DO namespace
+      // is only addressable from the Worker that binds it, and the caller has
+      // already enforced channel membership via assertChannelAccess.
+      const seqChannelId = seqPath(url.pathname);
+      if (seqChannelId) return this.sequencer.handle(req, seqChannelId);
+
       if (req.method !== 'GET') return errorResponse(405, 'method_not_allowed', 'GET required');
 
-      const url = new URL(req.url);
       const path = spacePath(url.pathname);
       if (!path) return errorResponse(404, 'not_found', 'space endpoint not found');
 

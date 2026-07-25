@@ -52,8 +52,8 @@ import app.pigeonsms.design.theme.UiSkin
 import app.pigeonsms.network.ReleaseDto
 import kotlinx.coroutines.launch
 
-// The public repo. cgcristi is the creator; the about screen links straight here.
-private const val GITHUB_REPO = "https://github.com/cgcristi/pigeonsms"
+// The public repo. realcgcristi is the creator; the about screen links straight here.
+private const val GITHUB_REPO = "https://github.com/realcgcristi/pigeonsms"
 
 /** The result of the last "check for updates" tap. */
 private sealed interface UpdateState {
@@ -123,7 +123,7 @@ fun AboutScreen(username: String, onBack: () -> Unit) {
                     modifier = Modifier.padding(top = Spacing.xxs),
                 )
                 Text(
-                    "made by cgcristi",
+                    "made by realcgcristi",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(top = Spacing.xs),
@@ -132,7 +132,7 @@ fun AboutScreen(username: String, onBack: () -> Unit) {
 
             Group("source")
             GroupCard {
-                AboutRow(Icons.Outlined.Code, "github", "view the source · cgcristi/pigeonsms") {
+                AboutRow(Icons.Outlined.Code, "github", "view the source · realcgcristi/pigeonsms") {
                     runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(GITHUB_REPO))) }
                 }
             }

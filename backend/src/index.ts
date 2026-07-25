@@ -22,6 +22,7 @@ import calls from './routes/calls';
 import { requireAuth } from './middleware/auth';
 import { sendPush } from './lib/fcm';
 import type { AppEnv, Env, PushJob } from './types';
+import { sweepLingeringRows } from './lib/purge';
 
 const app = new Hono<AppEnv>();
 
@@ -91,9 +92,9 @@ app.notFound(notFound);
 export default {
   fetch: app.fetch,
   // Cron entry point (schedule set in wrangler.toml, out of scope here). Runs
-  // two independent sweeps every tick; each is wrapped so a failure in one never
-  // aborts the other. Both helpers are context-free (no Hono Context) and reuse
-  // the message module's normal delete/send path — seq alloc + fanout + FCM.
+  // three independent sweeps every tick; each is wrapped so a failure in one never
+  // aborts the others. The message helpers are context-free (no Hono Context) and
+  // reuse the module's normal delete/send path — seq alloc + fanout + FCM.
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     // (a) disappearing messages: soft-delete anything past its expires_at via the
     // existing deleted path (sets deleted_at, tombstone fanout).
@@ -108,6 +109,14 @@ export default {
       await dispatchDueScheduledMessages(env, ctx);
     } catch (err) {
       console.error('cron: dispatch scheduled messages failed', err);
+    }
+    // (c) referential cleanup: collect rows left behind by long-soft-deleted
+    // nests/channels and E2EE envelopes addressed to devices that no longer
+    // exist. Bounded per tick, so a backlog drains over several runs.
+    try {
+      await sweepLingeringRows(env);
+    } catch (err) {
+      console.error('cron: sweep lingering rows failed', err);
     }
   },
   async queue(batch: MessageBatch, env: Env): Promise<void> {

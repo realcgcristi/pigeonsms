@@ -6,6 +6,8 @@ import { generateTotpSecret, verifyTotp, otpauthUri } from '../lib/totp';
 import { verifyPassword, sha256Hex } from '../lib/crypto';
 import { snowflake, randomDigits, randomFromAlphabet } from '../lib/ids';
 import type { AppEnv, AuthedUser } from '../types';
+import { readJsonBody } from '../lib/validate';
+import { purgeUserData } from '../lib/purge';
 
 const security = new Hono<AppEnv>();
 security.use(requireAuth);
@@ -29,7 +31,7 @@ function clampInt(value: unknown, min: number, max: number, fallback: number): n
 /** POST /auth/totp/setup → secret + otpauth uri (not yet enabled). */
 security.post('/totp/setup', async (c) => {
   const user = c.get('user') as AuthedUser;
-  const body = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
+  const body = await readJsonBody(c);
   // If 2FA is already on, require re-auth so a stolen session can't silently
   // reset the secret and disable protection. First-time setup needs nothing.
   const row = await c.env.DB.prepare('SELECT password_hash, totp_secret, totp_enabled FROM users WHERE id = ?')
@@ -54,7 +56,7 @@ security.post('/totp/setup', async (c) => {
 /** POST /auth/totp/enable { code } → recovery codes (shown exactly once). */
 security.post('/totp/enable', async (c) => {
   const user = c.get('user') as AuthedUser;
-  const body = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
+  const body = await readJsonBody(c);
   const row = await c.env.DB.prepare('SELECT totp_secret FROM users WHERE id = ?')
     .bind(user.id)
     .first<{ totp_secret: string | null }>();
@@ -84,7 +86,7 @@ security.post('/totp/enable', async (c) => {
 /** POST /auth/totp/disable { code } */
 security.post('/totp/disable', async (c) => {
   const user = c.get('user') as AuthedUser;
-  const body = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
+  const body = await readJsonBody(c);
   const row = await c.env.DB.prepare('SELECT totp_secret, totp_enabled FROM users WHERE id = ?')
     .bind(user.id)
     .first<{ totp_secret: string | null; totp_enabled: number }>();
@@ -128,7 +130,7 @@ security.get('/export', async (c) => {
 security.delete('/me', async (c) => {
   const user = c.get('user') as AuthedUser;
   await enforceRateLimit(c.env.RL_GENERAL, `export:${user.id}`);
-  const body = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
+  const body = await readJsonBody(c);
   const row = await c.env.DB.prepare('SELECT password_hash FROM users WHERE id = ?')
     .bind(user.id)
     .first<{ password_hash: string }>();
@@ -138,12 +140,16 @@ security.delete('/me', async (c) => {
   const now = Date.now();
   await c.env.DB.batch([
     c.env.DB.prepare('UPDATE users SET deleted_at = ? WHERE id = ?').bind(now, user.id),
-    c.env.DB.prepare('UPDATE sessions SET revoked_at = ? WHERE user_id = ?').bind(now, user.id),
-    c.env.DB.prepare('DELETE FROM push_tokens WHERE user_id = ?').bind(user.id),
     c.env.DB.prepare(
       'INSERT INTO audit_log (id, actor_id, action, target, created_at) VALUES (?, ?, ?, ?, ?)',
     ).bind(snowflake(), user.id, 'user.delete', user.id, now),
   ]);
+  // Everything else we hold about the account goes now rather than lingering
+  // forever behind the soft-deleted users row (BUGS_AND_ISSUES #53). This
+  // supersedes the old inline session-revoke + push-token delete: purgeUserData
+  // removes the session rows outright, along with devices, memberships and the
+  // rest. Content they authored is deliberately kept — see lib/purge.ts.
+  await purgeUserData(c.env, user.id);
   const header = c.req.header('authorization') ?? '';
   invalidateSessionCache(await sha256Hex(header.slice(7)));
   return c.json({ ok: true });
@@ -156,7 +162,7 @@ security.post('/invites', async (c) => {
     throw new ApiError(403, 'forbidden', 'not allowed to generate invites');
   }
   await enforceRateLimit(c.env.RL_GENERAL, `gen-invites:${user.id}`);
-  const body = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
+  const body = await readJsonBody(c);
   const count = clampInt(body['count'], 1, 50, 1);
   const uses = clampInt(body['uses'], 1, 1000, 1);
 

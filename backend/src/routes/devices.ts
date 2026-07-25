@@ -4,6 +4,7 @@ import { requireAuth } from '../middleware/auth';
 import { assertChannelAccess } from '../lib/channels';
 import { snowflake } from '../lib/ids';
 import type { AppEnv, AuthedUser } from '../types';
+import { readJsonBody } from '../lib/validate';
 
 // E2EE endpoints (2.8.0). Ships behind the client `e2ee` flag (default OFF).
 // The server is a dumb store here: it holds device public keys, an opaque
@@ -24,7 +25,7 @@ const devices = new Hono<AppEnv>();
 /** POST /auth/devices { pub_key, name? } — register one of the caller's devices. */
 devices.post('/auth/devices', requireAuth, async (c) => {
   const user = c.get('user') as AuthedUser;
-  const body = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
+  const body = await readJsonBody(c);
   const pubKey = String(body['pub_key'] ?? '').trim();
   if (!pubKey) throw new ApiError(400, 'bad_request', 'pub_key required');
   if (pubKey.length > 512) throw new ApiError(400, 'bad_request', 'pub_key too long');
@@ -133,7 +134,7 @@ devices.get('/auth/key-backup', requireAuth, async (c) => {
  */
 devices.put('/auth/key-backup', requireAuth, async (c) => {
   const user = c.get('user') as AuthedUser;
-  const body = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
+  const body = await readJsonBody(c);
   const blob = String(body['blob'] ?? '');
   const kdfSalt = String(body['kdf_salt'] ?? '');
   const kdfParams = String(body['kdf_params'] ?? '');
@@ -166,7 +167,7 @@ devices.post('/channels/:id/key-envelopes', requireAuth, async (c) => {
   const channelId = c.req.param('id');
   await assertChannelAccess(c.env, user.id, channelId);
 
-  const body = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
+  const body = await readJsonBody(c);
   const raw = Array.isArray(body['envelopes']) ? (body['envelopes'] as unknown[]) : [];
   if (raw.length === 0) throw new ApiError(400, 'bad_request', 'envelopes required');
   if (raw.length > 500) throw new ApiError(400, 'bad_request', 'too many envelopes');

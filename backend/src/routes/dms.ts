@@ -4,6 +4,7 @@ import { requireAuth } from '../middleware/auth';
 import { fanout } from '../lib/channels';
 import { snowflake } from '../lib/ids';
 import type { AppEnv, AuthedUser } from '../types';
+import { readJsonBody } from '../lib/validate';
 
 const dms = new Hono<AppEnv>();
 dms.use(requireAuth);
@@ -52,7 +53,7 @@ dms.get('/', async (c) => {
 /** POST /dms/open { user_id } — find or create the 1:1 channel. */
 dms.post('/open', async (c) => {
   const user = c.get('user') as AuthedUser;
-  const body = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
+  const body = await readJsonBody(c);
   const peerId = String(body['user_id'] ?? '');
   if (!peerId || peerId === user.id) throw new ApiError(400, 'bad_request', 'pick someone else');
 

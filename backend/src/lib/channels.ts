@@ -49,36 +49,16 @@ export async function channelRecipients(env: Env, channel: ChannelRow): Promise<
   return results.map((r) => r.user_id);
 }
 
-/** Next per-channel sequence number — single-row UPDATE keeps it atomic. */
-export async function bumpSeq(env: Env, channelId: string): Promise<number> {
-  const row = await env.DB.prepare(
-    'UPDATE channels SET last_seq = last_seq + 1 WHERE id = ? AND deleted_at IS NULL RETURNING last_seq',
-  )
-    .bind(channelId)
-    .first<{ last_seq: number }>();
-  if (!row) throw new ApiError(404, 'not_found', 'no such channel');
-  return row.last_seq;
-}
-
-/**
- * Reconcile a burned sequence number back down after a failed insert. `bumpSeq`
- * allocates in its own statement, so if the follow-up message `DB.batch` throws
- * the number is lost forever — leaving a gap that makes `has_more_after` (which
- * compares the last page seq against `last_seq`) permanently over-report. Only
- * step back when `last_seq` is still the value we allocated, so a concurrent
- * writer that already claimed a higher number is never clobbered.
+/*
+ * Sequence allocation moved to the channel's Durable Object in 2.9.0 — see
+ * `lib/sequencer.ts` (Worker side) and `do/seq.ts` (the allocator itself).
+ *
+ * `bumpSeq` (a single-row `last_seq = last_seq + 1` read-modify-write) and its
+ * `releaseSeq` compensation are gone: the first serialized every send in a channel
+ * on one D1 row, and the second existed only to unwind a number burned by a failed
+ * insert — a race it could lose. `channels.last_seq` is now a mirror advanced in
+ * the insert batch itself (`mirrorSeqStatement`), so nothing needs unwinding.
  */
-export async function releaseSeq(env: Env, channelId: string, seq: number): Promise<void> {
-  try {
-    await env.DB.prepare(
-      'UPDATE channels SET last_seq = last_seq - 1 WHERE id = ? AND last_seq = ?',
-    )
-      .bind(channelId, seq)
-      .run();
-  } catch {
-    // Best-effort: a stuck gap is preferable to masking the original insert error.
-  }
-}
 
 export interface GatewayEvent {
   t: string;

@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { requireAuth } from '../middleware/auth';
 import type { AppEnv, AuthedUser } from '../types';
+import { readJsonBody } from '../lib/validate';
 
 const push = new Hono<AppEnv>();
 push.use(requireAuth);
@@ -8,7 +9,7 @@ push.use(requireAuth);
 /** POST /push/tokens { token } — register this device for FCM. */
 push.post('/tokens', async (c) => {
   const user = c.get('user') as AuthedUser;
-  const body = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
+  const body = await readJsonBody(c);
   const token = String(body['token'] ?? '').slice(0, 512);
   if (!token) return c.json({ ok: false }, 400);
   await c.env.DB.prepare(
@@ -22,7 +23,7 @@ push.post('/tokens', async (c) => {
 
 push.delete('/tokens', async (c) => {
   const user = c.get('user') as AuthedUser;
-  const body = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
+  const body = await readJsonBody(c);
   await c.env.DB.prepare('DELETE FROM push_tokens WHERE token = ? AND user_id = ?')
     .bind(String(body['token'] ?? ''), user.id)
     .run();

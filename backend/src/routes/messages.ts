@@ -2,7 +2,8 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { ApiError } from '../middleware/errors';
 import { requireAuth } from '../middleware/auth';
-import { assertChannelAccess, bumpSeq, channelRecipients, fanout, releaseSeq, type ChannelRow, type WaitUntilCtx } from '../lib/channels';
+import { assertChannelAccess, channelRecipients, fanout, type ChannelRow, type WaitUntilCtx } from '../lib/channels';
+import { allocateSeq, mirrorSeqStatement } from '../lib/sequencer';
 import { snowflake } from '../lib/ids';
 import { assertOwnedAttachment, type AttachmentInput } from '../lib/media';
 import { autocompleteMentions, resolveMentions, type ResolvedMention } from '../lib/mentions';
@@ -18,6 +19,7 @@ import { messageNotificationPlan, storeMessageNotifications } from '../lib/notif
 import { normalizeReactionEmoji } from '../lib/social';
 import { enforceRateLimit } from '../middleware/ratelimit';
 import type { AppEnv, AuthedUser, Env } from '../types';
+import { readJsonBody } from '../lib/validate';
 
 const messages = new Hono<AppEnv>();
 // scoped: this router mounts at '/', a bare use() would guard the whole app
@@ -466,9 +468,7 @@ messages.post('/channels/:id/messages', async (c) => {
   // Per-endpoint message rate limit, keyed per sender+channel so one hot channel
   // can't starve a user's other conversations.
   await enforceRateLimit(c.env.RL_GENERAL, `msg:${user.id}:${channel.id}`);
-  const body = await c.req.json<Record<string, unknown>>().catch(() => {
-    throw new ApiError(400, 'bad_json', 'body must be json');
-  });
+  const body = await readJsonBody(c);
 
   let content = String(body['content'] ?? '').slice(0, MAX_CONTENT);
   const kind = normalizeMessageKind(body['kind']);
@@ -667,7 +667,8 @@ export async function deliverMessage(
   const { content, replyTo, threadId, nonce, attachment, kind, metadata, poll, ttlMs, encrypted } = input;
   const mentions = await resolveMentions(env, channel, author, content);
 
-  const seq = await bumpSeq(env, channel.id);
+  // 2.9.0: allocated by the channel's Durable Object, not a D1 single-row bump.
+  const seq = await allocateSeq(env, channel);
   const now = Date.now();
   const row: MessageRow = {
     id: snowflake(),
@@ -703,6 +704,11 @@ export async function deliverMessage(
       row.attachment_key, row.attachment_name, row.attachment_type, row.attachment_size, row.created_at,
       row.kind, row.metadata, row.thread_id, row.expires_at ?? null, row.encrypted ?? 0,
     ),
+    // Mirror the sequence into D1 in the SAME batch as the insert, so `last_seq`
+    // means "highest seq that actually exists" — which is what unread counts and
+    // `has_more_after` assume. A failed batch therefore leaves no trace at all,
+    // which is why 2.9.0 no longer needs the old releaseSeq compensation.
+    mirrorSeqStatement(env, channel.id, seq),
   ];
   if (poll) {
     statements.push(
@@ -719,14 +725,10 @@ export async function deliverMessage(
     `INSERT OR IGNORE INTO message_mentions (message_id, user_id, kind, created_at)
      VALUES (?, ?, ?, ?)`,
   ).bind(row.id, mention.userId, mention.kind, now)));
-  try {
-    // seq was allocated by bumpSeq in a separate statement; if the insert batch
-    // fails, hand the number back so it doesn't burn a permanent gap.
-    await env.DB.batch(statements);
-  } catch (err) {
-    await releaseSeq(env, channel.id, seq);
-    throw err;
-  }
+  // The DO already owns the counter, and the D1 mirror only moves on a successful
+  // insert, so a failed batch simply abandons this number — no compensation, no
+  // gap in anything a reader can observe.
+  await env.DB.batch(statements);
 
   // Viewer-neutral copy: fanout reaches many recipients, so no `me` flags baked in.
   // Exactly one row in -> exactly one serialized row out; `?? {}` only satisfies
@@ -778,7 +780,7 @@ messages.patch('/messages/:id', async (c) => {
   if (row.deleted_at !== null) throw new ApiError(400, 'deleted', 'message is deleted');
   const channel = await assertChannelAccess(c.env, user.id, row.channel_id);
 
-  const body = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
+  const body = await readJsonBody(c);
   if (body['content'] === undefined) throw new ApiError(400, 'bad_content', 'content is required');
   const content = String(body['content'] ?? '').slice(0, MAX_CONTENT);
   if (!content.trim() && !row.attachment_key) throw new ApiError(400, 'empty_message', 'say something');
@@ -1231,7 +1233,7 @@ async function createForumMessage(
   const mentions = await resolveMentions(c.env, channel, user, content);
   const id = snowflake();
   const now = Date.now();
-  const seq = await bumpSeq(c.env, channel.id);
+  const seq = await allocateSeq(c.env, channel);
   const row: MessageRow = {
     id,
     channel_id: channel.id,
@@ -1253,27 +1255,23 @@ async function createForumMessage(
     forum_tag_id: forumTagId,
     marked_at: null,
   };
-  try {
-    // seq is allocated separately by bumpSeq; reconcile it on batch failure so a
-    // failed forum insert can't burn a permanent gap in the channel sequence.
-    await c.env.DB.batch([
-      c.env.DB.prepare(
-        `INSERT INTO messages (id, channel_id, seq, author_id, content, reply_to, nonce,
-          attachment_key, attachment_name, attachment_type, attachment_size, created_at,
-          kind, metadata, thread_id, forum_tag_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).bind(
-        row.id, row.channel_id, row.seq, row.author_id, row.content, row.reply_to, row.nonce,
-        row.attachment_key, row.attachment_name, row.attachment_type, row.attachment_size,
-        row.created_at, row.kind, row.metadata, row.thread_id, row.forum_tag_id,
-      ),
-      ...mentions.map((mention) => c.env.DB.prepare(
-        'INSERT INTO message_mentions (message_id, user_id, kind, created_at) VALUES (?, ?, ?, ?)',
-      ).bind(row.id, mention.userId, mention.kind, now)),
-    ]);
-  } catch (err) {
-    await releaseSeq(c.env, channel.id, seq);
-    throw err;
-  }
+  // seq comes from the channel's DO; the mirror statement rides along in the same
+  // batch so `channels.last_seq` only ever reflects a row that really landed.
+  await c.env.DB.batch([
+    c.env.DB.prepare(
+      `INSERT INTO messages (id, channel_id, seq, author_id, content, reply_to, nonce,
+        attachment_key, attachment_name, attachment_type, attachment_size, created_at,
+        kind, metadata, thread_id, forum_tag_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(
+      row.id, row.channel_id, row.seq, row.author_id, row.content, row.reply_to, row.nonce,
+      row.attachment_key, row.attachment_name, row.attachment_type, row.attachment_size,
+      row.created_at, row.kind, row.metadata, row.thread_id, row.forum_tag_id,
+    ),
+    mirrorSeqStatement(c.env, channel.id, seq),
+    ...mentions.map((mention) => c.env.DB.prepare(
+      'INSERT INTO message_mentions (message_id, user_id, kind, created_at) VALUES (?, ?, ?, ?)',
+    ).bind(row.id, mention.userId, mention.kind, now)),
+  ]);
 
   const serialized = (await serializeMessages(c.env, [row], user.id, user.isAdmin))[0];
   const recipients = await channelRecipients(c.env, channel);
@@ -1303,9 +1301,7 @@ async function createForumMessage(
 messages.post('/channels/:id/forum/posts', async (c) => {
   const user = c.get('user') as AuthedUser;
   const channel = await assertChannelAccess(c.env, user.id, c.req.param('id'));
-  const body = await c.req.json<Record<string, unknown>>().catch(() => {
-    throw new ApiError(400, 'bad_json', 'body must be json');
-  });
+  const body = await readJsonBody(c);
   return createForumMessage(c, channel, user, body, null);
 });
 
@@ -1317,9 +1313,7 @@ messages.post('/channels/:id/forum/posts/:postId/replies', async (c) => {
   if (root.channel_id !== channel.id || root.kind !== 'forum_post' || root.deleted_at !== null) {
     throw new ApiError(404, 'not_found', 'no such forum post');
   }
-  const body = await c.req.json<Record<string, unknown>>().catch(() => {
-    throw new ApiError(400, 'bad_json', 'body must be json');
-  });
+  const body = await readJsonBody(c);
   return createForumMessage(c, channel, user, body, root);
 });
 
@@ -1433,9 +1427,7 @@ messages.post('/channels/:id/forum/tags', async (c) => {
   if (!await isSpaceOwner(c, user, channel)) {
     throw new ApiError(403, 'forbidden', 'only the space owner can manage forum tags');
   }
-  const body = await c.req.json<Record<string, unknown>>().catch(() => {
-    throw new ApiError(400, 'bad_json', 'body must be json');
-  });
+  const body = await readJsonBody(c);
   const name = String(body['name'] ?? '').trim().slice(0, 60);
   if (!name) throw new ApiError(400, 'bad_tag', 'tag name is required');
   const rawLabel = body['mark_label'];
@@ -1575,7 +1567,7 @@ messages.post('/channels/:id/typing', async (c) => {
 messages.put('/channels/:id/read', async (c) => {
   const user = c.get('user') as AuthedUser;
   const channel = await assertChannelAccess(c.env, user.id, c.req.param('id'));
-  const body = await c.req.json<Record<string, unknown>>().catch(() => ({}) as Record<string, unknown>);
+  const body = await readJsonBody(c);
   const seq = Number(body['seq']) || 0;
   // RETURNING only yields a row when the insert lands or the guard passes,
   // so a stale/duplicate seq produces no fanout.
