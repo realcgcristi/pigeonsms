@@ -277,6 +277,12 @@ fun ChatScreen(
     // This nest's custom emoji (2.9.5) — needed both to offer them in the picker
     // and to render `custom:<id>` reactions other people have already left.
     val customEmoji by vm.customEmoji.collectAsState()
+    // Opening a conversation clears its notifications — tapping one used to leave
+    // every other message from the same chat sitting in the shade.
+    val notifContext = LocalContext.current
+    LaunchedEffect(channelId) {
+        app.pigeonsms.dismissChannelNotifications(notifContext, channelId)
+    }
     val mediaItems = remember(messages) {
         messages.mapNotNull { message ->
             val key = message.attachmentKey ?: return@mapNotNull null
