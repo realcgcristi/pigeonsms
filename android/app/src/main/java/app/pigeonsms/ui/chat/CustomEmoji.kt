@@ -265,6 +265,11 @@ fun EmojiStickerPicker(
             }
 
             val shown = if (tab == 0) emojis else stickers
+            // 2.9.6: grouped by nest. One flat wall of images is unusable once you
+            // belong to more than a couple of nests.
+            val grouped = remember(shown) {
+                shown.groupBy { it.space_name ?: "other" }.toSortedMap()
+            }
             if (shown.isEmpty()) {
                 Text(
                     if (tab == 0) "no emoji in your nests yet" else "no stickers in your nests yet",
@@ -284,8 +289,20 @@ fun EmojiStickerPicker(
                     horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
                     verticalArrangement = Arrangement.spacedBy(Spacing.xs),
                 ) {
-                    items(shown.size, key = { shown[it].id }) { index ->
-                        val item = shown[index]
+                    grouped.forEach { (nest, itemsForNest) ->
+                        item(
+                            span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) },
+                            key = "hdr-$nest",
+                        ) {
+                            Text(
+                                nest,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = Spacing.xs),
+                            )
+                        }
+                        items(itemsForNest.size, key = { itemsForNest[it].id }) { index ->
+                        val item = itemsForNest[index]
                         Surface(
                             onClick = {
                                 if (tab == 0) onInsertEmoji(item) else { onSendSticker(item); onDismiss() }
@@ -299,6 +316,7 @@ fun EmojiStickerPicker(
                             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 CustomEmojiImage(item, mediaUrl, size = if (tab == 0) 44 else 88)
                             }
+                        }
                         }
                     }
                 }

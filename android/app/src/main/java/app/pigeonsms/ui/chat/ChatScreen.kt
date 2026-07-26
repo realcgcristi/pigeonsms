@@ -2760,10 +2760,38 @@ private fun AttachmentView(name: String?, type: String?, url: String, self: Bool
             )
         }
     } else {
+        // 2.9.6: non-media attachments (pdf, zip, docs...) had no tap handler at
+        // all, so they rendered as a dead card. Hand them to the system — whatever
+        // the user has installed for that type opens it, and the browser handles
+        // "download" for anything with no viewer.
+        val attachmentContext = LocalContext.current
         Row(
             Modifier.fillMaxWidth().defaultMinSize(minHeight = 48.dp)
                 .clip(Corners.chip)
                 .background(bubbleContentColor(self).copy(alpha = 0.1f))
+                .clickableScale(pressedScale = 0.98f) {
+                    val target = url
+                    runCatching {
+                        attachmentContext.startActivity(
+                            android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                                setDataAndType(android.net.Uri.parse(target), type ?: "*/*")
+                                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            },
+                        )
+                    }.onFailure {
+                        // No app claims that MIME type — fall back to the browser,
+                        // which will download it rather than failing silently.
+                        runCatching {
+                            attachmentContext.startActivity(
+                                android.content.Intent(
+                                    android.content.Intent.ACTION_VIEW,
+                                    android.net.Uri.parse(target),
+                                ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                            )
+                        }
+                    }
+                }
                 .padding(Spacing.s),
             verticalAlignment = Alignment.CenterVertically,
         ) {

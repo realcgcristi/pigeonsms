@@ -520,11 +520,11 @@ spaces.get('/emojis/mine', async (c) => {
   const user = c.get('user') as AuthedUser;
   const { results } = await c.env.DB.prepare(
     `SELECT se.id, se.space_id, se.name, se.kind, se.media_key, se.content_type,
-            se.animated, se.created_by, se.created_at
+            se.animated, se.created_by, se.created_at, s.name AS space_name
      FROM space_emojis se
      JOIN space_members sm ON sm.space_id = se.space_id AND sm.user_id = ?
      JOIN spaces s ON s.id = se.space_id AND s.deleted_at IS NULL
-     ORDER BY se.kind, se.name, se.created_at
+     ORDER BY s.name, se.kind, se.name, se.created_at
      LIMIT 1000`,
   )
     .bind(user.id)
@@ -541,6 +541,8 @@ spaces.get('/emojis/mine', async (c) => {
       animated: Number(row['animated'] ?? 0) === 1,
       created_by: row['created_by'],
       created_at: row['created_at'],
+      // 2.9.6: lets the picker group by nest instead of one flat wall of images.
+      space_name: row['space_name'],
     })),
   });
 });
