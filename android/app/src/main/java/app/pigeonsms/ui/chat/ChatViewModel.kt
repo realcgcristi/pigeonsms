@@ -8,6 +8,7 @@ import app.pigeonsms.data.SocialRepository
 import app.pigeonsms.db.MessageDao
 import app.pigeonsms.db.MessageEntity
 import app.pigeonsms.network.MessageDto
+import app.pigeonsms.network.SpaceEmojiDto
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -90,6 +91,20 @@ class ChatViewModel(
     private val _ui = MutableStateFlow(ChatUiState(isAdmin = isAdmin))
     val ui: StateFlow<ChatUiState> = _ui
 
+    /**
+     * This nest's custom emoji + stickers (2.9.5), for the reaction picker and for
+     * rendering `custom:<id>` reactions others have already left.
+     *
+     * Empty for DMs — custom emoji belong to a nest, and a DM has none. Loaded
+     * once per conversation and served from the repository's cache thereafter, so
+     * opening a chat costs at most one extra request.
+     */
+    private val _customEmoji = MutableStateFlow<List<SpaceEmojiDto>>(emptyList())
+    val customEmoji: StateFlow<List<SpaceEmojiDto>> = _customEmoji
+
+    /** Resolve a `custom:<id>` reaction to the emoji it names, if we know it. */
+    fun emojiById(id: String): SpaceEmojiDto? = _customEmoji.value.firstOrNull { it.id == id }
+
     private var searchJob: Job? = null
     private var localSearchJob: Job? = null
     private var mentionJob: Job? = null
@@ -109,6 +124,7 @@ class ChatViewModel(
         }
         // eager channel roster for the "seen by" info action (member avatars + count)
         loadChannelRoster()
+        loadCustomEmoji()
         viewModelScope.launch {
             repo.reads.collect { all ->
                 val peerSeq = all[channelId]?.filterKeys { it != selfId }?.values?.maxOrNull() ?: 0L
@@ -135,6 +151,23 @@ class ChatViewModel(
                     is PinEvent.SuperPinRemoved -> _ui.update { it.copy(superPin = null) }
                 }
             }
+        }
+    }
+
+    /**
+     * Load the nest's emoji set. Best-effort and silent: a nest with no emoji, a
+     * DM, or a failed request all mean "no custom emoji", and none of those should
+     * surface an error in a chat screen the user opened to read messages.
+     */
+    private fun loadCustomEmoji() {
+        val repository = social ?: return
+        if (!isSpace) return
+        viewModelScope.launch {
+            runCatching {
+                val space = repository.cachedSpaces().firstOrNull { s -> s.channels.any { it.id == channelId } }
+                    ?: repository.spaces().firstOrNull { s -> s.channels.any { it.id == channelId } }
+                space?.let { repository.spaceEmojis(it.id) }
+            }.getOrNull()?.let { emoji -> _customEmoji.value = emoji }
         }
     }
 
