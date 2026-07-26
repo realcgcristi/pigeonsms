@@ -9,6 +9,8 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -646,8 +648,13 @@ private fun NestHeader(
             }
         }
         // Nest actions row.
+        // Horizontally scrollable: 2.9.5 added emoji/roles/members chips here, and a
+        // fixed-width Row responds to overflow by squeezing the LAST child down to
+        // its minimum width — which turned "demolish nest" into one letter per line.
         Row(
-            Modifier.fillMaxWidth().padding(top = Spacing.xs, start = Spacing.xs),
+            Modifier.fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(top = Spacing.xs, start = Spacing.xs, end = Spacing.xs),
             horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -723,7 +730,16 @@ private fun NestActionChip(
         horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
     ) {
         Icon(icon, label, Modifier.size(16.dp), tint = tint)
-        Text(label, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = tint)
+        Text(
+            label,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = tint,
+            // Never wrap a chip label — a squeezed chip should overflow the row
+            // (which now scrolls) rather than stack its letters vertically.
+            maxLines = 1,
+            softWrap = false,
+        )
     }
 }
 
