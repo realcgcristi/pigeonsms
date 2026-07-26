@@ -195,6 +195,19 @@ class ChatRepository(
         send(channelId, caption.trim(), replyTo, attachment, selfName, isDm = isDm)
     }
 
+    /**
+     * Discard a message that never reached the server (2.9.7).
+     *
+     * A FAILED or stuck-SENDING row exists only on this device — the outbox still
+     * holds it and will keep retrying — so "delete" for those means dropping the
+     * local row *and* the outbox entry. Asking the server to delete it is
+     * meaningless: it has never seen the id.
+     */
+    suspend fun discardUnsent(message: MessageEntity) {
+        db.messages().delete(message.id)
+        message.nonce?.let { db.outbox().remove(it) }
+    }
+
     suspend fun sendSticker(channelId: String, stickerId: String) {
         api.sendSticker(channelId, stickerId, java.util.UUID.randomUUID().toString())
         runCatching { sync(channelId) }

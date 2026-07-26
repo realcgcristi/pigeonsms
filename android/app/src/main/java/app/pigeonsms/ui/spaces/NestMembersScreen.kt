@@ -22,6 +22,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -69,6 +72,8 @@ data class NestMembersUiState(
     val roles: List<SpaceRoleDto> = emptyList(),
     /** True when the viewer may assign roles — drives whether the + shows. */
     val canManageRoles: Boolean = false,
+    /** KICK_MEMBERS — drives the kick/ban actions (2.9.7). */
+    val canModerate: Boolean = false,
     val busy: Boolean = false,
 )
 
@@ -91,6 +96,8 @@ class NestMembersViewModel(private val repo: SocialRepository) : ViewModel() {
                         roles = roles,
                         canManageRoles = mine?.is_owner == true ||
                             mine?.permission_names?.contains("MANAGE_ROLES") == true,
+                        canModerate = mine?.is_owner == true ||
+                            mine?.permission_names?.contains("KICK_MEMBERS") == true,
                     )
                 }
             }
@@ -106,6 +113,34 @@ class NestMembersViewModel(private val repo: SocialRepository) : ViewModel() {
                 .onFailure { e ->
                     _ui.update { it.copy(loading = false, error = e.message ?: "couldn't load members") }
                 }
+        }
+    }
+
+    /** Remove someone from the nest (2.9.7). */
+    fun kick(spaceId: String, userId: String, onDone: () -> Unit) {
+        if (_ui.value.busy) return
+        viewModelScope.launch {
+            _ui.update { it.copy(busy = true, error = null) }
+            runCatching { repo.kickMember(spaceId, userId) }
+                .onSuccess {
+                    _ui.update { s -> s.copy(busy = false, members = s.members.filterNot { it.id == userId }) }
+                    onDone()
+                }
+                .onFailure { e -> _ui.update { it.copy(busy = false, error = e.message ?: "couldn't remove them") } }
+        }
+    }
+
+    /** Remove them and keep them out — a kick alone is undone by the next invite. */
+    fun ban(spaceId: String, userId: String, onDone: () -> Unit) {
+        if (_ui.value.busy) return
+        viewModelScope.launch {
+            _ui.update { it.copy(busy = true, error = null) }
+            runCatching { repo.banMember(spaceId, userId) }
+                .onSuccess {
+                    _ui.update { s -> s.copy(busy = false, members = s.members.filterNot { it.id == userId }) }
+                    onDone()
+                }
+                .onFailure { e -> _ui.update { it.copy(busy = false, error = e.message ?: "couldn't ban them") } }
         }
     }
 
@@ -230,6 +265,30 @@ fun NestMembersScreen(
                                         contentDescription = "give ${member.username} a role",
                                         tint = MaterialTheme.colorScheme.onSurface,
                                     )
+                                }
+                            }
+                            // 2.9.7: kick/ban. Hidden for the owner and for
+                            // yourself, both of which the server rejects anyway.
+                            if (ui.canModerate && member.role != "owner") {
+                                var menuOpen by remember(member.id) { mutableStateOf(false) }
+                                Box {
+                                    IconButton(onClick = { menuOpen = true }) {
+                                        Icon(
+                                            Icons.Outlined.MoreVert,
+                                            contentDescription = "moderate ${member.username}",
+                                            tint = MaterialTheme.colorScheme.onSurface,
+                                        )
+                                    }
+                                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                                        DropdownMenuItem(
+                                            text = { Text("kick") },
+                                            onClick = { menuOpen = false; vm.kick(spaceId, member.id) {} },
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("ban", color = MaterialTheme.colorScheme.error) },
+                                            onClick = { menuOpen = false; vm.ban(spaceId, member.id) {} },
+                                        )
+                                    }
                                 }
                             }
                         }
