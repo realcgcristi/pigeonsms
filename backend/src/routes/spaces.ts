@@ -505,6 +505,46 @@ spaces.get('/invites/:code/preview', async (c) => {
   });
 });
 
+/**
+ * GET /spaces/emojis/mine — every custom emoji and sticker from every nest the
+ * caller belongs to (2.9.5).
+ *
+ * Backs "use your emoji anywhere": the picker and the `:shortcode:` renderer need
+ * the whole set, not just the current nest's, because a DM has no nest at all and
+ * you can still use emoji there.
+ *
+ * Ordered so that if two nests use the same shortcode, the client picks a stable
+ * winner rather than whichever row came back first.
+ */
+spaces.get('/emojis/mine', async (c) => {
+  const user = c.get('user') as AuthedUser;
+  const { results } = await c.env.DB.prepare(
+    `SELECT se.id, se.space_id, se.name, se.kind, se.media_key, se.content_type,
+            se.animated, se.created_by, se.created_at
+     FROM space_emojis se
+     JOIN space_members sm ON sm.space_id = se.space_id AND sm.user_id = ?
+     JOIN spaces s ON s.id = se.space_id AND s.deleted_at IS NULL
+     ORDER BY se.kind, se.name, se.created_at
+     LIMIT 1000`,
+  )
+    .bind(user.id)
+    .all();
+
+  return c.json({
+    emojis: results.map((row) => ({
+      id: row['id'],
+      space_id: row['space_id'],
+      name: row['name'],
+      kind: row['kind'],
+      media_key: row['media_key'],
+      content_type: row['content_type'],
+      animated: Number(row['animated'] ?? 0) === 1,
+      created_by: row['created_by'],
+      created_at: row['created_at'],
+    })),
+  });
+});
+
 /** POST /spaces/join { code } */
 spaces.post('/join', async (c) => {
   const user = c.get('user') as AuthedUser;

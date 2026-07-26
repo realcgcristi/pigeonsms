@@ -703,6 +703,7 @@ fun ChatScreen(
                 vm.sendStreamedAttachment(open, name, type, size, caption)
             },
             stickers = customEmoji.filter { it.kind == "sticker" },
+            pickerEmoji = customEmoji,
             onSendSticker = vm::sendSticker,
             mediaUrlFor = vm::mediaUrl,
             onClearReply = { vm.setReply(null) },
@@ -2796,6 +2797,8 @@ private fun Composer(
     /** Large-file path: (openStream, name, type, size, caption). */
     onStreamedAttachment: (() -> java.io.InputStream, String, String, Long, String) -> Unit = { _, _, _, _, _ -> },
     stickers: List<SpaceEmojiDto> = emptyList(),
+    /** Every emoji you can use — drives the picker and `:name` autocomplete. */
+    pickerEmoji: List<SpaceEmojiDto> = emptyList(),
     onSendSticker: (String) -> Unit = {},
     mediaUrlFor: (String) -> String? = { null },
     onClearReply: () -> Unit,
@@ -3173,6 +3176,25 @@ private fun Composer(
                     onToggleEncrypt = { encryptOn = !encryptOn },
                 )
             }
+            // `:name` autocomplete (2.9.5) — sits above the input so it never
+            // covers what you're typing.
+            val emojiQuery = emojiQueryAt(text.text)
+            if (emojiQuery != null) {
+                EmojiAutocompleteRow(
+                    matches = pickerEmoji.filter {
+                        it.kind == "emoji" && it.name.startsWith(emojiQuery)
+                    },
+                    mediaUrl = mediaUrlFor,
+                    onPick = { item ->
+                        val colon = text.text.lastIndexOf(':')
+                        if (colon >= 0) {
+                            val token = ":" + item.name + ":"
+                            val next = text.text.substring(0, colon) + token
+                            text = TextFieldValue(next, TextRange(next.length))
+                        }
+                    },
+                )
+            }
             if (recording) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -3215,7 +3237,8 @@ private fun Composer(
             } else Row(verticalAlignment = Alignment.Bottom) {
                 // 2.9.5: only offered when this nest actually has stickers, so DMs
                 // and sticker-less nests don't get a button that opens an empty sheet.
-                if (stickers.isNotEmpty()) {
+                // One face button for both emoji and stickers (2.9.5).
+                if (stickers.isNotEmpty() || pickerEmoji.isNotEmpty()) {
                     IconButton(
                         onClick = { showStickerPicker = true },
                         enabled = !ui.sending && ui.editing == null,
@@ -3223,28 +3246,23 @@ private fun Composer(
                     ) {
                         Icon(
                             Icons.Outlined.EmojiEmotions,
-                            "send a sticker",
+                            "emoji and stickers",
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
                 if (showStickerPicker) {
-                    androidx.compose.material3.AlertDialog(
-                        onDismissRequest = { showStickerPicker = false },
-                        title = { Text("stickers") },
-                        text = {
-                            StickerPickerRow(
-                                emoji = stickers,
-                                mediaUrl = mediaUrlFor,
-                                onPick = { sticker ->
-                                    showStickerPicker = false
-                                    onSendSticker(sticker.id)
-                                },
-                            )
+                    EmojiStickerPicker(
+                        emoji = pickerEmoji,
+                        mediaUrl = mediaUrlFor,
+                        onInsertEmoji = { item ->
+                            val token = ":" + item.name + ":"
+                            val at = text.selection.end.coerceIn(0, text.text.length)
+                            val next = text.text.substring(0, at) + token + text.text.substring(at)
+                            text = TextFieldValue(next, TextRange(at + token.length))
                         },
-                        confirmButton = {
-                            TextButton(onClick = { showStickerPicker = false }) { Text("close") }
-                        },
+                        onSendSticker = { sticker -> onSendSticker(sticker.id) },
+                        onDismiss = { showStickerPicker = false },
                     )
                 }
                 IconButton(

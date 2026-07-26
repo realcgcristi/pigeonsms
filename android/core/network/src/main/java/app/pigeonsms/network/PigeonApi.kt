@@ -635,4 +635,9 @@ class PigeonApi(
     suspend fun invitePreview(code: String) =
         client.get("$baseUrl/spaces/invites/${q(code)}/preview") { auth() }.unwrap<InvitePreviewResponse>()
 
+
+    /** Every emoji + sticker from every nest the caller belongs to (2.9.5). */
+    suspend fun myEmojis() =
+        client.get("$baseUrl/spaces/emojis/mine") { auth() }.unwrap<SpaceEmojisResponse>().emojis
+
 }

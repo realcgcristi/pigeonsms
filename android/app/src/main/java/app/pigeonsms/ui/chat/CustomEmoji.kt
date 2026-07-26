@@ -16,6 +16,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -65,7 +70,7 @@ fun CustomEmojiImage(
     emoji: SpaceEmojiDto?,
     mediaUrl: (String) -> String?,
     modifier: Modifier = Modifier,
-    size: Int = 20,
+    size: Int = 24,
 ) {
     if (emoji == null) {
         Text("▫", style = MaterialTheme.typography.bodySmall)
@@ -122,12 +127,12 @@ fun CustomEmojiPickerRow(
                         MaterialTheme.colorScheme.surfaceContainerHigh
                     },
                     interactionSource = source,
-                    modifier = Modifier.size(44.dp).semantics {
+                    modifier = Modifier.size(52.dp).semantics {
                         contentDescription = ":${item.name}:"
                     },
                 ) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CustomEmojiImage(item, mediaUrl, size = 24)
+                        CustomEmojiImage(item, mediaUrl, size = 30)
                     }
                 }
             }
@@ -168,12 +173,12 @@ fun StickerPickerRow(
                     shape = MaterialTheme.shapes.medium,
                     color = MaterialTheme.colorScheme.surfaceContainerHigh,
                     interactionSource = source,
-                    modifier = Modifier.size(72.dp).semantics {
+                    modifier = Modifier.size(96.dp).semantics {
                         contentDescription = "sticker ${item.name}"
                     },
                 ) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CustomEmojiImage(item, mediaUrl, size = 60)
+                        CustomEmojiImage(item, mediaUrl, size = 84)
                     }
                 }
             }
@@ -210,6 +215,141 @@ fun StickerMessageContent(
         model = mediaUrl(key),
         contentDescription = parsed.second,
         contentScale = ContentScale.Fit,
-        modifier = modifier.size(140.dp),
+        modifier = modifier.size(180.dp),
     )
+}
+
+/**
+ * The Discord-style picker: emoji and stickers behind one face button (2.9.5).
+ *
+ * Two tabs rather than two buttons — they come from the same table and the same
+ * mental bucket ("my nests' images"), they just differ in how they're sent:
+ * tapping an emoji inserts `:name:` into the draft, tapping a sticker sends it as
+ * its own message and closes the sheet.
+ */
+@Composable
+fun EmojiStickerPicker(
+    emoji: List<SpaceEmojiDto>,
+    mediaUrl: (String) -> String?,
+    onInsertEmoji: (SpaceEmojiDto) -> Unit,
+    onSendSticker: (SpaceEmojiDto) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var tab by remember { mutableStateOf(0) }
+    val emojis = remember(emoji) { emoji.filter { it.kind == "emoji" } }
+    val stickers = remember(emoji) { emoji.filter { it.kind == "sticker" } }
+
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
+                androidx.compose.material3.TextButton(onClick = { tab = 0 }) {
+                    Text(if (tab == 0) "• emoji" else "emoji")
+                }
+                androidx.compose.material3.TextButton(onClick = { tab = 1 }) {
+                    Text(if (tab == 1) "• stickers" else "stickers")
+                }
+            }
+        },
+        text = {
+            val shown = if (tab == 0) emojis else stickers
+            if (shown.isEmpty()) {
+                Text(
+                    if (tab == 0) "no emoji in your nests yet" else "no stickers in your nests yet",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
+                    columns = androidx.compose.foundation.lazy.grid.GridCells.Adaptive(
+                        if (tab == 0) 56.dp else 96.dp,
+                    ),
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp),
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
+                    verticalArrangement = Arrangement.spacedBy(Spacing.xs),
+                ) {
+                    items(shown.size, key = { shown[it].id }) { index ->
+                        val item = shown[index]
+                        Surface(
+                            onClick = {
+                                if (tab == 0) onInsertEmoji(item) else { onSendSticker(item); onDismiss() }
+                            },
+                            shape = MaterialTheme.shapes.medium,
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            modifier = Modifier.size(if (tab == 0) 52.dp else 92.dp).semantics {
+                                contentDescription = ":${item.name}:"
+                            },
+                        ) {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                CustomEmojiImage(item, mediaUrl, size = if (tab == 0) 34 else 80)
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            androidx.compose.material3.TextButton(onClick = onDismiss) { Text("close") }
+        },
+    )
+}
+
+/**
+ * Autocomplete for a half-typed `:shortcode` in the composer (2.9.5).
+ *
+ * Matches on the fragment after the opening colon and shows nothing until at
+ * least one character is typed, so an ordinary ":" in prose doesn't pop a menu.
+ */
+@Composable
+fun EmojiAutocompleteRow(
+    matches: List<SpaceEmojiDto>,
+    mediaUrl: (String) -> String?,
+    onPick: (SpaceEmojiDto) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (matches.isEmpty()) return
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        shape = MaterialTheme.shapes.medium,
+    ) {
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(Spacing.xs),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.s),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            matches.take(20).forEach { item ->
+                Surface(
+                    onClick = { onPick(item) },
+                    shape = MaterialTheme.shapes.small,
+                    color = MaterialTheme.colorScheme.surface,
+                ) {
+                    Row(
+                        Modifier.padding(horizontal = Spacing.s, vertical = Spacing.xs),
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        CustomEmojiImage(item, mediaUrl, size = 22)
+                        Text(":${item.name}:", style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Find the `:fragment` the caret is sitting in, if any.
+ *
+ * Returns null unless the text ends with a colon followed by at least one
+ * shortcode character and no whitespace — that's what keeps it quiet while you're
+ * writing normal prose containing colons.
+ */
+fun emojiQueryAt(text: String): String? {
+    val colon = text.lastIndexOf(':')
+    if (colon < 0 || colon == text.lastIndex) return null
+    val fragment = text.substring(colon + 1)
+    if (fragment.isEmpty() || fragment.any { it.isWhitespace() || it == ':' }) return null
+    if (!fragment.all { it.isLetterOrDigit() || it == '_' }) return null
+    return fragment.lowercase()
 }
