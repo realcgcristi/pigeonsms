@@ -15,7 +15,6 @@ import search from './routes/search';
 import emojis from './routes/emojis';
 import roles from './routes/roles';
 import threads from './routes/threads';
-import reminders, { dispatchDueReminders } from './routes/reminders';
 import uploads from './routes/uploads';
 import devices from './routes/devices';
 import { mediaUpload, mediaServe } from './routes/media';
@@ -78,7 +77,6 @@ app.route('/', search);
 // Threads in text channels: /channels/:id/threads and /threads/:threadId...,
 // which span two top-level prefixes, so root-mounted like the message routes.
 app.route('/', threads);
-app.route('/reminders', reminders);
 app.route('/uploads', uploads);
 app.route('/media', mediaUpload);
 app.route('/media', mediaServe);
@@ -108,8 +106,8 @@ app.notFound(notFound);
 export default {
   fetch: app.fetch,
   // Cron entry point (schedule set in wrangler.toml, out of scope here). Runs
-  // four independent sweeps every tick; each is wrapped so a failure in one never
-  // aborts the others. The message helpers are context-free (no Hono Context) and
+  // three independent sweeps every tick; each is wrapped so a failure in one never
+  // aborts the other. The message helpers are context-free (no Hono Context) and
   // reuse the module's normal delete/send path — seq alloc + fanout + FCM.
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     // (a) disappearing messages: soft-delete anything past its expires_at via the
@@ -133,14 +131,6 @@ export default {
       await sweepLingeringRows(env);
     } catch (err) {
       console.error('cron: sweep lingering rows failed', err);
-    }
-    // (d) reminders: deliver every due reminder as a notification + push. Unlike
-    // scheduled messages these never become a message, so nobody else's
-    // conversation is touched.
-    try {
-      await dispatchDueReminders(env);
-    } catch (err) {
-      console.error('cron: dispatch reminders failed', err);
     }
   },
   async queue(batch: MessageBatch, env: Env): Promise<void> {

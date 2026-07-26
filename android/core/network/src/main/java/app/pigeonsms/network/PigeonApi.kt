@@ -578,28 +578,6 @@ class PigeonApi(
         else client.delete("$baseUrl/threads/$threadId/follow") { auth() }.unwrap<OkResponse>()
     }
 
-    // --- v2.9.5: reminders ---
-    suspend fun reminders(fired: Boolean = false) =
-        client.get("$baseUrl/reminders?fired=${if (fired) 1 else 0}") { auth() }
-            .unwrap<RemindersResponse>().reminders
-
-    suspend fun createReminder(
-        text: String,
-        remindAt: Long,
-        channelId: String? = null,
-        messageId: String? = null,
-    ) = client.post("$baseUrl/reminders") {
-        auth(); contentType(ContentType.Application.Json)
-        setBody(buildJsonObject {
-            put("text", text); put("remind_at", remindAt)
-            if (channelId != null) put("channel_id", channelId)
-            if (messageId != null) put("message_id", messageId)
-        })
-    }.unwrap<ReminderResponse>().reminder
-
-    suspend fun cancelReminder(id: String) {
-        client.delete("$baseUrl/reminders/$id") { auth() }.unwrap<OkResponse>()
-    }
 
     // --- v2.9.5: global search (across every nest + DMs) ---
     suspend fun searchEverywhere(query: String, before: Long? = null) =

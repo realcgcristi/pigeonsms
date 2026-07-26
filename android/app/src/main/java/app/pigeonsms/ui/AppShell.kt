@@ -97,8 +97,6 @@ import app.pigeonsms.ui.threads.ThreadsScreen
 import app.pigeonsms.ui.threads.ThreadsViewModel
 import app.pigeonsms.ui.threads.ThreadScreen
 import app.pigeonsms.ui.threads.ThreadViewModel
-import app.pigeonsms.ui.reminders.RemindersScreen
-import app.pigeonsms.ui.reminders.RemindersViewModel
 import app.pigeonsms.ui.spaces.NestRolesScreen
 import app.pigeonsms.ui.spaces.NestRolesViewModel
 import app.pigeonsms.ui.spaces.NestEmojiViewModel
@@ -292,7 +290,6 @@ fun AppShell(session: LocalSession) {
                     onNotifications = { nav.navigate("notifications") },
                     onNests = { nav.navigate("nestsettings") },
                     onAbout = { nav.navigate("about") },
-                    onReminders = { nav.navigate("reminders") },
                     onSignOut = { app.viewModelScopeSignOut() },
                 )
             }
@@ -346,7 +343,7 @@ fun AppShell(session: LocalSession) {
             composable("nestsettings") { NestSettingsScreen(app, onBack = { nav.popBackStack() }) }
             // 2.9.5: per-nest custom emoji + stickers. Reachable from a nest's
             // channel list; the API enforces MANAGE_EMOJI regardless of who gets here.
-            // 2.9.5: threads in text channels, roles/permissions, reminders.
+            // 2.9.5: threads in text channels, roles/permissions.
             composable("threads/{channelId}") { entry ->
                 val channelId = entry.arguments?.getString("channelId") ?: return@composable
                 val threadsVm: ThreadsViewModel = pigeonVm(key = "threads-$channelId") { c, _ -> ThreadsViewModel(c.api) }
@@ -367,17 +364,13 @@ fun AppShell(session: LocalSession) {
                 val rolesVm: NestRolesViewModel = pigeonVm(key = "roles-$spaceId") { c, _ -> NestRolesViewModel(c.socialRepository) }
                 NestRolesScreen(spaceId = spaceId, vm = rolesVm, onBack = { nav.popBackStack() })
             }
-            composable("reminders") {
-                val remindersVm: RemindersViewModel = pigeonVm { c, _ -> RemindersViewModel(c.socialRepository) }
-                RemindersScreen(vm = remindersVm, onBack = { nav.popBackStack() })
-            }
             composable("nestemoji/{spaceId}") { entry ->
                 val spaceId = entry.arguments?.getString("spaceId") ?: return@composable
                 // Short names, not fully-qualified: the `app: AppViewModel`
                 // parameter shadows the root `app.` package inside this file.
                 val emojiVm: NestEmojiViewModel =
                     pigeonVm { c, _ -> NestEmojiViewModel(c.socialRepository) }
-                NestEmojiScreen(spaceId = spaceId, vm = emojiVm)
+                NestEmojiScreen(spaceId = spaceId, vm = emojiVm, onBack = { nav.popBackStack() })
             }
             composable("about") {
                 AboutScreen(username = session.username, onBack = { nav.popBackStack() })

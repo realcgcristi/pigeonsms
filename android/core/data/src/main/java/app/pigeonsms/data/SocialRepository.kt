@@ -219,11 +219,6 @@ class SocialRepository(
         deny: List<String> = emptyList(),
     ) = api.setChannelOverride(spaceId, channelId, roleId, userId, allow, deny)
 
-    // ── v2.9.5: reminders ──────────────────────────────────────────────────
-    suspend fun reminders(fired: Boolean = false) = api.reminders(fired)
-    suspend fun createReminder(text: String, remindAt: Long, channelId: String? = null, messageId: String? = null) =
-        api.createReminder(text, remindAt, channelId, messageId)
-    suspend fun cancelReminder(id: String) = api.cancelReminder(id)
 
     // ── v2.9.5: global search ──────────────────────────────────────────────
     suspend fun searchEverywhere(query: String, before: Long? = null) =

@@ -41,6 +41,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.pigeonsms.data.SocialRepository
 import app.pigeonsms.design.theme.Spacing
+import app.pigeonsms.ui.settings.SettingsSubHeader
 import app.pigeonsms.network.SpaceRoleDto
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -176,18 +177,16 @@ fun NestRolesScreen(
 
     LaunchedEffect(spaceId) { vm.load(spaceId) }
 
-    Column(Modifier.fillMaxSize().padding(Spacing.m)) {
+    Column(Modifier.fillMaxSize().padding(horizontal = Spacing.m)) {
+        // Shared skin-aware header: it owns the status-bar inset and matches
+        // Classic/Nova/Galaxy. The hand-rolled Row it replaces did neither, so the
+        // title sat under the status bar and ignored the active skin.
         Row(
             Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
+            verticalAlignment = Alignment.Bottom,
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "back")
-                }
-                Text("roles", style = MaterialTheme.typography.titleLarge)
-            }
+            Box(Modifier.weight(1f)) { SettingsSubHeader("roles", onBack) }
             IconButton(onClick = {
                 draftName = ""
                 draftPermissions = setOf("VIEW_CHANNEL", "SEND_MESSAGES")
