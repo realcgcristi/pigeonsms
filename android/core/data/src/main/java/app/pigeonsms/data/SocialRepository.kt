@@ -7,6 +7,9 @@ import app.pigeonsms.network.PigeonApi
 import app.pigeonsms.network.ProfileResponse
 import app.pigeonsms.network.SpaceDto
 import java.util.UUID
+import app.pigeonsms.network.SpaceEmojiDto
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Friends, DMs, spaces, profiles.
@@ -85,6 +88,88 @@ class SocialRepository(
     suspend fun deleteSpace(spaceId: String) = api.deleteSpace(spaceId)
     suspend fun uploadFile(bytes: ByteArray, filename: String, type: String) = api.uploadFile(bytes, filename, type)
     suspend fun setSpaceIcon(spaceId: String, key: String?) = api.setSpaceIcon(spaceId, key)
+
+    // ── v2.9.5: custom emoji + stickers ────────────────────────────────────
+    //
+    // Cached per nest for the lifetime of the process: the picker and every
+    // message that renders a `:shortcode:` need this list, and re-fetching it per
+    // message would be one request per bubble. Mutations invalidate the entry
+    // rather than trying to patch it, since the set is small and a refetch is one
+    // request.
+    private val emojiCache = mutableMapOf<String, List<SpaceEmojiDto>>()
+    private val emojiMutex = Mutex()
+
+    suspend fun spaceEmojis(spaceId: String, refresh: Boolean = false): List<SpaceEmojiDto> =
+        emojiMutex.withLock {
+            if (!refresh) emojiCache[spaceId]?.let { return@withLock it }
+            val fetched = runCatching { api.spaceEmojis(spaceId) }.getOrElse {
+                // Never let a missing emoji list break rendering — worst case the
+                // shortcode stays as text, which is what older clients show anyway.
+                return@withLock emojiCache[spaceId].orEmpty()
+            }
+            emojiCache[spaceId] = fetched
+            fetched
+        }
+
+    suspend fun createSpaceEmoji(
+        spaceId: String,
+        name: String,
+        mediaKey: String,
+        kind: String = "emoji",
+        contentType: String? = null,
+    ): SpaceEmojiDto {
+        val created = api.createSpaceEmoji(spaceId, name, mediaKey, kind, contentType)
+        emojiMutex.withLock { emojiCache.remove(spaceId) }
+        return created
+    }
+
+    suspend fun renameSpaceEmoji(spaceId: String, emojiId: String, name: String): SpaceEmojiDto {
+        val renamed = api.renameSpaceEmoji(spaceId, emojiId, name)
+        emojiMutex.withLock { emojiCache.remove(spaceId) }
+        return renamed
+    }
+
+    suspend fun deleteSpaceEmoji(spaceId: String, emojiId: String) {
+        api.deleteSpaceEmoji(spaceId, emojiId)
+        emojiMutex.withLock { emojiCache.remove(spaceId) }
+    }
+
+    // ── v2.9.5: roles + permissions ────────────────────────────────────────
+    suspend fun spaceRoles(spaceId: String) = api.spaceRoles(spaceId)
+    suspend fun spacePermissions(spaceId: String, channelId: String? = null) =
+        api.spacePermissions(spaceId, channelId)
+    suspend fun createRole(spaceId: String, name: String, permissions: List<String>, color: String? = null) =
+        api.createRole(spaceId, name, permissions, color)
+    suspend fun updateRole(
+        spaceId: String,
+        roleId: String,
+        name: String? = null,
+        permissions: List<String>? = null,
+        color: String? = null,
+    ) = api.updateRole(spaceId, roleId, name, permissions, color)
+    suspend fun deleteRole(spaceId: String, roleId: String) = api.deleteRole(spaceId, roleId)
+    suspend fun setMemberRoles(spaceId: String, userId: String, roleIds: List<String>) =
+        api.setMemberRoles(spaceId, userId, roleIds)
+    suspend fun channelOverrides(spaceId: String, channelId: String) =
+        api.channelOverrides(spaceId, channelId)
+    suspend fun setChannelOverride(
+        spaceId: String,
+        channelId: String,
+        roleId: String? = null,
+        userId: String? = null,
+        allow: List<String> = emptyList(),
+        deny: List<String> = emptyList(),
+    ) = api.setChannelOverride(spaceId, channelId, roleId, userId, allow, deny)
+
+    // ── v2.9.5: reminders ──────────────────────────────────────────────────
+    suspend fun reminders(fired: Boolean = false) = api.reminders(fired)
+    suspend fun createReminder(text: String, remindAt: Long, channelId: String? = null, messageId: String? = null) =
+        api.createReminder(text, remindAt, channelId, messageId)
+    suspend fun cancelReminder(id: String) = api.cancelReminder(id)
+
+    // ── v2.9.5: global search ──────────────────────────────────────────────
+    suspend fun searchEverywhere(query: String, before: Long? = null) =
+        api.searchEverywhere(query, before)
 
     suspend fun profile(userId: String): ProfileResponse = api.profile(userId)
     suspend fun updateProfile(fields: Map<String, String?>) = api.updateProfile(fields)

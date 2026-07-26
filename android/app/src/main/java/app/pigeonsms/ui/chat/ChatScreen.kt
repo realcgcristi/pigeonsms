@@ -194,6 +194,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import coil.compose.AsyncImage
 import app.pigeonsms.network.ReactionDto
 import app.pigeonsms.network.RevisionDto
+import app.pigeonsms.network.SpaceEmojiDto
 import app.pigeonsms.ui.pigeonVm
 import app.pigeonsms.ui.util.Avatar
 import app.pigeonsms.ui.util.dayLabel
@@ -261,6 +262,9 @@ fun ChatScreen(
     }
     val messages by vm.messages.collectAsState()
     val ui by vm.ui.collectAsState()
+    // This nest's custom emoji (2.9.5) — needed both to offer them in the picker
+    // and to render `custom:<id>` reactions other people have already left.
+    val customEmoji by vm.customEmoji.collectAsState()
     val mediaItems = remember(messages) {
         messages.mapNotNull { message ->
             val key = message.attachmentKey ?: return@mapNotNull null
@@ -501,6 +505,7 @@ fun ChatScreen(
                             onEdit = { vm.setEditing(message) },
                             onDelete = { vm.delete(message) },
                             onReact = { emoji, on -> vm.toggleReaction(message, emoji, on) },
+                            customEmoji = customEmoji,
                             onPin = { on -> vm.pin(message, on) },
                             onRetry = { vm.retry(message) },
                             onOpenMedia = { key -> mediaViewerIndex = mediaItems.indexOfFirst { it.messageId == message.id }.takeIf { it >= 0 } },
@@ -1348,6 +1353,8 @@ private fun MessageBubble(
     selected: Boolean = false,
     onEnterSelection: () -> Unit = {},
     onToggleSelected: () -> Unit = {},
+    /** This nest's custom emoji (2.9.5); empty in DMs, which have no nest. */
+    customEmoji: List<SpaceEmojiDto> = emptyList(),
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     var reactionPickerOpen by remember { mutableStateOf(false) }
@@ -1763,6 +1770,8 @@ private fun MessageBubble(
                                 reaction = reaction,
                                 enabled = canMutate && !busy,
                                 onClick = { onReact(reaction.emoji, !reaction.me) },
+                                customEmoji = customEmoji,
+                                mediaUrl = mediaUrl,
                             )
                         }
                     }
@@ -1814,6 +1823,8 @@ private fun MessageBubble(
                 reactionPickerOpen = false
                 onReact(emoji, on)
             },
+            customEmoji = customEmoji,
+            mediaUrl = mediaUrl,
         )
     }
 
@@ -1983,7 +1994,13 @@ private fun disappearingLabel(expiresAt: Long, nowMs: Long): String {
 }
 
 @Composable
-private fun ReactionChip(reaction: ReactionDto, enabled: Boolean, onClick: () -> Unit) {
+private fun ReactionChip(
+    reaction: ReactionDto,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    customEmoji: List<SpaceEmojiDto> = emptyList(),
+    mediaUrl: (String) -> String? = { null },
+) {
     val nova = LocalExperimentalRedesign.current
     val interactionSource = remember { MutableInteractionSource() }
     val container by animateColorAsState(
@@ -2025,7 +2042,18 @@ private fun ReactionChip(reaction: ReactionDto, enabled: Boolean, onClick: () ->
             horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(reaction.emoji, style = MaterialTheme.typography.bodyMedium)
+            // A `custom:<id>` reaction is an image, not a glyph. An id we no longer
+            // recognise (the emoji was deleted after someone reacted) falls back to
+            // a placeholder rather than printing the raw `custom:123…` string.
+            if (isCustomReaction(reaction.emoji)) {
+                CustomEmojiImage(
+                    emoji = customEmoji.firstOrNull { it.id == customEmojiId(reaction.emoji) },
+                    mediaUrl = mediaUrl,
+                    size = 18,
+                )
+            } else {
+                Text(reaction.emoji, style = MaterialTheme.typography.bodyMedium)
+            }
             Text(
                 reaction.count.toString(),
                 style = MaterialTheme.typography.labelMedium,
@@ -2041,6 +2069,8 @@ private fun ReactionPickerDialog(
     reactions: List<ReactionDto>,
     onDismiss: () -> Unit,
     onReact: (String, Boolean) -> Unit,
+    customEmoji: List<SpaceEmojiDto> = emptyList(),
+    mediaUrl: (String) -> String? = { null },
 ) {
     var customEmoji by rememberSaveable { mutableStateOf("") }
     val selected = remember(reactions) {
@@ -2058,6 +2088,13 @@ private fun ReactionPickerDialog(
                     "Choose a quick reaction or enter any emoji.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                // The nest's own emoji, if it has any. Renders nothing in a DM.
+                CustomEmojiPickerRow(
+                    emoji = customEmoji,
+                    selected = selected,
+                    mediaUrl = mediaUrl,
+                    onPick = onReact,
                 )
                 Row(
                     Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = Spacing.m),
