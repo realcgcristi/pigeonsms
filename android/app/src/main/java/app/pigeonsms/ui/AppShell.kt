@@ -93,6 +93,14 @@ import app.pigeonsms.ui.settings.NestSettingsScreen
 import app.pigeonsms.ui.settings.NotificationSettingsScreen
 import app.pigeonsms.ui.forum.ForumScreen
 import app.pigeonsms.ui.search.SearchScreen
+import app.pigeonsms.ui.threads.ThreadsScreen
+import app.pigeonsms.ui.threads.ThreadsViewModel
+import app.pigeonsms.ui.threads.ThreadScreen
+import app.pigeonsms.ui.threads.ThreadViewModel
+import app.pigeonsms.ui.reminders.RemindersScreen
+import app.pigeonsms.ui.reminders.RemindersViewModel
+import app.pigeonsms.ui.spaces.NestRolesScreen
+import app.pigeonsms.ui.spaces.NestRolesViewModel
 import app.pigeonsms.ui.spaces.NestEmojiViewModel
 import app.pigeonsms.ui.spaces.NestEmojiScreen
 import app.pigeonsms.ui.spaces.NestChannelsScreen
@@ -244,6 +252,7 @@ fun AppShell(session: LocalSession) {
                         app = app,
                         spaceId = spaceId,
                         onOpenEmoji = { nav.navigate("nestemoji/$spaceId") },
+                        onOpenRoles = { nav.navigate("nestroles/$spaceId") },
                         onBack = { nav.popBackStack() },
                         onOpenChannel = { ch, name, kind ->
                             if (kind == "forum") {
@@ -283,6 +292,7 @@ fun AppShell(session: LocalSession) {
                     onNotifications = { nav.navigate("notifications") },
                     onNests = { nav.navigate("nestsettings") },
                     onAbout = { nav.navigate("about") },
+                    onReminders = { nav.navigate("reminders") },
                     onSignOut = { app.viewModelScopeSignOut() },
                 )
             }
@@ -311,6 +321,8 @@ fun AppShell(session: LocalSession) {
                     onBack = { nav.popBackStack() },
                     onActive = { app.activeChannel = it },
                     onOpenProfile = { id -> nav.navigate("profile/$id") },
+                    // Threads live in nest channels; a DM has no thread list.
+                    onOpenThreads = if (isSpace) ({ nav.navigate("threads/$cid") }) else null,
                 )
                 }
             }
@@ -334,6 +346,31 @@ fun AppShell(session: LocalSession) {
             composable("nestsettings") { NestSettingsScreen(app, onBack = { nav.popBackStack() }) }
             // 2.9.5: per-nest custom emoji + stickers. Reachable from a nest's
             // channel list; the API enforces MANAGE_EMOJI regardless of who gets here.
+            // 2.9.5: threads in text channels, roles/permissions, reminders.
+            composable("threads/{channelId}") { entry ->
+                val channelId = entry.arguments?.getString("channelId") ?: return@composable
+                val threadsVm: ThreadsViewModel = pigeonVm(key = "threads-$channelId") { c, _ -> ThreadsViewModel(c.api) }
+                ThreadsScreen(
+                    channelId = channelId,
+                    vm = threadsVm,
+                    onBack = { nav.popBackStack() },
+                    onOpenThread = { id -> nav.navigate("thread/$id") },
+                )
+            }
+            composable("thread/{threadId}") { entry ->
+                val threadId = entry.arguments?.getString("threadId") ?: return@composable
+                val threadVm: ThreadViewModel = pigeonVm(key = "thread-$threadId") { c, _ -> ThreadViewModel(c.api) }
+                ThreadScreen(threadId = threadId, vm = threadVm, onBack = { nav.popBackStack() })
+            }
+            composable("nestroles/{spaceId}") { entry ->
+                val spaceId = entry.arguments?.getString("spaceId") ?: return@composable
+                val rolesVm: NestRolesViewModel = pigeonVm(key = "roles-$spaceId") { c, _ -> NestRolesViewModel(c.socialRepository) }
+                NestRolesScreen(spaceId = spaceId, vm = rolesVm, onBack = { nav.popBackStack() })
+            }
+            composable("reminders") {
+                val remindersVm: RemindersViewModel = pigeonVm { c, _ -> RemindersViewModel(c.socialRepository) }
+                RemindersScreen(vm = remindersVm, onBack = { nav.popBackStack() })
+            }
             composable("nestemoji/{spaceId}") { entry ->
                 val spaceId = entry.arguments?.getString("spaceId") ?: return@composable
                 // Short names, not fully-qualified: the `app: AppViewModel`

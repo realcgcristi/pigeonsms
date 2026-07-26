@@ -75,6 +75,7 @@ import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Call
 import androidx.compose.material.icons.outlined.Videocam
@@ -251,6 +252,8 @@ fun ChatScreen(
     onBack: () -> Unit,
     onActive: (String?) -> Unit,
     onOpenProfile: (String) -> Unit,
+    /** Opens this channel's thread list (2.9.5). Null hides the action. */
+    onOpenThreads: (() -> Unit)? = null,
 ) {
     val vmAppContext = LocalContext.current.applicationContext
     val vm: ChatViewModel = pigeonVm(key = "chat-$channelId") { container, _ ->
@@ -563,7 +566,7 @@ fun ChatScreen(
                         },
                     )
                 } else
-                ChatTopBar(title, avatarKey, channelId, vm::mediaUrl, chatHaze, onBack, onSearch = vm::openSearch, onPins = vm::loadPins, onAppearance = { showAppearance = true }, onCall = ::startCall, onInfo = { infoOpen = true })
+                ChatTopBar(title, avatarKey, channelId, vm::mediaUrl, chatHaze, onBack, onSearch = vm::openSearch, onPins = vm::loadPins, onAppearance = { showAppearance = true }, onCall = ::startCall, onInfo = { infoOpen = true }, onThreads = onOpenThreads)
                 if (ui.pins.isNotEmpty()) {
                     SuperPinBanner(
                         pins = ui.pins,
@@ -809,6 +812,8 @@ private fun ChatTopBar(
     onAppearance: () -> Unit,
     onCall: (Boolean) -> Unit,
     onInfo: () -> Unit,
+    /** 2.9.5 thread list; null hides the overflow entry. */
+    onThreads: (() -> Unit)? = null,
 ) {
     // frosted glass over the scrolling messages (they pass underneath)
     val frostBg = MaterialTheme.colorScheme.surface
@@ -905,6 +910,13 @@ private fun ChatTopBar(
                         leadingIcon = { Icon(Icons.Outlined.PushPin, null) },
                         onClick = { overflowOpen = false; onPins() },
                     )
+                    onThreads?.let { openThreads ->
+                        DropdownMenuItem(
+                            text = { Text("Threads") },
+                            leadingIcon = { Icon(Icons.Outlined.Forum, null) },
+                            onClick = { overflowOpen = false; openThreads() },
+                        )
+                    }
                 }
             }
         }

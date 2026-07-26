@@ -381,14 +381,18 @@ class SearchViewModel(
     fun search(query: String) {
         val q = query.trim()
         val spaceId = _ui.value.selectedSpaceId
-        if (q.length < 2 || spaceId == null) {
+        if (q.length < 2) {
             clearResults()
             return
         }
         searchJob?.cancel()
         _ui.update { it.copy(searching = true, error = null) }
         searchJob = viewModelScope.launch {
-            runCatching { api.searchSpace(spaceId, q) }
+            // 2.9.5: with no nest selected, search *everything* the caller can read
+            // (every nest plus their DMs) instead of refusing to search at all.
+            runCatching {
+                if (spaceId == null) api.searchEverywhere(q) else api.searchSpace(spaceId, q)
+            }
                 .onSuccess { resp ->
                     _ui.update { it.copy(searching = false, results = resp.results, error = null) }
                 }

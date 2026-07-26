@@ -128,6 +128,8 @@ fun NestChannelsScreen(
     onCreateOrJoin: (() -> Unit)? = null,
     /** Opens this nest's custom-emoji manager (2.9.5). Null hides the entry. */
     onOpenEmoji: (() -> Unit)? = null,
+    /** Opens this nest's roles + permissions editor (2.9.5). Null hides the entry. */
+    onOpenRoles: (() -> Unit)? = null,
 ) {
     val vm: SpacesViewModel = pigeonVm(key = "nest-$spaceId") { c, _ -> SpacesViewModel(c.socialRepository, c.api) }
     val home by app.home.collectAsState()
@@ -229,6 +231,23 @@ fun NestChannelsScreen(
                         modifier = Modifier.size(18.dp),
                     )
                     Text("nest emoji", style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+        }
+        (if (canManageIcon) onOpenRoles else null)?.let { open ->
+            Surface(
+                onClick = open,
+                shape = MaterialTheme.shapes.medium,
+                tonalElevation = 1.dp,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.m, vertical = Spacing.xs),
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().padding(Spacing.s),
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.s),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Outlined.PeopleOutline, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Text("roles & permissions", style = MaterialTheme.typography.bodyMedium)
                 }
             }
         }

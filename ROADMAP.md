@@ -15,11 +15,11 @@ shipped and iterating: dms, nests with text/voice/forum channels, forum tags + l
 ## v3 — smaller wants
 
 - web client (browser access, no install)
-- message search that's actually good (server-side, across a whole nest)
-- threads / better forum threading
-- richer roles + permissions per nest (not just owner/member)
-- scheduled messages + reminders
-- better media: gifs picker, stickers, larger uploads with resumable transfer
+- ~~message search that's actually good (server-side, across a whole nest)~~ — **done in v2.9.5.** nest-wide FTS5 plus a global search across every nest and your DMs, with snippets and `from:`/channel filters.
+- ~~threads / better forum threading~~ — **done in v2.9.5.** any message in a text channel can start a thread; replies are ordinary messages so they keep sequencing, push, search and e2ee.
+- ~~richer roles + permissions per nest (not just owner/member)~~ — **done in v2.9.5.** custom roles with a 14-flag permission set and per-channel allow/deny overrides.
+- ~~scheduled messages + reminders~~ — **done.** scheduled messages shipped in v2.8.0, private reminders in v2.9.5.
+- ~~better media: gifs picker, stickers, larger uploads with resumable transfer~~ — **done in v2.9.5.** custom nest emoji + stickers, and resumable chunked uploads (50mb → 500mb, resumes after a restart).
 - import/export your data (privacy = you can take it and leave)
 - accessibility pass (talkback, larger text, reduced motion is partly there)
 - self-host quality-of-life: a one-command deploy, clearer docs, an admin dashboard
