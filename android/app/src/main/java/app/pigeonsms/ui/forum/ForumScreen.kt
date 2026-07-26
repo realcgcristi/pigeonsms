@@ -145,14 +145,6 @@ fun ForumScreen(
         ForumViewModel(c.api, c.socialRepository, c.gateway, channelId, title)
     }
     val ui by vm.ui.collectAsState()
-    // 2.9.6 new-activity dots.
-    val forumSeenContext = LocalContext.current
-    val forumSeenStore = remember(forumSeenContext) {
-        (forumSeenContext.applicationContext as? app.pigeonsms.PigeonApp)?.container?.forumSeenStore
-    }
-    val forumSeen by (forumSeenStore?.seen ?: kotlinx.coroutines.flow.flowOf(emptyMap()))
-        .collectAsState(initial = emptyMap())
-    val forumSeenScope = rememberCoroutineScope()
     var composeOpen by rememberSaveable(channelId) { mutableStateOf(false) }
     var renameOpen by rememberSaveable(channelId) { mutableStateOf(false) }
     var tagDialogOpen by rememberSaveable(channelId) { mutableStateOf(false) }
@@ -536,6 +528,14 @@ private fun PostList(
     onLike: (String) -> Unit,
     onCreateTag: () -> Unit,
 ) {
+    // 2.9.6 new-activity dots.
+    val forumSeenContext = LocalContext.current
+    val forumSeenStore = remember(forumSeenContext) {
+        (forumSeenContext.applicationContext as? app.pigeonsms.PigeonApp)?.container?.forumSeenStore
+    }
+    val forumSeen by (forumSeenStore?.seen ?: kotlinx.coroutines.flow.flowOf(emptyMap()))
+        .collectAsState(initial = emptyMap())
+    val forumSeenScope = rememberCoroutineScope()
     val skin = LocalUiSkin.current
     val galaxy = skin == UiSkin.Galaxy
     Column(Modifier.fillMaxSize()) {
