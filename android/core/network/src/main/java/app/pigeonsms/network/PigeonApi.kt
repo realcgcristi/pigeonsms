@@ -630,4 +630,9 @@ class PigeonApi(
             })
         }.unwrap<SendResponse>()
 
+
+    /** Preview an SPC- invite without joining or consuming a use (2.9.5). */
+    suspend fun invitePreview(code: String) =
+        client.get("$baseUrl/spaces/invites/${q(code)}/preview") { auth() }.unwrap<InvitePreviewResponse>()
+
 }

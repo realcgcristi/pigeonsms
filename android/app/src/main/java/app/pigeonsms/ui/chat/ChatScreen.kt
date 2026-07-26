@@ -263,6 +263,8 @@ fun ChatScreen(
     onOpenProfile: (String) -> Unit,
     /** Opens this channel's thread list (2.9.5). Null hides the action. */
     onOpenThreads: (() -> Unit)? = null,
+    /** Navigate to a sibling channel by id (from a tapped #channel) — 2.9.5. */
+    onOpenChannel: ((id: String, name: String, isSpace: Boolean) -> Unit)? = null,
 ) {
     val vmAppContext = LocalContext.current.applicationContext
     val vm: ChatViewModel = pigeonVm(key = "chat-$channelId") { container, _ ->
@@ -277,6 +279,7 @@ fun ChatScreen(
     // This nest's custom emoji (2.9.5) — needed both to offer them in the picker
     // and to render `custom:<id>` reactions other people have already left.
     val customEmoji by vm.customEmoji.collectAsState()
+    var invitePreviewCode by remember { mutableStateOf<String?>(null) }
     // Opening a conversation clears its notifications — tapping one used to leave
     // every other message from the same chat sitting in the shade.
     val notifContext = LocalContext.current
@@ -524,6 +527,14 @@ fun ChatScreen(
                             onDelete = { vm.delete(message) },
                             onReact = { emoji, on -> vm.toggleReaction(message, emoji, on) },
                             customEmoji = customEmoji,
+                            onTokenClick = { tag, value ->
+                                when (tag) {
+                                    "INVITE" -> invitePreviewCode = value
+                                    "CHANNEL" -> vm.resolveChannel(value)?.let { found ->
+                                        onOpenChannel?.invoke(found.first, found.second, true)
+                                    }
+                                }
+                            },
                             onPin = { on -> vm.pin(message, on) },
                             onRetry = { vm.retry(message) },
                             onOpenMedia = { key -> mediaViewerIndex = mediaItems.indexOfFirst { it.messageId == message.id }.takeIf { it >= 0 } },
@@ -726,6 +737,19 @@ fun ChatScreen(
                 vm.sendEvent(eventTitle, startsAt, endsAt, location, description)
             },
         )
+    }
+
+    invitePreviewCode?.let { code ->
+        val socialRepo = (LocalContext.current.applicationContext as? app.pigeonsms.PigeonApp)
+            ?.container?.socialRepository
+        if (socialRepo != null) {
+            InvitePreviewDialog(
+                code = code,
+                social = socialRepo,
+                onDismiss = { invitePreviewCode = null },
+                onJoin = { invitePreviewCode = null; vm.joinFromInvite(code) },
+            )
+        }
     }
 
     if (showAppearance) {
@@ -1388,6 +1412,8 @@ private fun MessageBubble(
     onToggleSelected: () -> Unit = {},
     /** This nest's custom emoji (2.9.5); empty in DMs, which have no nest. */
     customEmoji: List<SpaceEmojiDto> = emptyList(),
+    /** Tapped `#channel` / `SPC-` tokens in the body (2.9.5). */
+    onTokenClick: ((String, String) -> Unit)? = null,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     var reactionPickerOpen by remember { mutableStateOf(false) }
@@ -1764,6 +1790,7 @@ private fun MessageBubble(
                                     color = bubbleContentColor(self),
                                     emoji = customEmoji,
                                     mediaUrl = mediaUrl,
+                                    onTokenClick = onTokenClick,
                                 )
                             }
                             val previewUrl = if (!message.deleted) firstUrlIn(message.content) else null

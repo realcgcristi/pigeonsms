@@ -17,6 +17,11 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -59,6 +64,11 @@ fun MarkdownMessage(
     /** This nest's emoji, so `:name:` and `::name::` render as images (2.9.5). */
     emoji: List<SpaceEmojiDto> = emptyList(),
     mediaUrl: (String) -> String? = { null },
+    /**
+     * Tap handler for the annotated tokens (2.9.5): tag is one of `CHANNEL`,
+     * `INVITE`, `POST` or `URL`, value is the payload.
+     */
+    onTokenClick: ((String, String) -> Unit)? = null,
 ) {
     val blocks = remember(value) { parseMarkdownBlocks(value) }
     val linkColor = MaterialTheme.colorScheme.primary
@@ -70,12 +80,32 @@ fun MarkdownMessage(
         Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
             blocks.forEach { block ->
                 when (block) {
-                    is MarkdownBlock.Paragraph -> Text(
-                        inlineMarkdown(block.text, color, linkColor, emoji),
-                        color = color,
-                        style = MaterialTheme.typography.bodyLarge,
-                        inlineContent = inlineContent,
-                    )
+                    is MarkdownBlock.Paragraph -> {
+                        val annotated = inlineMarkdown(block.text, color, linkColor, emoji)
+                        // SelectionContainer rules out ClickableText, so hit-testing is
+                        // done manually: map the tap offset to a character index and
+                        // look for an annotation there.
+                        var layout by remember(annotated) {
+                            mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null)
+                        }
+                        Text(
+                            annotated,
+                            color = color,
+                            style = MaterialTheme.typography.bodyLarge,
+                            inlineContent = inlineContent,
+                            onTextLayout = { layout = it },
+                            modifier = if (onTokenClick == null) Modifier else Modifier.pointerInput(annotated) {
+                                detectTapGestures { position ->
+                                    val offset = layout?.getOffsetForPosition(position) ?: return@detectTapGestures
+                                    for (tag in TOKEN_TAGS) {
+                                        annotated.getStringAnnotations(tag, offset, offset)
+                                            .firstOrNull()
+                                            ?.let { onTokenClick(tag, it.item); return@detectTapGestures }
+                                    }
+                                }
+                            },
+                        )
+                    }
                     is MarkdownBlock.Heading -> Text(
                         inlineMarkdown(block.text, color, linkColor),
                         color = color,
@@ -308,8 +338,32 @@ private fun androidx.compose.ui.text.AnnotatedString.Builder.appendInline(
             raw.startsWith('[') -> {
                 val label = raw.substringAfter('[').substringBefore("](")
                 val url = raw.substringAfter("](").dropLast(1)
-                pushStringAnnotation("URL", url)
+                // A pigeonsms://forum/<id> link is a forum-post mention (2.9.5);
+                // anything else is an ordinary URL.
+                pushStringAnnotation(
+                    if (url.startsWith("pigeonsms://forum/")) "POST" else "URL",
+                    if (url.startsWith("pigeonsms://forum/")) url.removePrefix("pigeonsms://forum/") else url,
+                )
                 withStyle(SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline)) { append(label) }
+                pop()
+            }
+            raw.startsWith("SPC-") -> {
+                pushStringAnnotation("INVITE", raw)
+                withStyle(
+                    SpanStyle(
+                        color = linkColor,
+                        fontWeight = FontWeight.SemiBold,
+                        textDecoration = TextDecoration.Underline,
+                    ),
+                ) { append(raw) }
+                pop()
+            }
+            raw.startsWith('#') -> {
+                // The channel may not exist; resolution happens at tap time against
+                // the nest the message lives in, so an unknown #word still reads as
+                // ordinary emphasis rather than a dead link.
+                pushStringAnnotation("CHANNEL", raw.removePrefix("#"))
+                withStyle(SpanStyle(color = linkColor, fontWeight = FontWeight.Medium)) { append(raw) }
                 pop()
             }
             raw.startsWith('@') -> {
@@ -338,7 +392,17 @@ private val BULLET = Regex("^\\s*[-+*]\\s+.+")
 private val ORDERED = Regex("^\\s*\\d+[.)]\\s+.+")
 private val BULLET_PREFIX = Regex("^\\s*[-+*]\\s+")
 private val ORDERED_PREFIX = Regex("^\\s*\\d+[.)]\\s+")
-private val INLINE = Regex("\\*\\*[^*\\n]+\\*\\*|~~[^~\\n]+~~|`[^`\\n]+`|\\[[^]\\n]+]\\([^ )\\n]+\\)|@[A-Za-z0-9_.-]{1,32}|\\*[^*\\n]+\\*|_[^_\\n]+_")
+private val INLINE = Regex(
+    "\\*\\*[^*\\n]+\\*\\*|~~[^~\\n]+~~|`[^`\\n]+`|\\[[^]\\n]+]\\([^ )\\n]+\\)" +
+        "|@[A-Za-z0-9_.-]{1,32}" +
+        // 2.9.5: #channel mentions and SPC- nest invites become tappable tokens.
+        "|#[a-z0-9_-]{1,32}" +
+        "|SPC-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{4}-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{4}" +
+        "|\\*[^*\\n]+\\*|_[^_\\n]+_",
+)
+
+/** Annotation tags the tap handler looks for, most specific first. */
+internal val TOKEN_TAGS = listOf("INVITE", "CHANNEL", "POST", "URL")
 
 /**
  * Build the inline-content map Compose needs to draw emoji images inside text.

@@ -320,6 +320,10 @@ fun AppShell(session: LocalSession) {
                     onOpenProfile = { id -> nav.navigate("profile/$id") },
                     // Threads live in nest channels; a DM has no thread list.
                     onOpenThreads = if (isSpace) ({ nav.navigate("threads/$cid") }) else null,
+                    onOpenChannel = { id, chName, space ->
+                        val suffix = if (space) "?space=true" else ""
+                        nav.navigate("chat/$id/${enc(chName)}$suffix")
+                    },
                 )
                 }
             }
