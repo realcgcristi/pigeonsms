@@ -1823,7 +1823,7 @@ private fun MessageBubble(
                 reactionPickerOpen = false
                 onReact(emoji, on)
             },
-            customEmoji = customEmoji,
+            nestEmoji = customEmoji,
             mediaUrl = mediaUrl,
         )
     }
@@ -2069,7 +2069,10 @@ private fun ReactionPickerDialog(
     reactions: List<ReactionDto>,
     onDismiss: () -> Unit,
     onReact: (String, Boolean) -> Unit,
-    customEmoji: List<SpaceEmojiDto> = emptyList(),
+    // Named `nestEmoji`, not `customEmoji`: this dialog already uses that name for
+    // the free-text "type any emoji" field, and the shadowed parameter silently
+    // resolved to that String.
+    nestEmoji: List<SpaceEmojiDto> = emptyList(),
     mediaUrl: (String) -> String? = { null },
 ) {
     var customEmoji by rememberSaveable { mutableStateOf("") }
@@ -2091,7 +2094,7 @@ private fun ReactionPickerDialog(
                 )
                 // The nest's own emoji, if it has any. Renders nothing in a DM.
                 CustomEmojiPickerRow(
-                    emoji = customEmoji,
+                    emoji = nestEmoji,
                     selected = selected,
                     mediaUrl = mediaUrl,
                     onPick = onReact,
