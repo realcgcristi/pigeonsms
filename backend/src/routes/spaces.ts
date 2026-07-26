@@ -453,6 +453,58 @@ spaces.post('/:id/invites', async (c) => {
   return c.json({ code, max_uses: maxUses, expires_at: expiresAt }, 201);
 });
 
+/**
+ * GET /spaces/invites/:code/preview — what's behind an invite code (2.9.5).
+ *
+ * Lets a tapped `SPC-` code in a message show the nest's name, icon and size
+ * before you commit to joining. Read-only: it never consumes a use, so opening
+ * the preview and backing out costs the inviter nothing.
+ *
+ * Returns `valid: false` rather than 404 for a dead code — the client shows
+ * "this invite has expired" instead of a scary error, and an attacker learns
+ * nothing either way.
+ */
+spaces.get('/invites/:code/preview', async (c) => {
+  const user = c.get('user') as AuthedUser;
+  const code = (c.req.param('code') ?? '').trim().toUpperCase();
+
+  const row = await c.env.DB.prepare(
+    `SELECT s.id, s.name, s.icon_key, s.icon_square_key,
+            (SELECT COUNT(*) FROM space_members sm WHERE sm.space_id = s.id) AS member_count,
+            si.uses, si.max_uses, si.expires_at
+     FROM space_invites si
+     JOIN spaces s ON s.id = si.space_id AND s.deleted_at IS NULL
+     WHERE si.code = ?`,
+  )
+    .bind(code)
+    .first<{
+      id: string; name: string; icon_key: string | null; icon_square_key: string | null;
+      member_count: number; uses: number; max_uses: number | null; expires_at: number | null;
+    }>();
+
+  if (!row) return c.json({ valid: false });
+  const exhausted = row.max_uses !== null && Number(row.uses) >= Number(row.max_uses);
+  const expired = row.expires_at !== null && Number(row.expires_at) < Date.now();
+  if (exhausted || expired) return c.json({ valid: false });
+
+  const member = await c.env.DB.prepare(
+    'SELECT 1 FROM space_members WHERE space_id = ? AND user_id = ?',
+  )
+    .bind(row.id, user.id)
+    .first();
+
+  return c.json({
+    valid: true,
+    space: {
+      id: row.id,
+      name: row.name,
+      icon_key: row.icon_square_key ?? row.icon_key,
+      member_count: Number(row.member_count),
+    },
+    already_member: !!member,
+  });
+});
+
 /** POST /spaces/join { code } */
 spaces.post('/join', async (c) => {
   const user = c.get('user') as AuthedUser;

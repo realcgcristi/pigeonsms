@@ -125,6 +125,7 @@ class ChatViewModel(
         // eager channel roster for the "seen by" info action (member avatars + count)
         loadChannelRoster()
         loadCustomEmoji()
+        loadChannelIndex()
         viewModelScope.launch {
             repo.reads.collect { all ->
                 val peerSeq = all[channelId]?.filterKeys { it != selfId }?.values?.maxOrNull() ?: 0L
@@ -177,6 +178,42 @@ class ChatViewModel(
             runCatching { repo.sendSticker(channelId, stickerId) }
                 .onFailure { e ->
                     _ui.update { it.copy(error = e.message ?: "couldn't send that sticker") }
+                }
+        }
+    }
+
+    /**
+     * Resolve a tapped `#channel` to (id, name) within this conversation's nest
+     * (2.9.5). Returns null when the name doesn't match a channel the user can
+     * see, so an unknown #word simply does nothing rather than erroring.
+     */
+    fun resolveChannel(name: String): Pair<String, String>? {
+        val wanted = name.trim().lowercase()
+        return _channelIndex.value.firstOrNull { it.second.lowercase() == wanted }
+    }
+
+    /** Channels of this nest, cached for #mention resolution. */
+    private val _channelIndex = MutableStateFlow<List<Pair<String, String>>>(emptyList())
+
+    private fun loadChannelIndex() {
+        val repository = social ?: return
+        if (!isSpace) return
+        viewModelScope.launch {
+            runCatching {
+                val space = repository.cachedSpaces().firstOrNull { s -> s.channels.any { it.id == channelId } }
+                    ?: repository.spaces().firstOrNull { s -> s.channels.any { it.id == channelId } }
+                space?.channels?.map { it.id to (it.name ?: "") }.orEmpty()
+            }.getOrNull()?.let { _channelIndex.value = it }
+        }
+    }
+
+    /** Accept a nest invite tapped in a message (2.9.5). */
+    fun joinFromInvite(code: String) {
+        val repository = social ?: return
+        viewModelScope.launch {
+            runCatching { repository.joinSpace(code) }
+                .onFailure { e ->
+                    _ui.update { it.copy(error = e.message ?: "couldn't join that nest") }
                 }
         }
     }

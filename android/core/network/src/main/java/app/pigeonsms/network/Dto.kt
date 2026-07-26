@@ -556,3 +556,20 @@ data class UploadSessionDto(
 
 @Serializable data class UploadSessionResponse(val upload: UploadSessionDto)
 @Serializable data class UploadCompleteResponse(val attachment: AttachmentDto)
+
+
+/** What an SPC- invite points at, without consuming a use (2.9.5). */
+@Serializable
+data class InvitePreviewSpaceDto(
+    val id: String,
+    val name: String = "",
+    val icon_key: String? = null,
+    val member_count: Int = 0,
+)
+
+@Serializable
+data class InvitePreviewResponse(
+    val valid: Boolean = false,
+    val space: InvitePreviewSpaceDto? = null,
+    val already_member: Boolean = false,
+)

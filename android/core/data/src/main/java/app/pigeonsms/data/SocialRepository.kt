@@ -89,6 +89,7 @@ class SocialRepository(
     suspend fun deleteChannel(spaceId: String, channelId: String) = api.deleteChannel(spaceId, channelId)
     suspend fun spaceInvite(spaceId: String) = api.spaceInvite(spaceId)
     suspend fun joinSpace(code: String) = api.joinSpace(code)
+    suspend fun invitePreview(code: String) = api.invitePreview(code)
     suspend fun spaceMembers(spaceId: String) = api.spaceMembers(spaceId)
     suspend fun setRole(spaceId: String, userId: String, role: String) = api.setRole(spaceId, userId, role)
     suspend fun transferSpace(spaceId: String, userId: String) = api.transferSpace(spaceId, userId)
