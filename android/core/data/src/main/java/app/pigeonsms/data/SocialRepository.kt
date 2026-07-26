@@ -97,45 +97,59 @@ class SocialRepository(
     suspend fun uploadFile(bytes: ByteArray, filename: String, type: String) = api.uploadFile(bytes, filename, type)
 
     /**
-     * Upload a file, switching to the resumable multipart path once it's big
-     * enough to be worth the extra round trips (2.9.5).
+     * Upload a file with the resumable multipart path, **streaming** it.
      *
-     * Below the threshold the single-shot endpoint is strictly better: one
-     * request, no session bookkeeping. Above it, a dropped connection at 95% used
-     * to mean starting over — and the old 50 MB ceiling existed largely because
-     * of that. Chunked upload raises the ceiling to 500 MB and only re-sends the
-     * chunk that failed.
+     * Takes a factory that opens a fresh `InputStream` rather than a `ByteArray`:
+     * the previous signature held the entire file in the heap, so the 500 MB
+     * ceiling this path advertises was a guaranteed OutOfMemoryError long before
+     * you reached it. Only one part (5 MB by default) is resident at a time now.
      *
-     * [onProgress] receives 0f..1f so a caller can show a real progress bar
-     * instead of an indeterminate spinner.
+     * [openStream] must be re-openable — it is called once up front, and again if
+     * a resume needs to skip past already-uploaded parts.
+     *
+     * [onProgress] receives 0f..1f for a real progress bar.
      */
-    suspend fun uploadLargeFile(
-        bytes: ByteArray,
+    suspend fun uploadLargeStream(
+        openStream: () -> java.io.InputStream,
         filename: String,
         type: String,
+        totalSize: Long,
         onProgress: (Float) -> Unit = {},
     ): AttachmentDto {
-        if (bytes.size < RESUMABLE_THRESHOLD_BYTES) {
+        // Small files: one request beats session bookkeeping, and reading them
+        // whole is harmless at this size.
+        if (totalSize < RESUMABLE_THRESHOLD_BYTES) {
+            val bytes = openStream().use { it.readBytes() }
             onProgress(1f)
             return api.uploadFile(bytes, filename, type)
         }
 
-        val session = api.openUpload(filename, type, bytes.size.toLong())
+        val session = api.openUpload(filename, type, totalSize)
         try {
-            // Ask what already landed: on a retry after a crash this is non-empty
-            // and those chunks are skipped entirely.
             val done = runCatching { api.uploadStatus(session.id).uploaded_parts.toSet() }
                 .getOrDefault(emptySet())
 
-            for (part in 1..session.part_count) {
-                if (part in done) {
+            openStream().use { stream ->
+                val buffer = ByteArray(session.part_size)
+                for (part in 1..session.part_count) {
+                    // Fill one part. read() may return short, so loop until the
+                    // buffer is full or the stream ends — a short read would
+                    // otherwise upload an undersized middle part, which R2 rejects
+                    // only at completion time.
+                    var filled = 0
+                    while (filled < buffer.size) {
+                        val read = stream.read(buffer, filled, buffer.size - filled)
+                        if (read < 0) break
+                        filled += read
+                    }
+                    if (filled == 0) break
+
+                    if (part !in done) {
+                        val chunk = if (filled == buffer.size) buffer else buffer.copyOf(filled)
+                        api.uploadPart(session.id, part, chunk)
+                    }
                     onProgress(part.toFloat() / session.part_count)
-                    continue
                 }
-                val start = (part - 1) * session.part_size
-                val end = minOf(start + session.part_size, bytes.size)
-                api.uploadPart(session.id, part, bytes.copyOfRange(start, end))
-                onProgress(part.toFloat() / session.part_count)
             }
             return api.completeUpload(session.id)
         } catch (error: Throwable) {
@@ -145,6 +159,7 @@ class SocialRepository(
             throw error
         }
     }
+
     suspend fun setSpaceIcon(spaceId: String, key: String?) = api.setSpaceIcon(spaceId, key)
 
     // ── v2.9.5: custom emoji + stickers ────────────────────────────────────

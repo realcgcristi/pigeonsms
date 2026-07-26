@@ -99,6 +99,7 @@ import app.pigeonsms.design.theme.NovaDepth
 import app.pigeonsms.design.theme.NovaGradients
 import app.pigeonsms.design.theme.PigeonMotion
 import app.pigeonsms.design.theme.Spacing
+import app.pigeonsms.ui.chat.MarkdownMessage
 import app.pigeonsms.design.theme.heroAppear
 import app.pigeonsms.design.theme.novaElevation
 import app.pigeonsms.design.theme.novaHalo
@@ -1685,9 +1686,10 @@ private fun NovaThreadHero(
             }
         }
         if (post.content.isNotBlank()) {
-            Text(
+            // 2.9.5: forum bodies render markdown, same renderer as chat, so
+            // code blocks, quotes, lists and tables work here too.
+            MarkdownMessage(
                 post.content,
-                style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.padding(horizontal = Spacing.l, vertical = Spacing.m),
             )
@@ -1759,12 +1761,20 @@ private fun NovaReplyRow(reply: MessageDto, avatarUrl: (String?) -> String?, onO
                     color = MaterialTheme.colorScheme.secondary,
                 )
             }
-            Text(
-                if (reply.deleted) "deleted reply" else reply.content,
-                style = MaterialTheme.typography.bodyMedium,
-                color = if (reply.deleted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.padding(top = Spacing.xxs),
-            )
+            if (reply.deleted) {
+                Text(
+                    "deleted reply",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = Spacing.xxs),
+                )
+            } else {
+                MarkdownMessage(
+                    reply.content,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(top = Spacing.xxs),
+                )
+            }
             if (!reply.deleted) ForumAttachmentImage(reply.attachment, avatarUrl)
         }
     }
@@ -1919,9 +1929,10 @@ private fun ExpNovaThreadHero(
             }
         }
         if (post.content.isNotBlank()) {
-            Text(
+            // 2.9.5: forum bodies render markdown, same renderer as chat, so
+            // code blocks, quotes, lists and tables work here too.
+            MarkdownMessage(
                 post.content,
-                style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.padding(horizontal = Spacing.l, vertical = Spacing.m),
             )
@@ -1987,12 +1998,20 @@ private fun ExpNovaReplyRow(reply: MessageDto, avatarUrl: (String?) -> String?, 
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Text(
-                if (reply.deleted) "deleted reply" else reply.content,
-                style = MaterialTheme.typography.bodyMedium,
-                color = if (reply.deleted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.padding(top = Spacing.xxs),
-            )
+            if (reply.deleted) {
+                Text(
+                    "deleted reply",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = Spacing.xxs),
+                )
+            } else {
+                MarkdownMessage(
+                    reply.content,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(top = Spacing.xxs),
+                )
+            }
             if (!reply.deleted) ForumAttachmentImage(reply.attachment, avatarUrl)
         }
     }

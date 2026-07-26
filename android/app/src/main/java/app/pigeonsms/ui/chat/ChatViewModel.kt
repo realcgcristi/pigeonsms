@@ -246,6 +246,49 @@ class ChatViewModel(
         }
     }
 
+    /**
+     * Send a large attachment without ever holding it in memory (2.9.5).
+     *
+     * Used for anything past the resumable threshold; [openStream] re-opens the
+     * picked `Uri` so the uploader can stream and resume.
+     */
+    fun sendStreamedAttachment(
+        openStream: () -> java.io.InputStream,
+        filename: String,
+        type: String,
+        totalSize: Long,
+        caption: String,
+    ) {
+        if (_ui.value.sending) return
+        val reply = _ui.value.replyTo?.id
+        val repository = social
+        if (repository == null) {
+            _ui.update { it.copy(error = "can't upload right now") }
+            return
+        }
+        viewModelScope.launch {
+            _ui.update { it.copy(sending = true, error = null) }
+            runCatching {
+                repo.sendStreamedAttachment(
+                    channelId = channelId,
+                    social = repository,
+                    openStream = openStream,
+                    filename = filename,
+                    type = type,
+                    totalSize = totalSize,
+                    caption = caption,
+                    replyTo = reply,
+                    selfName = selfName,
+                    isDm = !isSpace,
+                )
+            }.onSuccess {
+                _ui.update { it.copy(sending = false, replyTo = null, composerClearToken = it.composerClearToken + 1) }
+            }.onFailure { e ->
+                _ui.update { it.copy(sending = false, error = e.message ?: "couldn't send that file") }
+            }
+        }
+    }
+
     fun sendAttachment(
         bytes: ByteArray,
         filename: String,

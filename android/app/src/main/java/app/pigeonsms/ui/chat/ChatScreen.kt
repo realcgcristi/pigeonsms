@@ -234,7 +234,15 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalDensity
 
-private const val MAX_ATTACHMENT_BYTES = 50L * 1024L * 1024L
+/**
+ * Hard ceiling for an attachment. Raised to match the server's resumable path
+ * (2.9.5); anything past [STREAM_ATTACHMENT_BYTES] is streamed rather than read
+ * into memory, so this no longer implies a 500 MB allocation.
+ */
+private const val MAX_ATTACHMENT_BYTES = 500L * 1024L * 1024L
+
+/** Past this, stream from the Uri instead of buffering the file in the heap. */
+private const val STREAM_ATTACHMENT_BYTES = 8L * 1024L * 1024L
 private val chatJson = Json { ignoreUnknownKeys = true }
 private val reactionChoices = listOf("👍", "❤️", "😂", "🎉", "🐦", "🔥")
 
@@ -674,6 +682,9 @@ fun ChatScreen(
             onTyping = vm::typing,
             onAttachment = vm::sendAttachment,
             onAttachmentError = vm::reportError,
+            onStreamedAttachment = { open, name, type, size, caption ->
+                vm.sendStreamedAttachment(open, name, type, size, caption)
+            },
             stickers = customEmoji.filter { it.kind == "sticker" },
             onSendSticker = vm::sendSticker,
             mediaUrlFor = vm::mediaUrl,
@@ -2744,6 +2755,8 @@ private fun Composer(
     onAttachment: (ByteArray, String, String, String) -> Unit,
     onAttachmentError: (String) -> Unit,
     /** This nest's stickers (2.9.5); empty hides the composer's sticker button. */
+    /** Large-file path: (openStream, name, type, size, caption). */
+    onStreamedAttachment: (() -> java.io.InputStream, String, String, Long, String) -> Unit = { _, _, _, _, _ -> },
     stickers: List<SpaceEmojiDto> = emptyList(),
     onSendSticker: (String) -> Unit = {},
     mediaUrlFor: (String) -> String? = { null },
@@ -2800,6 +2813,21 @@ private fun Composer(
         if (uri != null) {
             scope.launch {
                 readingAttachment = true
+                // Probe the size before touching the bytes: a large file must never
+                // be read into a ByteArray (that was an OutOfMemoryError waiting to
+                // happen). Stream it straight from the Uri instead.
+                val probed = runCatching { probeAttachment(context, uri) }.getOrNull()
+                if (probed != null && probed.size > STREAM_ATTACHMENT_BYTES) {
+                    onStreamedAttachment(
+                        { context.contentResolver.openInputStream(uri)!! },
+                        probed.name,
+                        probed.type,
+                        probed.size,
+                        "",
+                    )
+                    readingAttachment = false
+                    return@launch
+                }
                 runCatching { readAttachment(context, uri) }
                     .onSuccess { selected ->
                         // Still bitmaps go through the editor; GIF/SVG (and video/audio/docs)
@@ -2815,7 +2843,7 @@ private fun Composer(
                     }
                     .onFailure { error ->
                         onAttachmentError(
-                            if (error is AttachmentTooLargeException) "attachments can be up to 50 MB"
+                            if (error is AttachmentTooLargeException) "attachments can be up to 500 MB"
                             else "couldn't read attachment",
                         )
                     }
@@ -3875,6 +3903,26 @@ private data class SelectedAttachment(
 )
 
 private class AttachmentTooLargeException : IllegalArgumentException()
+
+/** Name/type/size of a picked file, read from metadata without opening the bytes. */
+private class ProbedAttachment(val name: String, val type: String, val size: Long)
+
+private fun probeAttachment(context: android.content.Context, uri: Uri): ProbedAttachment {
+    val resolver = context.contentResolver
+    var name = "attachment"
+    var size = -1L
+    resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+        if (cursor.moveToFirst()) {
+            val nameColumn = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            val sizeColumn = cursor.getColumnIndex(OpenableColumns.SIZE)
+            if (nameColumn >= 0) name = cursor.getString(nameColumn) ?: name
+            if (sizeColumn >= 0 && !cursor.isNull(sizeColumn)) size = cursor.getLong(sizeColumn)
+        }
+    }
+    if (size > MAX_ATTACHMENT_BYTES) throw AttachmentTooLargeException()
+    val type = resolver.getType(uri)?.substringBefore(';')?.trim() ?: "application/octet-stream"
+    return ProbedAttachment(name, type, size)
+}
 
 /**
  * Newest-first device gallery items (images + videos) for the attachment sheet strip.
