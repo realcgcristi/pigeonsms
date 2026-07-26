@@ -355,15 +355,20 @@ async function mutateReaction(c: Context<AppEnv>, action: 'add' | 'remove'): Pro
   // emoji id would react anywhere, including in DMs and in nests that never
   // created it — which would render as a broken image for everyone else.
   if (emoji.startsWith('custom:')) {
-    if (!channel.space_id) {
-      throw new ApiError(400, 'bad_emoji', 'custom emoji only work inside a nest');
-    }
+    // 2.9.5: an emoji is usable ANYWHERE the sender can reach — including DMs and
+    // other nests — as long as they're a member of the nest that owns it. Scoping
+    // it to the current channel's nest meant your emoji vanished the moment you
+    // left the room they live in, which is not how people expect them to work.
+    // Membership is still required, so this can't be used to probe or hotlink
+    // emoji from a nest you don't belong to.
     const known = await c.env.DB.prepare(
-      'SELECT 1 FROM space_emojis WHERE id = ? AND space_id = ?',
+      `SELECT 1 FROM space_emojis se
+       JOIN space_members sm ON sm.space_id = se.space_id AND sm.user_id = ?
+       WHERE se.id = ?`,
     )
-      .bind(emoji.slice('custom:'.length), channel.space_id)
+      .bind(user.id, emoji.slice('custom:'.length))
       .first();
-    if (!known) throw new ApiError(400, 'bad_emoji', 'that emoji is not in this nest');
+    if (!known) throw new ApiError(400, 'bad_emoji', 'that emoji is not one of yours');
   }
 
   const result = action === 'add'
@@ -522,16 +527,17 @@ messages.post('/channels/:id/messages', async (c) => {
     // member was permanently unable to send it.
     const stickerId = String(metadata?.['sticker_id'] ?? '').trim();
     if (stickerId) {
-      if (!channel.space_id) {
-        throw new ApiError(400, 'bad_sticker', 'nest stickers only work inside a nest');
-      }
+      // Usable anywhere the sender can reach, same rule as custom emoji: you must
+      // be a member of the nest that owns it, but you may send it in a DM or a
+      // different nest.
       const sticker = await c.env.DB.prepare(
-        `SELECT id, name, media_key, content_type FROM space_emojis
-         WHERE id = ? AND space_id = ? AND kind = 'sticker'`,
+        `SELECT se.id, se.name, se.media_key, se.content_type FROM space_emojis se
+         JOIN space_members sm ON sm.space_id = se.space_id AND sm.user_id = ?
+         WHERE se.id = ? AND se.kind = 'sticker'`,
       )
-        .bind(stickerId, channel.space_id)
+        .bind(user.id, stickerId)
         .first<{ id: string; name: string; media_key: string; content_type: string | null }>();
-      if (!sticker) throw new ApiError(400, 'bad_sticker', 'that sticker is not in this nest');
+      if (!sticker) throw new ApiError(400, 'bad_sticker', 'that sticker is not one of yours');
 
       // Stamp the media key from the database rather than echoing the client's:
       // otherwise anyone could point a "sticker" at an arbitrary media key and

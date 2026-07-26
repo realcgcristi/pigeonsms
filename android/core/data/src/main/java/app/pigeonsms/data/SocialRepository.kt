@@ -173,6 +173,22 @@ class SocialRepository(
     private val emojiCache = mutableMapOf<String, List<SpaceEmojiDto>>()
     private val emojiMutex = Mutex()
 
+    /**
+     * Every emoji you can use, from every nest you're in (2.9.5).
+     *
+     * Cached like the per-nest list. This is what makes emoji work in DMs and in
+     * nests other than the one that owns them — the server enforces the same
+     * membership rule when the message is actually sent.
+     */
+    private var allEmoji: List<SpaceEmojiDto>? = null
+
+    suspend fun myEmojis(refresh: Boolean = false): List<SpaceEmojiDto> = emojiMutex.withLock {
+        if (!refresh) allEmoji?.let { return@withLock it }
+        val fetched = runCatching { api.myEmojis() }.getOrElse { return@withLock allEmoji.orEmpty() }
+        allEmoji = fetched
+        fetched
+    }
+
     suspend fun spaceEmojis(spaceId: String, refresh: Boolean = false): List<SpaceEmojiDto> =
         emojiMutex.withLock {
             if (!refresh) emojiCache[spaceId]?.let { return@withLock it }
@@ -193,19 +209,19 @@ class SocialRepository(
         contentType: String? = null,
     ): SpaceEmojiDto {
         val created = api.createSpaceEmoji(spaceId, name, mediaKey, kind, contentType)
-        emojiMutex.withLock { emojiCache.remove(spaceId) }
+        emojiMutex.withLock { emojiCache.remove(spaceId); allEmoji = null }
         return created
     }
 
     suspend fun renameSpaceEmoji(spaceId: String, emojiId: String, name: String): SpaceEmojiDto {
         val renamed = api.renameSpaceEmoji(spaceId, emojiId, name)
-        emojiMutex.withLock { emojiCache.remove(spaceId) }
+        emojiMutex.withLock { emojiCache.remove(spaceId); allEmoji = null }
         return renamed
     }
 
     suspend fun deleteSpaceEmoji(spaceId: String, emojiId: String) {
         api.deleteSpaceEmoji(spaceId, emojiId)
-        emojiMutex.withLock { emojiCache.remove(spaceId) }
+        emojiMutex.withLock { emojiCache.remove(spaceId); allEmoji = null }
     }
 
     // ── v2.9.5: roles + permissions ────────────────────────────────────────

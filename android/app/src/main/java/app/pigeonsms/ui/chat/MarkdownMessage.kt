@@ -420,7 +420,9 @@ internal fun rememberEmojiInlineContent(
     mediaUrl: (String) -> String?,
 ): Map<String, InlineTextContent> = remember(emoji) {
     emoji.associate { item ->
-        val size = if (item.kind == "sticker") 48.sp else 20.sp
+        // Emoji sit slightly above the cap height of body text so they read as
+        // emoji rather than punctuation; stickers render at image scale.
+        val size = if (item.kind == "sticker") 128.sp else 26.sp
         "$EMOJI_INLINE_PREFIX${item.id}" to InlineTextContent(
             Placeholder(size, size, PlaceholderVerticalAlign.TextCenter),
         ) {

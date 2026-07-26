@@ -99,6 +99,8 @@ import app.pigeonsms.ui.threads.ThreadScreen
 import app.pigeonsms.ui.threads.ThreadViewModel
 import app.pigeonsms.ui.spaces.NestRolesScreen
 import app.pigeonsms.ui.spaces.NestRolesViewModel
+import app.pigeonsms.ui.spaces.NestMembersScreen
+import app.pigeonsms.ui.spaces.NestMembersViewModel
 import app.pigeonsms.ui.spaces.NestEmojiViewModel
 import app.pigeonsms.ui.spaces.NestEmojiScreen
 import app.pigeonsms.ui.spaces.NestChannelsScreen
@@ -251,6 +253,7 @@ fun AppShell(session: LocalSession) {
                         spaceId = spaceId,
                         onOpenEmoji = { nav.navigate("nestemoji/$spaceId") },
                         onOpenRoles = { nav.navigate("nestroles/$spaceId") },
+                        onOpenMembers = { nav.navigate("nestmembers/$spaceId") },
                         onBack = { nav.popBackStack() },
                         onOpenChannel = { ch, name, kind ->
                             if (kind == "forum") {
@@ -367,6 +370,17 @@ fun AppShell(session: LocalSession) {
                 val spaceId = entry.arguments?.getString("spaceId") ?: return@composable
                 val rolesVm: NestRolesViewModel = pigeonVm(key = "roles-$spaceId") { c, _ -> NestRolesViewModel(c.socialRepository) }
                 NestRolesScreen(spaceId = spaceId, vm = rolesVm, onBack = { nav.popBackStack() })
+            }
+            composable("nestmembers/{spaceId}") { entry ->
+                val spaceId = entry.arguments?.getString("spaceId") ?: return@composable
+                val membersVm: NestMembersViewModel =
+                    pigeonVm(key = "members-$spaceId") { c, _ -> NestMembersViewModel(c.socialRepository) }
+                NestMembersScreen(
+                    spaceId = spaceId,
+                    vm = membersVm,
+                    onBack = { nav.popBackStack() },
+                    onOpenProfile = { id -> nav.navigate("profile/$id") },
+                )
             }
             composable("nestemoji/{spaceId}") { entry ->
                 val spaceId = entry.arguments?.getString("spaceId") ?: return@composable

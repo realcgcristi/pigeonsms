@@ -40,6 +40,7 @@ import androidx.compose.material.icons.outlined.DeleteForever
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.EmojiEmotions
 import androidx.compose.material.icons.outlined.Forum
+import androidx.compose.material.icons.outlined.Groups
 import androidx.compose.material.icons.outlined.PeopleOutline
 import androidx.compose.material.icons.outlined.PersonAdd
 import androidx.compose.material.icons.outlined.PhotoCamera
@@ -130,6 +131,8 @@ fun NestChannelsScreen(
     onOpenEmoji: (() -> Unit)? = null,
     /** Opens this nest's roles + permissions editor (2.9.5). Null hides the entry. */
     onOpenRoles: (() -> Unit)? = null,
+    /** Opens the member list (2.9.5). Visible to every member, not just admins. */
+    onOpenMembers: (() -> Unit)? = null,
 ) {
     val vm: SpacesViewModel = pigeonVm(key = "nest-$spaceId") { c, _ -> SpacesViewModel(c.socialRepository, c.api) }
     val home by app.home.collectAsState()
@@ -225,6 +228,8 @@ fun NestChannelsScreen(
             onChangeIcon = onChangeIcon,
             onOpenEmoji = emojiEntry,
             onOpenRoles = if (canManageIcon) onOpenRoles else null,
+            // Deliberately ungated: anyone in the nest can see who else is in it.
+            onOpenMembers = onOpenMembers,
             onInvite = onInvite,
             onDemolish = onDemolish,
             onLeave = onLeave,
@@ -554,6 +559,7 @@ private fun NestHeader(
     /** 2.9.5 nest-management actions, shown opposite invite/leave. */
     onOpenEmoji: (() -> Unit)? = null,
     onOpenRoles: (() -> Unit)? = null,
+    onOpenMembers: (() -> Unit)? = null,
     onInvite: () -> Unit,
     onDemolish: (() -> Unit)?,
     onLeave: (() -> Unit)?,
@@ -665,6 +671,14 @@ private fun NestHeader(
                 NestActionChip(
                     icon = Icons.Outlined.PeopleOutline,
                     label = "roles",
+                    onClick = open,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            onOpenMembers?.let { open ->
+                NestActionChip(
+                    icon = Icons.Outlined.Groups,
+                    label = "members",
                     onClick = open,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

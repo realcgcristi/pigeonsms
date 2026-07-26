@@ -162,13 +162,12 @@ class ChatViewModel(
      */
     private fun loadCustomEmoji() {
         val repository = social ?: return
-        if (!isSpace) return
         viewModelScope.launch {
-            runCatching {
-                val space = repository.cachedSpaces().firstOrNull { s -> s.channels.any { it.id == channelId } }
-                    ?: repository.spaces().firstOrNull { s -> s.channels.any { it.id == channelId } }
-                space?.let { repository.spaceEmojis(it.id) }
-            }.getOrNull()?.let { emoji -> _customEmoji.value = emoji }
+            // Every nest's emoji, not just this channel's: emoji are usable
+            // anywhere as of 2.9.5, including DMs (which have no nest at all).
+            runCatching { repository.myEmojis() }
+                .getOrNull()
+                ?.let { emoji -> _customEmoji.value = emoji }
         }
     }
 

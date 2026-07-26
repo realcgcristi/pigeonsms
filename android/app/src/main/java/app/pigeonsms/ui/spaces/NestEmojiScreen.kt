@@ -126,7 +126,13 @@ fun NestEmojiScreen(
                     picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                 },
             ) {
-                Icon(Icons.Outlined.Add, contentDescription = "add emoji")
+                Icon(
+                    Icons.Outlined.Add,
+                    contentDescription = "add emoji",
+                    // Default tint is onSurfaceVariant, which disappears against the
+                    // dark Nova header — use full-contrast onSurface.
+                    tint = MaterialTheme.colorScheme.onSurface,
+                )
             }
         }
         Text(
