@@ -137,3 +137,46 @@ class ChatAppearanceStore(private val context: Context) {
         it[mutedKey(channelId)] = muted
     }
 }
+
+/**
+ * Private nicknames for other people (2.9.5).
+ *
+ * "Only you can see them" is the whole feature, so this is deliberately **local
+ * only** — nothing is uploaded, and the server never learns you call someone
+ * something else. The trade-off is that a nickname doesn't follow you to a new
+ * device; syncing it would mean storing it server-side, at which point it isn't
+ * private any more.
+ *
+ * Lives in Stores.kt rather than its own file because the `dataStore` delegate is
+ * private here, and declaring a second `preferencesDataStore` with the same name
+ * throws at runtime.
+ */
+class NicknameStore(private val context: Context) {
+
+    /** Every nickname you've set, keyed by user id. */
+    val nicknames: Flow<Map<String, String>> = context.dataStore.data.map { prefs ->
+        prefs.asMap().mapNotNull { (key, value) ->
+            val name = key.name
+            if (!name.startsWith(NICKNAME_PREFIX)) return@mapNotNull null
+            val nickname = value as? String ?: return@mapNotNull null
+            if (nickname.isBlank()) null else name.removePrefix(NICKNAME_PREFIX) to nickname
+        }.toMap()
+    }
+
+    /** Set or clear one person's nickname. Blank clears it. */
+    suspend fun set(userId: String, nickname: String?) {
+        val key = androidx.datastore.preferences.core.stringPreferencesKey("$NICKNAME_PREFIX$userId")
+        context.dataStore.edit { prefs ->
+            val trimmed = nickname?.trim().orEmpty()
+            if (trimmed.isEmpty()) prefs.remove(key) else prefs[key] = trimmed.take(40)
+        }
+    }
+
+    private companion object {
+        const val NICKNAME_PREFIX = "nickname:"
+    }
+}
+
+/** Your nickname for someone, falling back to whatever the server calls them. */
+fun Map<String, String>.displayNameFor(userId: String, fallback: String): String =
+    this[userId]?.takeIf { it.isNotBlank() } ?: fallback

@@ -1753,7 +1753,12 @@ private fun MessageBubble(
                                     message.content,
                                     color = bubbleContentColor(self),
                                     style = MaterialTheme.typography.displaySmall,
-                                ) else MarkdownMessage(message.content, color = bubbleContentColor(self))
+                                ) else MarkdownMessage(
+                                    message.content,
+                                    color = bubbleContentColor(self),
+                                    emoji = customEmoji,
+                                    mediaUrl = mediaUrl,
+                                )
                             }
                             val previewUrl = if (!message.deleted) firstUrlIn(message.content) else null
                             if (previewUrl != null) {
