@@ -70,6 +70,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
@@ -130,15 +132,85 @@ fun ProfileScreen(userId: String, onBack: () -> Unit, isSelf: Boolean = false) {
     val vm: ProfileViewModel = pigeonVm(key = "profile-$userId") { c, _ -> ProfileViewModel(c.socialRepository, userId) }
     val ui by vm.ui.collectAsState()
 
-    when {
-        ui.loading -> ProfileStatus(onBack, "loading profile...")
-        ui.profile == null -> ProfileStatus(onBack, ui.error ?: "couldn't load profile", "try again", vm::load)
-        else -> ProfileContent(
-            ui.profile!!,
-            vm::mediaUrl,
-            onBack,
-            onBlock = if (isSelf) null else ({ vm.block(onBack) }),
-            mutualSpaces = if (isSelf) emptyList() else ui.mutualSpaces,
+    // Nicknames (2.9.5) are private and device-local — nothing is uploaded, so the
+    // person never learns what you call them. Rendered as an overlay rather than a
+    // row inside ProfileContent because that fans out to three hand-written skin
+    // variants; one overlay covers Classic, Nova and Galaxy alike.
+    val nicknameContext = LocalContext.current
+    val nicknameStore = remember(nicknameContext) {
+        (nicknameContext.applicationContext as? app.pigeonsms.PigeonApp)?.container?.nicknameStore
+    }
+    val nicknames by (nicknameStore?.nicknames ?: kotlinx.coroutines.flow.flowOf(emptyMap()))
+        .collectAsState(initial = emptyMap())
+    val nicknameScope = rememberCoroutineScope()
+    var editingNickname by remember { mutableStateOf(false) }
+    var nicknameDraft by remember(userId) { mutableStateOf("") }
+
+    Box(Modifier.fillMaxSize()) {
+        when {
+            ui.loading -> ProfileStatus(onBack, "loading profile...")
+            ui.profile == null -> ProfileStatus(onBack, ui.error ?: "couldn't load profile", "try again", vm::load)
+            else -> ProfileContent(
+                ui.profile!!,
+                vm::mediaUrl,
+                onBack,
+                onBlock = if (isSelf) null else ({ vm.block(onBack) }),
+                mutualSpaces = if (isSelf) emptyList() else ui.mutualSpaces,
+            )
+        }
+
+        if (!isSelf && ui.profile != null && nicknameStore != null) {
+            ExtendedFloatingActionButton(
+                onClick = {
+                    nicknameDraft = nicknames[userId].orEmpty()
+                    editingNickname = true
+                },
+                modifier = Modifier.align(Alignment.BottomEnd)
+                    .navigationBarsPadding()
+                    .padding(Spacing.l),
+            ) {
+                Text(if (nicknames[userId].isNullOrBlank()) "add nickname" else "edit nickname")
+            }
+        }
+    }
+
+    if (editingNickname && nicknameStore != null) {
+        AlertDialog(
+            onDismissRequest = { editingNickname = false },
+            title = { Text("nickname") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = nicknameDraft,
+                        onValueChange = { nicknameDraft = it.take(40) },
+                        label = { Text("what you call them") },
+                        singleLine = true,
+                    )
+                    Text(
+                        "only you can see this — it stays on this device and is never sent to the server.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = Spacing.s),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    nicknameScope.launch { nicknameStore.set(userId, nicknameDraft) }
+                    editingNickname = false
+                }) { Text("save") }
+            },
+            dismissButton = {
+                Row {
+                    if (!nicknames[userId].isNullOrBlank()) {
+                        TextButton(onClick = {
+                            nicknameScope.launch { nicknameStore.set(userId, null) }
+                            editingNickname = false
+                        }) { Text("clear") }
+                    }
+                    TextButton(onClick = { editingNickname = false }) { Text("cancel") }
+                }
+            },
         )
     }
 }
