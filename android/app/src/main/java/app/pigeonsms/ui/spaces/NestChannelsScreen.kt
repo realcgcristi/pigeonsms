@@ -213,44 +213,6 @@ fun NestChannelsScreen(
     val emojiEntry: (() -> Unit)? = if (canManageIcon) onOpenEmoji else null
 
     Column(Modifier.fillMaxSize()) {
-        emojiEntry?.let { open ->
-            Surface(
-                onClick = open,
-                shape = MaterialTheme.shapes.medium,
-                tonalElevation = 1.dp,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.m, vertical = Spacing.xs),
-            ) {
-                Row(
-                    Modifier.fillMaxWidth().padding(Spacing.s),
-                    horizontalArrangement = Arrangement.spacedBy(Spacing.s),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        Icons.Outlined.EmojiEmotions,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                    )
-                    Text("nest emoji", style = MaterialTheme.typography.bodyMedium)
-                }
-            }
-        }
-        (if (canManageIcon) onOpenRoles else null)?.let { open ->
-            Surface(
-                onClick = open,
-                shape = MaterialTheme.shapes.medium,
-                tonalElevation = 1.dp,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.m, vertical = Spacing.xs),
-            ) {
-                Row(
-                    Modifier.fillMaxWidth().padding(Spacing.s),
-                    horizontalArrangement = Arrangement.spacedBy(Spacing.s),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(Icons.Outlined.PeopleOutline, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Text("roles & permissions", style = MaterialTheme.typography.bodyMedium)
-                }
-            }
-        }
         // Header: back (or create/join "+" when embedded) + nest identity + actions.
         NestHeader(
             space = space,
@@ -261,6 +223,8 @@ fun NestChannelsScreen(
             onBack = onBack,
             onCreateOrJoin = onCreateOrJoin,
             onChangeIcon = onChangeIcon,
+            onOpenEmoji = emojiEntry,
+            onOpenRoles = if (canManageIcon) onOpenRoles else null,
             onInvite = onInvite,
             onDemolish = onDemolish,
             onLeave = onLeave,
@@ -587,6 +551,9 @@ private fun NestHeader(
     onBack: () -> Unit,
     onCreateOrJoin: (() -> Unit)?,
     onChangeIcon: (() -> Unit)?,
+    /** 2.9.5 nest-management actions, shown opposite invite/leave. */
+    onOpenEmoji: (() -> Unit)? = null,
+    onOpenRoles: (() -> Unit)? = null,
     onInvite: () -> Unit,
     onDemolish: (() -> Unit)?,
     onLeave: (() -> Unit)?,
@@ -684,6 +651,24 @@ private fun NestHeader(
                 onClick = onInvite,
                 tint = MaterialTheme.colorScheme.primary,
             )
+            // 2.9.5 management actions live in the same chip row as invite/leave
+            // rather than as separate full-width rows above the header.
+            onOpenEmoji?.let { open ->
+                NestActionChip(
+                    icon = Icons.Outlined.EmojiEmotions,
+                    label = "emoji",
+                    onClick = open,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            onOpenRoles?.let { open ->
+                NestActionChip(
+                    icon = Icons.Outlined.PeopleOutline,
+                    label = "roles",
+                    onClick = open,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             if (onDemolish != null) {
                 NestActionChip(
                     icon = Icons.Outlined.DeleteForever,

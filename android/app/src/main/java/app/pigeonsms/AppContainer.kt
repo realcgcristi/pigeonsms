@@ -22,6 +22,8 @@ class AppContainer(context: Context) {
     private val appScope = CoroutineScope(SupervisorJob())
     val sessionStore = SessionStore(context)
     val themeStore = ThemeStore(context)
+    /** Private, device-local nicknames for other people (2.9.5). */
+    val nicknameStore = app.pigeonsms.data.NicknameStore(context)
     val api = PigeonApi(tokenProvider = { sessionStore.session.first()?.token })
     private val db = PigeonDatabase.get(context)
 
