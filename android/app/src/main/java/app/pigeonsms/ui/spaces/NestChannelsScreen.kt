@@ -38,6 +38,7 @@ import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.DeleteForever
 import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.EmojiEmotions
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.PeopleOutline
 import androidx.compose.material.icons.outlined.PersonAdd
@@ -55,6 +56,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -124,6 +126,8 @@ fun NestChannelsScreen(
     onOpenChannel: (id: String, name: String, kind: String) -> Unit,
     embedded: Boolean = false,
     onCreateOrJoin: (() -> Unit)? = null,
+    /** Opens this nest's custom-emoji manager (2.9.5). Null hides the entry. */
+    onOpenEmoji: (() -> Unit)? = null,
 ) {
     val vm: SpacesViewModel = pigeonVm(key = "nest-$spaceId") { c, _ -> SpacesViewModel(c.socialRepository, c.api) }
     val home by app.home.collectAsState()
@@ -202,7 +206,32 @@ fun NestChannelsScreen(
         }
     } else null
 
+    // Emoji management is owner/admin only, matching the server's MANAGE_EMOJI
+    // default. Members simply don't see the entry.
+    val emojiEntry: (() -> Unit)? = if (canManageIcon) onOpenEmoji else null
+
     Column(Modifier.fillMaxSize()) {
+        emojiEntry?.let { open ->
+            Surface(
+                onClick = open,
+                shape = MaterialTheme.shapes.medium,
+                tonalElevation = 1.dp,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = Spacing.m, vertical = Spacing.xs),
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().padding(Spacing.s),
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.s),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        Icons.Outlined.EmojiEmotions,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Text("nest emoji", style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+        }
         // Header: back (or create/join "+" when embedded) + nest identity + actions.
         NestHeader(
             space = space,
