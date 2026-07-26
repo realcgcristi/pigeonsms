@@ -1791,6 +1791,9 @@ private fun MessageBubble(
                                     color = bubbleContentColor(self),
                                     emoji = customEmoji,
                                     mediaUrl = mediaUrl,
+                                    // A message that's only custom emoji renders big,
+                                    // the same courtesy Unicode-only messages get.
+                                    emojiScale = if (isCustomEmojiOnly(message.content)) 2.4f else 1f,
                                     onTokenClick = onTokenClick,
                                 )
                             }
@@ -4237,6 +4240,21 @@ private fun authorColor(id: String): Color =
     authorPalette[(id.hashCode() and Int.MAX_VALUE) % authorPalette.size]
 
 /** True for short, symbol-only messages so they render oversized (jumbomoji). */
+/**
+ * True when a message is nothing but custom-emoji shortcodes (up to three).
+ *
+ * Mirrors [isEmojiOnly] for Unicode: those get `displaySmall`, so custom emoji
+ * need the same treatment or a `:wave:`-only message renders at body size while
+ * a "👋"-only one renders huge.
+ */
+private fun isCustomEmojiOnly(text: String): Boolean {
+    val trimmed = text.trim()
+    if (trimmed.isEmpty()) return false
+    val tokens = Regex("::?[a-z0-9_]{2,32}::?").findAll(trimmed).toList()
+    if (tokens.isEmpty() || tokens.size > 3) return false
+    return tokens.sumOf { it.value.length } == trimmed.replace(" ", "").length
+}
+
 private fun isEmojiOnly(text: String): Boolean {
     val trimmed = text.trim()
     if (trimmed.isEmpty() || trimmed.length > 12) return false

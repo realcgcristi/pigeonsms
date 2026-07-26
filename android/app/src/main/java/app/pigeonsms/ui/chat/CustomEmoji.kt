@@ -16,6 +16,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.runtime.getValue
@@ -227,6 +228,7 @@ fun StickerMessageContent(
  * tapping an emoji inserts `:name:` into the draft, tapping a sticker sends it as
  * its own message and closes the sheet.
  */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun EmojiStickerPicker(
     emoji: List<SpaceEmojiDto>,
@@ -238,33 +240,46 @@ fun EmojiStickerPicker(
     var tab by remember { mutableStateOf(0) }
     val emojis = remember(emoji) { emoji.filter { it.kind == "emoji" } }
     val stickers = remember(emoji) { emoji.filter { it.kind == "sticker" } }
+    val sheetState = androidx.compose.material3.rememberModalBottomSheetState(
+        // Keyboard-like: open straight to full panel height rather than a peek.
+        skipPartiallyExpanded = true,
+    )
 
-    androidx.compose.material3.AlertDialog(
+    androidx.compose.material3.ModalBottomSheet(
         onDismissRequest = onDismiss,
-        title = {
+        sheetState = sheetState,
+    ) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = Spacing.m)) {
             Row(horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
-                androidx.compose.material3.TextButton(onClick = { tab = 0 }) {
-                    Text(if (tab == 0) "• emoji" else "emoji")
-                }
-                androidx.compose.material3.TextButton(onClick = { tab = 1 }) {
-                    Text(if (tab == 1) "• stickers" else "stickers")
-                }
+                androidx.compose.material3.FilterChip(
+                    selected = tab == 0,
+                    onClick = { tab = 0 },
+                    label = { Text("emoji") },
+                )
+                androidx.compose.material3.FilterChip(
+                    selected = tab == 1,
+                    onClick = { tab = 1 },
+                    label = { Text("stickers") },
+                )
             }
-        },
-        text = {
+
             val shown = if (tab == 0) emojis else stickers
             if (shown.isEmpty()) {
                 Text(
                     if (tab == 0) "no emoji in your nests yet" else "no stickers in your nests yet",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = Spacing.xl),
                 )
             } else {
                 androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
                     columns = androidx.compose.foundation.lazy.grid.GridCells.Adaptive(
-                        if (tab == 0) 56.dp else 96.dp,
+                        if (tab == 0) 64.dp else 104.dp,
                     ),
-                    modifier = Modifier.fillMaxWidth().heightIn(max = 320.dp),
+                    // A keyboard-height panel: tall enough to scroll through a real
+                    // set without swallowing the whole screen.
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 260.dp, max = 380.dp)
+                        .padding(top = Spacing.s),
                     horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
                     verticalArrangement = Arrangement.spacedBy(Spacing.xs),
                 ) {
@@ -276,22 +291,20 @@ fun EmojiStickerPicker(
                             },
                             shape = MaterialTheme.shapes.medium,
                             color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                            modifier = Modifier.size(if (tab == 0) 52.dp else 92.dp).semantics {
+                            modifier = Modifier.size(if (tab == 0) 60.dp else 100.dp).semantics {
                                 contentDescription = ":${item.name}:"
                             },
                         ) {
                             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                CustomEmojiImage(item, mediaUrl, size = if (tab == 0) 34 else 80)
+                                CustomEmojiImage(item, mediaUrl, size = if (tab == 0) 44 else 88)
                             }
                         }
                     }
                 }
             }
-        },
-        confirmButton = {
-            androidx.compose.material3.TextButton(onClick = onDismiss) { Text("close") }
-        },
-    )
+            Spacer(Modifier.height(Spacing.l))
+        }
+    }
 }
 
 /**
