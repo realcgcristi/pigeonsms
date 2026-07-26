@@ -76,6 +76,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -143,6 +145,14 @@ fun ForumScreen(
         ForumViewModel(c.api, c.socialRepository, c.gateway, channelId, title)
     }
     val ui by vm.ui.collectAsState()
+    // 2.9.6 new-activity dots.
+    val forumSeenContext = LocalContext.current
+    val forumSeenStore = remember(forumSeenContext) {
+        (forumSeenContext.applicationContext as? app.pigeonsms.PigeonApp)?.container?.forumSeenStore
+    }
+    val forumSeen by (forumSeenStore?.seen ?: kotlinx.coroutines.flow.flowOf(emptyMap()))
+        .collectAsState(initial = emptyMap())
+    val forumSeenScope = rememberCoroutineScope()
     var composeOpen by rememberSaveable(channelId) { mutableStateOf(false) }
     var renameOpen by rememberSaveable(channelId) { mutableStateOf(false) }
     var tagDialogOpen by rememberSaveable(channelId) { mutableStateOf(false) }
@@ -583,10 +593,14 @@ private fun PostList(
                     // captured on first load. Guard newSinceSeq > 0 so a fresh channel
                     // (baseline 0) doesn't light every post.
                     val isNew = ui.newSinceSeq > 0 && post.seq > ui.newSinceSeq
+                    // 2.9.6: a dot for posts whose reply count grew since you last
+                    // opened them. Distinct from `isNew` (a brand-new post) — this
+                    // is "the conversation moved on without you".
+                    val hasNewReplies = forumSeen[post.id]?.let { post.reply_count > it } == true
                     when (skin) {
-                        UiSkin.Galaxy -> NovaPostCard(post, avatarUrl, isNew = isNew, modifier = Modifier.itemAppear(index), onOpen = { onOpen(post) }, onOpenProfile = onOpenProfile, onDelete = onDeleteThis, onLike = { onLike(post.id) })
-                        UiSkin.Nova -> ExpNovaPostCard(post, avatarUrl, isNew = isNew, modifier = Modifier.itemAppear(index), onOpen = { onOpen(post) }, onOpenProfile = onOpenProfile, onDelete = onDeleteThis, onLike = { onLike(post.id) })
-                        UiSkin.Classic -> PostCard(post, avatarUrl, isNew = isNew, modifier = Modifier.itemAppear(index), onOpen = { onOpen(post) }, onOpenProfile = onOpenProfile, onDelete = onDeleteThis, onLike = { onLike(post.id) })
+                        UiSkin.Galaxy -> NovaPostCard(post, avatarUrl, isNew = isNew || hasNewReplies, modifier = Modifier.itemAppear(index), onOpen = { forumSeenScope.launch { forumSeenStore?.markSeen(post.id, post.reply_count) }; onOpen(post) }, onOpenProfile = onOpenProfile, onDelete = onDeleteThis, onLike = { onLike(post.id) })
+                        UiSkin.Nova -> ExpNovaPostCard(post, avatarUrl, isNew = isNew || hasNewReplies, modifier = Modifier.itemAppear(index), onOpen = { forumSeenScope.launch { forumSeenStore?.markSeen(post.id, post.reply_count) }; onOpen(post) }, onOpenProfile = onOpenProfile, onDelete = onDeleteThis, onLike = { onLike(post.id) })
+                        UiSkin.Classic -> PostCard(post, avatarUrl, isNew = isNew || hasNewReplies, modifier = Modifier.itemAppear(index), onOpen = { forumSeenScope.launch { forumSeenStore?.markSeen(post.id, post.reply_count) }; onOpen(post) }, onOpenProfile = onOpenProfile, onDelete = onDeleteThis, onLike = { onLike(post.id) })
                     }
                 }
             }

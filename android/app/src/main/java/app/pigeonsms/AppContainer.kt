@@ -24,6 +24,8 @@ class AppContainer(context: Context) {
     val themeStore = ThemeStore(context)
     /** Private, device-local nicknames for other people (2.9.5). */
     val nicknameStore = app.pigeonsms.data.NicknameStore(context)
+    /** Per-post reply counts you've seen — drives the forum's new-activity dot. */
+    val forumSeenStore = app.pigeonsms.data.ForumSeenStore(context)
     val api = PigeonApi(tokenProvider = { sessionStore.session.first()?.token })
     private val db = PigeonDatabase.get(context)
 
