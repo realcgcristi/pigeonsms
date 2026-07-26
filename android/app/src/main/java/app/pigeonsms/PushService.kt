@@ -149,6 +149,9 @@ class PushService : FirebaseMessagingService() {
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setContentIntent(open)
+            // Group per conversation so every notification from one channel can be
+            // dismissed together the moment that channel is opened.
+            .also { builder -> target?.channelId?.let { builder.setGroup(channelGroupKey(it)) } }
             .setWhen(System.currentTimeMillis())
             .setShowWhen(true)
             .setSilent(!scoped.sound)

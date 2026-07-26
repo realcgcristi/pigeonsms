@@ -249,3 +249,29 @@ private fun String?.clean(): String? = this?.trim()?.takeIf { it.isNotEmpty() }
 private fun String.stripBrackets(): String = trim().let {
     if (it.length >= 2 && it.first() == '[' && it.last() == ']') it.substring(1, it.length - 1).trim() else it
 }.ifBlank { "Space" }
+
+
+/** Notification group key for one conversation (2.9.5). */
+fun channelGroupKey(channelId: String): String = "pigeon:channel:$channelId"
+
+/**
+ * Dismiss every notification belonging to [channelId].
+ *
+ * Called when a conversation is opened — whether the user tapped a notification
+ * or navigated in themselves. Previously each message left its own notification
+ * behind, so opening a busy chat still left a stack of stale ones in the shade.
+ *
+ * `activeNotifications` needs API 23; below that we simply can't enumerate them,
+ * and a stale notification is a far better outcome than a crash.
+ */
+fun dismissChannelNotifications(context: android.content.Context, channelId: String) {
+    if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.M) return
+    val manager = context.getSystemService(android.content.Context.NOTIFICATION_SERVICE)
+        as? android.app.NotificationManager ?: return
+    val group = channelGroupKey(channelId)
+    runCatching {
+        manager.activeNotifications
+            .filter { it.notification.group == group }
+            .forEach { manager.cancel(it.id) }
+    }
+}
