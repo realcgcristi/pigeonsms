@@ -126,6 +126,19 @@ export async function serializeMessages(
     for (const match of row.content.matchAll(/::?([a-z0-9_]{2,32})::?/g)) {
       if (match[1]) shortcodes.add(match[1]);
     }
+    // Emoji bound at send time (2.9.7) resolve regardless of which nest the
+    // message ended up in — including DMs, which have no nest at all.
+    if (row.metadata) {
+      try {
+        const parsed = JSON.parse(row.metadata) as { emoji?: { id?: string }[] };
+        for (const entry of parsed.emoji ?? []) {
+          if (entry?.id) emojiIds.add(String(entry.id));
+        }
+      } catch {
+        // Metadata that won't parse is not worth failing a whole page of
+        // messages over; the emoji simply falls back to shortcode text.
+      }
+    }
   }
 
   const customEmoji = new Map<string, {
@@ -580,6 +593,38 @@ messages.post('/channels/:id/messages', async (c) => {
   const poll: PollInput | null = kind === 'poll' ? normalizePoll(body['poll']) : null;
   if (poll && !content.trim()) content = poll.question;
   if (kind === 'event' && !content.trim()) content = String(metadata?.['title'] ?? 'Event');
+  // 2.9.7: resolve any `:shortcode:` in the body against the SENDER's nests and
+  // stamp the result into metadata.
+  //
+  // Resolving at read time doesn't work: a shortcode is only meaningful inside
+  // the nest that defines it, so an emoji used in a DM — or in a different nest —
+  // had nothing to resolve against and rendered as literal text for everyone.
+  // Binding it at send time means the reference travels with the message and any
+  // viewer can draw it, which is what "works everywhere" actually requires.
+  {
+    const names = [...new Set(
+      [...content.matchAll(/::?([a-z0-9_]{2,32})::?/g)].map((m) => m[1]).filter(Boolean),
+    )] as string[];
+    if (names.length) {
+      const { results } = await c.env.DB.prepare(
+        `SELECT se.id, se.name, se.kind, se.media_key FROM space_emojis se
+         JOIN space_members sm ON sm.space_id = se.space_id AND sm.user_id = ?
+         WHERE se.name IN (${names.map(() => '?').join(', ')})
+         LIMIT 100`,
+      )
+        .bind(user.id, ...names)
+        .all<{ id: string; name: string; kind: string; media_key: string }>();
+      if (results.length) {
+        metadata = {
+          ...(metadata ?? {}),
+          // First match wins if two of your nests share a shortcode — arbitrary,
+          // but stable, and the alternative is refusing to render either.
+          emoji: results.filter((row, i) => results.findIndex((r) => r.name === row.name) === i),
+        };
+      }
+    }
+  }
+
   if (kind === 'sticker') {
     // 2.9.5: a sticker may reference one of the NEST's stickers by id instead of
     // carrying an owned attachment. Whoever added it to the nest owns the upload

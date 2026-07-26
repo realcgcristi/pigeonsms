@@ -640,4 +640,20 @@ class PigeonApi(
     suspend fun myEmojis() =
         client.get("$baseUrl/spaces/emojis/mine") { auth() }.unwrap<SpaceEmojisResponse>().emojis
 
+
+    // --- v2.9.7: moderation ---
+    suspend fun kickMember(spaceId: String, userId: String) {
+        client.delete("$baseUrl/spaces/$spaceId/members/$userId") { auth() }.unwrap<OkResponse>()
+    }
+
+    suspend fun banMember(spaceId: String, userId: String, reason: String? = null) {
+        client.post("$baseUrl/spaces/$spaceId/bans") {
+            auth(); contentType(ContentType.Application.Json)
+            setBody(buildJsonObject {
+                put("user_id", userId)
+                if (reason != null) put("reason", reason)
+            })
+        }.unwrap<OkResponse>()
+    }
+
 }

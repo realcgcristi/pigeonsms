@@ -377,7 +377,26 @@ class ChatViewModel(
     }
 
     fun delete(message: MessageEntity) {
-        if ((!isOwn(message) && !_ui.value.isAdmin) || message.deleted || message.state != "SENT") return
+        // 2.9.7: a message that never sent lives only on this device, and the
+        // outbox will keep retrying it forever. Deleting one used to be impossible
+        // — this guard returned early and nothing happened — so drop the local row
+        // and its outbox entry instead of asking the server about an id it has
+        // never seen.
+        if (message.state != "SENT") {
+            if (!isOwn(message)) return
+            viewModelScope.launch {
+                runCatching { repo.discardUnsent(message) }
+                    .onFailure { _ui.update { it.copy(error = "couldn't discard that message") } }
+                _ui.update { state ->
+                    state.copy(
+                        editing = state.editing?.takeUnless { it.id == message.id },
+                        replyTo = state.replyTo?.takeUnless { it.id == message.id },
+                    )
+                }
+            }
+            return
+        }
+        if ((!isOwn(message) && !_ui.value.isAdmin) || message.deleted) return
         if (!beginMessageAction(message.id)) return
         viewModelScope.launch {
             runCatching { repo.delete(message.id) }

@@ -7,6 +7,7 @@ import { fanout } from '../lib/channels';
 import { assertOwnedAttachment } from '../lib/media';
 import { normalizeProfileImageType, spaceCreationKey } from '../lib/social';
 import type { AppEnv, AuthedUser } from '../types';
+import { Permission, requirePermission } from '../lib/permissions';
 import { readJsonBody } from '../lib/validate';
 
 const spaces = new Hono<AppEnv>();
@@ -568,6 +569,15 @@ spaces.post('/join', async (c) => {
     .first<{ space_id: string }>();
   if (!invite) throw new ApiError(400, 'invalid_invite', 'that invite is not valid');
 
+  // 2.9.7: a ban has to survive the invite link, otherwise kicking someone is
+  // undone the moment they get another code.
+  const banned = await c.env.DB.prepare(
+    'SELECT 1 FROM space_bans WHERE space_id = ? AND user_id = ?',
+  )
+    .bind(invite.space_id, user.id)
+    .first();
+  if (banned) throw new ApiError(403, 'banned', "you can't join this nest");
+
   const already = await c.env.DB.prepare(
     'SELECT 1 FROM space_members WHERE space_id = ? AND user_id = ?',
   )
@@ -651,6 +661,91 @@ spaces.post('/:id/transfer', async (c) => {
     c.env.DB.prepare('UPDATE spaces SET owner_id = ? WHERE id = ?').bind(targetId, spaceId),
   ]);
   audit(c, user.id, 'space.transfer', targetId);
+  return c.json({ ok: true });
+});
+
+/**
+ * DELETE /spaces/:id/members/:userId — kick (2.9.7).
+ *
+ * Requires KICK_MEMBERS. You can't kick the owner, and you can't kick someone
+ * whose base role outranks yours — otherwise an admin could remove a fellow
+ * admin, or worse, the person who appointed them.
+ */
+spaces.delete('/:id/members/:userId', async (c) => {
+  const user = c.get('user') as AuthedUser;
+  const spaceId = c.req.param('id');
+  const targetId = c.req.param('userId') ?? '';
+  if (targetId === 'me') throw new ApiError(404, 'not_found', 'use the leave endpoint');
+
+  const actor = await requirePermission(c.env, user.id, spaceId, Permission.KICK_MEMBERS);
+  const target = await c.env.DB.prepare(
+    'SELECT role FROM space_members WHERE space_id = ? AND user_id = ?',
+  )
+    .bind(spaceId, targetId)
+    .first<{ role: string }>();
+  if (!target) throw new ApiError(404, 'not_found', 'not a member of this nest');
+  if (target.role === 'owner') throw new ApiError(403, 'forbidden', "you can't kick the owner");
+  if (target.role === 'admin' && !actor.isOwner) {
+    throw new ApiError(403, 'forbidden', 'only the owner can remove an admin');
+  }
+
+  await c.env.DB.batch([
+    c.env.DB.prepare('DELETE FROM space_members WHERE space_id = ? AND user_id = ?')
+      .bind(spaceId, targetId),
+    c.env.DB.prepare('DELETE FROM space_member_roles WHERE space_id = ? AND user_id = ?')
+      .bind(spaceId, targetId),
+  ]);
+  return c.json({ ok: true });
+});
+
+/**
+ * POST /spaces/:id/bans { user_id, reason? } — kick and keep them out (2.9.7).
+ *
+ * A kick alone is undone by the next invite link, so a ban records the exclusion
+ * and the join path checks it. Same rank rules as kicking.
+ */
+spaces.post('/:id/bans', async (c) => {
+  const user = c.get('user') as AuthedUser;
+  const spaceId = c.req.param('id');
+  const actor = await requirePermission(c.env, user.id, spaceId, Permission.KICK_MEMBERS);
+
+  const body = await readJsonBody(c);
+  const targetId = String(body['user_id'] ?? '').trim();
+  if (!targetId) throw new ApiError(400, 'bad_request', 'user_id required');
+  if (targetId === user.id) throw new ApiError(400, 'bad_request', "you can't ban yourself");
+
+  const target = await c.env.DB.prepare(
+    'SELECT role FROM space_members WHERE space_id = ? AND user_id = ?',
+  )
+    .bind(spaceId, targetId)
+    .first<{ role: string }>();
+  if (target?.role === 'owner') throw new ApiError(403, 'forbidden', "you can't ban the owner");
+  if (target?.role === 'admin' && !actor.isOwner) {
+    throw new ApiError(403, 'forbidden', 'only the owner can ban an admin');
+  }
+
+  await c.env.DB.batch([
+    c.env.DB.prepare(
+      `INSERT INTO space_bans (space_id, user_id, banned_by, reason, created_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT (space_id, user_id) DO UPDATE SET reason = excluded.reason`,
+    ).bind(spaceId, targetId, user.id, String(body['reason'] ?? '') || null, Date.now()),
+    c.env.DB.prepare('DELETE FROM space_members WHERE space_id = ? AND user_id = ?')
+      .bind(spaceId, targetId),
+    c.env.DB.prepare('DELETE FROM space_member_roles WHERE space_id = ? AND user_id = ?')
+      .bind(spaceId, targetId),
+  ]);
+  return c.json({ ok: true });
+});
+
+/** DELETE /spaces/:id/bans/:userId — lift a ban (2.9.7). */
+spaces.delete('/:id/bans/:userId', async (c) => {
+  const user = c.get('user') as AuthedUser;
+  const spaceId = c.req.param('id');
+  await requirePermission(c.env, user.id, spaceId, Permission.KICK_MEMBERS);
+  await c.env.DB.prepare('DELETE FROM space_bans WHERE space_id = ? AND user_id = ?')
+    .bind(spaceId, c.req.param('userId'))
+    .run();
   return c.json({ ok: true });
 });
 

@@ -91,6 +91,9 @@ class SocialRepository(
     suspend fun joinSpace(code: String) = api.joinSpace(code)
     suspend fun invitePreview(code: String) = api.invitePreview(code)
     suspend fun spaceMembers(spaceId: String) = api.spaceMembers(spaceId)
+    suspend fun kickMember(spaceId: String, userId: String) = api.kickMember(spaceId, userId)
+    suspend fun banMember(spaceId: String, userId: String, reason: String? = null) =
+        api.banMember(spaceId, userId, reason)
     suspend fun setRole(spaceId: String, userId: String, role: String) = api.setRole(spaceId, userId, role)
     suspend fun transferSpace(spaceId: String, userId: String) = api.transferSpace(spaceId, userId)
     suspend fun leaveSpace(spaceId: String) = api.leaveSpace(spaceId)
