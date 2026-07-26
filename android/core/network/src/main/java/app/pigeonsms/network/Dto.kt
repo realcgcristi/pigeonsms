@@ -444,3 +444,129 @@ data class ScheduledMessageDto(
 )
 
 @Serializable data class ScheduledResponse(val scheduled: List<ScheduledMessageDto> = emptyList())
+
+// ── v2.9.5: custom emoji, roles/permissions, threads, reminders, uploads ────
+
+/**
+ * A nest's custom emoji or sticker. `media_key` goes through
+ * `PigeonApi.mediaUrl` to render; `kind` is "emoji" (inline) or "sticker"
+ * (sent as a whole message).
+ */
+@Serializable
+data class SpaceEmojiDto(
+    val id: String,
+    val space_id: String = "",
+    val name: String = "",
+    val kind: String = "emoji",
+    val media_key: String = "",
+    val content_type: String? = null,
+    val animated: Boolean = false,
+    val created_by: String = "",
+    val created_at: Long = 0,
+)
+
+@Serializable data class SpaceEmojisResponse(val emojis: List<SpaceEmojiDto> = emptyList())
+@Serializable data class SpaceEmojiResponse(val emoji: SpaceEmojiDto)
+
+/**
+ * A custom role. `permissions` is the raw bitfield; `permission_names` is the
+ * same set spelled out, which is what the settings UI renders so it never has to
+ * know the bit values.
+ */
+@Serializable
+data class SpaceRoleDto(
+    val id: String,
+    val space_id: String = "",
+    val name: String = "",
+    val color: String? = null,
+    val position: Int = 0,
+    val permissions: Int = 0,
+    val permission_names: List<String> = emptyList(),
+    val created_at: Long = 0,
+)
+
+@Serializable data class SpaceRolesResponse(val roles: List<SpaceRoleDto> = emptyList())
+@Serializable data class SpaceRoleResponse(val role: SpaceRoleDto)
+
+/** What the caller may do, resolved for a nest (and optionally one channel). */
+@Serializable
+data class PermissionsResponse(
+    val role: String = "member",
+    val is_owner: Boolean = false,
+    val permissions: Int = 0,
+    val permission_names: List<String> = emptyList(),
+)
+
+/** A per-channel allow/deny override, addressed to a role or a single member. */
+@Serializable
+data class ChannelOverrideDto(
+    val id: String,
+    val channel_id: String = "",
+    val role_id: String? = null,
+    val user_id: String? = null,
+    val allow: Int = 0,
+    val deny: Int = 0,
+    val allow_names: List<String> = emptyList(),
+    val deny_names: List<String> = emptyList(),
+    val created_at: Long = 0,
+)
+
+@Serializable data class ChannelOverridesResponse(val overrides: List<ChannelOverrideDto> = emptyList())
+
+/** A thread hanging off a root message. Replies are ordinary messages. */
+@Serializable
+data class ThreadDto(
+    val id: String,
+    val channel_id: String = "",
+    val root_message_id: String = "",
+    val title: String? = null,
+    val created_by: String = "",
+    val reply_count: Int = 0,
+    val last_reply_at: Long? = null,
+    val created_at: Long = 0,
+    val archived: Boolean = false,
+    val archived_at: Long? = null,
+)
+
+@Serializable data class ThreadsResponse(val threads: List<ThreadDto> = emptyList())
+@Serializable data class ThreadResponse(val thread: ThreadDto, val root: MessageDto? = null)
+@Serializable
+data class ThreadMessagesResponse(
+    val messages: List<MessageDto> = emptyList(),
+    val next_before: Long? = null,
+)
+
+/** A pending or fired reminder. Delivered as a notification, never as a message. */
+@Serializable
+data class ReminderDto(
+    val id: String,
+    val message_id: String? = null,
+    val channel_id: String? = null,
+    val text: String = "",
+    val remind_at: Long = 0,
+    val created_at: Long = 0,
+    val fired_at: Long? = null,
+)
+
+@Serializable data class RemindersResponse(val reminders: List<ReminderDto> = emptyList())
+@Serializable data class ReminderResponse(val reminder: ReminderDto)
+
+/**
+ * A resumable upload session. `uploaded_parts` is what makes resume work: after
+ * a restart the client asks for the session and re-sends only what's missing.
+ */
+@Serializable
+data class UploadSessionDto(
+    val id: String,
+    val key: String = "",
+    val part_size: Int = 0,
+    val total_size: Long = 0,
+    val part_count: Int = 0,
+    val completed: Boolean = false,
+    val aborted: Boolean = false,
+    val received_bytes: Long = 0,
+    val uploaded_parts: List<Int> = emptyList(),
+)
+
+@Serializable data class UploadSessionResponse(val upload: UploadSessionDto)
+@Serializable data class UploadCompleteResponse(val attachment: AttachmentDto)

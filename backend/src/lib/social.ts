@@ -1,7 +1,16 @@
 const EMOJI_LIKE = /\p{Extended_Pictographic}|\p{Regional_Indicator}|[0-9#*]\uFE0F?\u20E3/u;
 const ASCII_CONTROL_OR_SPACE = /[\u0000-\u0020\u007f-\u009f]/u;
 
-/** Decode and bound a Unicode reaction without breaking ZWJ emoji sequences. */
+/**
+ * A custom-emoji reaction, stored as `custom:<space_emojis.id>` (2.9.5).
+ *
+ * The id rather than the `:shortcode:` on purpose: renaming an emoji must not
+ * orphan every reaction that used it, and two nests can legitimately use the
+ * same shortcode for different images.
+ */
+const CUSTOM_EMOJI_RE = /^custom:\d{1,25}$/;
+
+/** Decode and bound a reaction: a Unicode emoji, or a `custom:<id>` reference. */
 export function normalizeReactionEmoji(raw: string): string | null {
   let value: string;
   try {
@@ -9,6 +18,11 @@ export function normalizeReactionEmoji(raw: string): string | null {
   } catch {
     return null;
   }
+
+  // Custom emoji bypass the pictographic test — the payload is an id, not a
+  // glyph. Whether the id actually resolves is checked at the call site, which
+  // knows which nest the message lives in.
+  if (CUSTOM_EMOJI_RE.test(value)) return value;
 
   if (
     !value ||

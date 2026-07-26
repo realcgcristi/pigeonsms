@@ -8,7 +8,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.MaterialTheme
@@ -99,24 +102,41 @@ fun MarkdownMessage(
     }
 }
 
+/** Width of one table cell. Fixed rather than proportional — see [MarkdownTable]. */
+private val TableCellWidth = 132.dp
+
 @Composable
 private fun MarkdownTable(rows: List<List<String>>, color: Color, linkColor: Color) {
     if (rows.isEmpty()) return
     val columns = rows.maxOfOrNull(List<String>::size)?.coerceIn(1, 6) ?: 1
     Column(
         Modifier.horizontalScroll(rememberScrollState())
-            .widthIn(min = (columns * 92).dp)
             .border(1.dp, color.copy(alpha = 0.22f), Corners.chip),
     ) {
         rows.take(24).forEachIndexed { rowIndex, values ->
-            Row(Modifier.fillMaxWidth().background(color.copy(alpha = if (rowIndex == 0) 0.11f else 0.035f))) {
+            // `height(IntrinsicSize.Min)` + `fillMaxHeight` on the cells makes every
+            // cell in a row as tall as the tallest one, so the dividers line up
+            // when one cell wraps onto a second line.
+            Row(
+                Modifier.height(IntrinsicSize.Min)
+                    .background(color.copy(alpha = if (rowIndex == 0) 0.11f else 0.035f)),
+            ) {
                 repeat(columns) { column ->
                     Text(
                         inlineMarkdown(values.getOrNull(column).orEmpty(), color, linkColor),
                         color = color,
                         style = MaterialTheme.typography.bodySmall,
                         fontWeight = if (rowIndex == 0) FontWeight.SemiBold else FontWeight.Normal,
-                        modifier = Modifier.weight(1f).widthIn(min = 92.dp)
+                        // Fixed width, NOT `weight(1f)`: this Column sits inside a
+                        // horizontalScroll, which measures its children with an
+                        // infinite max width. A weight divides the *remaining*
+                        // space, and there is no finite remaining space to divide —
+                        // which is what collapsed these tables into unreadable
+                        // slivers. `fillMaxWidth()` on the Row was a no-op for the
+                        // same reason, so it's gone too; the Row now sizes to the
+                        // sum of its cells, which is exactly what should scroll.
+                        modifier = Modifier.width(TableCellWidth)
+                            .fillMaxHeight()
                             .border(0.5.dp, color.copy(alpha = 0.16f))
                             .padding(horizontal = Spacing.s, vertical = Spacing.xs),
                     )
