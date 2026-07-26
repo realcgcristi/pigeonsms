@@ -12,6 +12,11 @@ import messagesRoutes, {
 } from './routes/messages';
 import spaces from './routes/spaces';
 import search from './routes/search';
+import emojis from './routes/emojis';
+import roles from './routes/roles';
+import threads from './routes/threads';
+import reminders, { dispatchDueReminders } from './routes/reminders';
+import uploads from './routes/uploads';
 import devices from './routes/devices';
 import { mediaUpload, mediaServe } from './routes/media';
 import users from './routes/users';
@@ -61,9 +66,20 @@ app.route('/', messagesRoutes);
 // inside the router (none of its routes are public).
 app.route('/', devices);
 app.route('/spaces', spaces);
-// B3 message search: GET /spaces/:id/search. Composes onto the same /spaces
-// prefix as the spaces router; requireAuth is applied inside the search router.
-app.route('/spaces', search);
+// 2.9.5 nest surfaces — custom emoji/stickers and the role/permission model.
+// Both compose onto the same /spaces prefix as the spaces router and apply
+// requireAuth internally.
+app.route('/spaces', emojis);
+app.route('/spaces', roles);
+// Message search. Root-mounted since 2.9.5: it owns both /spaces/:id/search
+// (one nest) and /search (every nest you're in, plus DMs), so its paths are
+// absolute rather than prefix-relative.
+app.route('/', search);
+// Threads in text channels: /channels/:id/threads and /threads/:threadId...,
+// which span two top-level prefixes, so root-mounted like the message routes.
+app.route('/', threads);
+app.route('/reminders', reminders);
+app.route('/uploads', uploads);
 app.route('/media', mediaUpload);
 app.route('/media', mediaServe);
 app.route('/users', users);
@@ -92,7 +108,7 @@ app.notFound(notFound);
 export default {
   fetch: app.fetch,
   // Cron entry point (schedule set in wrangler.toml, out of scope here). Runs
-  // three independent sweeps every tick; each is wrapped so a failure in one never
+  // four independent sweeps every tick; each is wrapped so a failure in one never
   // aborts the others. The message helpers are context-free (no Hono Context) and
   // reuse the module's normal delete/send path — seq alloc + fanout + FCM.
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
@@ -117,6 +133,14 @@ export default {
       await sweepLingeringRows(env);
     } catch (err) {
       console.error('cron: sweep lingering rows failed', err);
+    }
+    // (d) reminders: deliver every due reminder as a notification + push. Unlike
+    // scheduled messages these never become a message, so nobody else's
+    // conversation is touched.
+    try {
+      await dispatchDueReminders(env);
+    } catch (err) {
+      console.error('cron: dispatch reminders failed', err);
     }
   },
   async queue(batch: MessageBatch, env: Env): Promise<void> {

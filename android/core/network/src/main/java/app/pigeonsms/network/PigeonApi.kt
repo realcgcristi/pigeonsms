@@ -24,6 +24,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
@@ -432,4 +433,206 @@ class PigeonApi(
     // --- scheduled messages ---
     suspend fun listScheduled() = client.get("$baseUrl/scheduled") { auth() }.unwrap<ScheduledResponse>().scheduled
     suspend fun cancelScheduled(id: String) { client.delete("$baseUrl/scheduled/$id") { auth() }.unwrap<OkResponse>() }
+
+    // --- v2.9.5: custom emoji + stickers ---
+    suspend fun spaceEmojis(spaceId: String) =
+        client.get("$baseUrl/spaces/$spaceId/emojis") { auth() }.unwrap<SpaceEmojisResponse>().emojis
+
+    /** Register an already-uploaded image as a nest emoji or sticker. */
+    suspend fun createSpaceEmoji(
+        spaceId: String,
+        name: String,
+        mediaKey: String,
+        kind: String = "emoji",
+        contentType: String? = null,
+    ) = client.post("$baseUrl/spaces/$spaceId/emojis") {
+        auth(); contentType(ContentType.Application.Json)
+        setBody(buildJsonObject {
+            put("name", name); put("media_key", mediaKey); put("kind", kind)
+            if (contentType != null) put("content_type", contentType)
+        })
+    }.unwrap<SpaceEmojiResponse>().emoji
+
+    suspend fun renameSpaceEmoji(spaceId: String, emojiId: String, name: String) =
+        client.patch("$baseUrl/spaces/$spaceId/emojis/$emojiId") {
+            auth(); contentType(ContentType.Application.Json)
+            setBody(buildJsonObject { put("name", name) })
+        }.unwrap<SpaceEmojiResponse>().emoji
+
+    suspend fun deleteSpaceEmoji(spaceId: String, emojiId: String) {
+        client.delete("$baseUrl/spaces/$spaceId/emojis/$emojiId") { auth() }.unwrap<OkResponse>()
+    }
+
+    // --- v2.9.5: roles + permissions ---
+    suspend fun spaceRoles(spaceId: String) =
+        client.get("$baseUrl/spaces/$spaceId/roles") { auth() }.unwrap<SpaceRolesResponse>().roles
+
+    /** What the caller may do here; pass [channelId] to include channel overrides. */
+    suspend fun spacePermissions(spaceId: String, channelId: String? = null) =
+        client.get(
+            "$baseUrl/spaces/$spaceId/permissions" + (channelId?.let { "?channel_id=$it" } ?: ""),
+        ) { auth() }.unwrap<PermissionsResponse>()
+
+    suspend fun createRole(spaceId: String, name: String, permissions: List<String>, color: String? = null) =
+        client.post("$baseUrl/spaces/$spaceId/roles") {
+            auth(); contentType(ContentType.Application.Json)
+            setBody(buildJsonObject {
+                put("name", name)
+                if (color != null) put("color", color)
+                put("permissions", buildJsonArray { permissions.forEach { add(it) } })
+            })
+        }.unwrap<SpaceRoleResponse>().role
+
+    suspend fun updateRole(
+        spaceId: String,
+        roleId: String,
+        name: String? = null,
+        permissions: List<String>? = null,
+        color: String? = null,
+        position: Int? = null,
+    ) = client.patch("$baseUrl/spaces/$spaceId/roles/$roleId") {
+        auth(); contentType(ContentType.Application.Json)
+        setBody(buildJsonObject {
+            if (name != null) put("name", name)
+            if (color != null) put("color", color)
+            if (position != null) put("position", position)
+            if (permissions != null) put("permissions", buildJsonArray { permissions.forEach { add(it) } })
+        })
+    }.unwrap<SpaceRoleResponse>().role
+
+    suspend fun deleteRole(spaceId: String, roleId: String) {
+        client.delete("$baseUrl/spaces/$spaceId/roles/$roleId") { auth() }.unwrap<OkResponse>()
+    }
+
+    suspend fun setMemberRoles(spaceId: String, userId: String, roleIds: List<String>) {
+        client.put("$baseUrl/spaces/$spaceId/members/$userId/roles") {
+            auth(); contentType(ContentType.Application.Json)
+            setBody(buildJsonObject { put("role_ids", buildJsonArray { roleIds.forEach { add(it) } }) })
+        }.unwrap<OkResponse>()
+    }
+
+    suspend fun channelOverrides(spaceId: String, channelId: String) =
+        client.get("$baseUrl/spaces/$spaceId/channels/$channelId/overrides") { auth() }
+            .unwrap<ChannelOverridesResponse>().overrides
+
+    suspend fun setChannelOverride(
+        spaceId: String,
+        channelId: String,
+        roleId: String? = null,
+        userId: String? = null,
+        allow: List<String> = emptyList(),
+        deny: List<String> = emptyList(),
+    ) {
+        client.put("$baseUrl/spaces/$spaceId/channels/$channelId/overrides") {
+            auth(); contentType(ContentType.Application.Json)
+            setBody(buildJsonObject {
+                if (roleId != null) put("role_id", roleId)
+                if (userId != null) put("user_id", userId)
+                put("allow", buildJsonArray { allow.forEach { add(it) } })
+                put("deny", buildJsonArray { deny.forEach { add(it) } })
+            })
+        }.unwrap<OkResponse>()
+    }
+
+    // --- v2.9.5: threads ---
+    suspend fun channelThreads(channelId: String, archived: Boolean = false) =
+        client.get("$baseUrl/channels/$channelId/threads?archived=${if (archived) 1 else 0}") { auth() }
+            .unwrap<ThreadsResponse>().threads
+
+    suspend fun createThread(channelId: String, messageId: String, title: String? = null) =
+        client.post("$baseUrl/channels/$channelId/threads") {
+            auth(); contentType(ContentType.Application.Json)
+            setBody(buildJsonObject {
+                put("message_id", messageId)
+                if (title != null) put("title", title)
+            })
+        }.unwrap<ThreadResponse>().thread
+
+    suspend fun thread(threadId: String) =
+        client.get("$baseUrl/threads/$threadId") { auth() }.unwrap<ThreadResponse>()
+
+    suspend fun threadMessages(threadId: String, before: Long? = null) =
+        client.get("$baseUrl/threads/$threadId/messages" + (before?.let { "?before=$it" } ?: "")) { auth() }
+            .unwrap<ThreadMessagesResponse>()
+
+    suspend fun sendThreadMessage(threadId: String, content: String, nonce: String? = null) =
+        client.post("$baseUrl/threads/$threadId/messages") {
+            auth(); contentType(ContentType.Application.Json)
+            setBody(buildJsonObject {
+                put("content", content)
+                if (nonce != null) put("nonce", nonce)
+            })
+        }.unwrap<MessageResponse>().message
+
+    suspend fun updateThread(threadId: String, title: String? = null, archived: Boolean? = null) =
+        client.patch("$baseUrl/threads/$threadId") {
+            auth(); contentType(ContentType.Application.Json)
+            setBody(buildJsonObject {
+                if (title != null) put("title", title)
+                if (archived != null) put("archived", archived)
+            })
+        }.unwrap<ThreadResponse>().thread
+
+    suspend fun followThread(threadId: String, follow: Boolean) {
+        if (follow) client.post("$baseUrl/threads/$threadId/follow") { auth() }.unwrap<OkResponse>()
+        else client.delete("$baseUrl/threads/$threadId/follow") { auth() }.unwrap<OkResponse>()
+    }
+
+    // --- v2.9.5: reminders ---
+    suspend fun reminders(fired: Boolean = false) =
+        client.get("$baseUrl/reminders?fired=${if (fired) 1 else 0}") { auth() }
+            .unwrap<RemindersResponse>().reminders
+
+    suspend fun createReminder(
+        text: String,
+        remindAt: Long,
+        channelId: String? = null,
+        messageId: String? = null,
+    ) = client.post("$baseUrl/reminders") {
+        auth(); contentType(ContentType.Application.Json)
+        setBody(buildJsonObject {
+            put("text", text); put("remind_at", remindAt)
+            if (channelId != null) put("channel_id", channelId)
+            if (messageId != null) put("message_id", messageId)
+        })
+    }.unwrap<ReminderResponse>().reminder
+
+    suspend fun cancelReminder(id: String) {
+        client.delete("$baseUrl/reminders/$id") { auth() }.unwrap<OkResponse>()
+    }
+
+    // --- v2.9.5: global search (across every nest + DMs) ---
+    suspend fun searchEverywhere(query: String, before: Long? = null) =
+        client.get("$baseUrl/search?q=${q(query)}" + (before?.let { "&before=$it" } ?: "")) { auth() }
+            .unwrap<SearchResponse>()
+
+    // --- v2.9.5: resumable uploads ---
+    /** Open a multipart session. Returns the part size the server expects. */
+    suspend fun openUpload(filename: String, contentType: String, totalSize: Long, partSize: Int? = null) =
+        client.post("$baseUrl/uploads") {
+            auth(); contentType(ContentType.Application.Json)
+            setBody(buildJsonObject {
+                put("filename", filename); put("content_type", contentType)
+                put("total_size", totalSize)
+                if (partSize != null) put("part_size", partSize)
+            })
+        }.unwrap<UploadSessionResponse>().upload
+
+    /** Progress for a session — which parts already landed, so resume can skip them. */
+    suspend fun uploadStatus(uploadId: String) =
+        client.get("$baseUrl/uploads/$uploadId") { auth() }.unwrap<UploadSessionResponse>().upload
+
+    suspend fun uploadPart(uploadId: String, partNumber: Int, bytes: ByteArray) {
+        client.put("$baseUrl/uploads/$uploadId/parts/$partNumber") { auth(); setBody(bytes) }
+            .unwrap<OkResponse>()
+    }
+
+    suspend fun completeUpload(uploadId: String) =
+        client.post("$baseUrl/uploads/$uploadId/complete") { auth() }
+            .unwrap<UploadCompleteResponse>().attachment
+
+    suspend fun abortUpload(uploadId: String) {
+        client.delete("$baseUrl/uploads/$uploadId") { auth() }.unwrap<OkResponse>()
+    }
+
 }
