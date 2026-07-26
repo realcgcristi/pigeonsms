@@ -148,6 +148,30 @@ class ChatRepository(
      * the message means anything, so there is nothing useful to render optimistically.
      * A [sync] afterwards pulls the real row in through the normal path.
      */
+    /**
+     * Upload a large attachment by streaming it, then send the message (2.9.5).
+     *
+     * The byte-array path reads the whole file into the heap before it uploads a
+     * single byte, which is fine for a photo and fatal for a video. This one hands
+     * the uploader a stream factory so only one 5 MB part is resident at a time.
+     */
+    suspend fun sendStreamedAttachment(
+        channelId: String,
+        social: SocialRepository,
+        openStream: () -> java.io.InputStream,
+        filename: String,
+        type: String,
+        totalSize: Long,
+        caption: String,
+        replyTo: String?,
+        selfName: String,
+        isDm: Boolean,
+        onProgress: (Float) -> Unit = {},
+    ) {
+        val attachment = social.uploadLargeStream(openStream, filename, type, totalSize, onProgress)
+        send(channelId, caption.trim(), replyTo, attachment, selfName, isDm = isDm)
+    }
+
     suspend fun sendSticker(channelId: String, stickerId: String) {
         api.sendSticker(channelId, stickerId, java.util.UUID.randomUUID().toString())
         runCatching { sync(channelId) }
