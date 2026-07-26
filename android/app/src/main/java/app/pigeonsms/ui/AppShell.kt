@@ -93,6 +93,8 @@ import app.pigeonsms.ui.settings.NestSettingsScreen
 import app.pigeonsms.ui.settings.NotificationSettingsScreen
 import app.pigeonsms.ui.forum.ForumScreen
 import app.pigeonsms.ui.search.SearchScreen
+import app.pigeonsms.ui.spaces.NestEmojiViewModel
+import app.pigeonsms.ui.spaces.NestEmojiScreen
 import app.pigeonsms.ui.spaces.NestChannelsScreen
 import app.pigeonsms.ui.spaces.SpacesScreen
 import app.pigeonsms.ui.util.Avatar
@@ -334,9 +336,11 @@ fun AppShell(session: LocalSession) {
             // channel list; the API enforces MANAGE_EMOJI regardless of who gets here.
             composable("nestemoji/{spaceId}") { entry ->
                 val spaceId = entry.arguments?.getString("spaceId") ?: return@composable
-                val emojiVm: app.pigeonsms.ui.spaces.NestEmojiViewModel =
-                    pigeonVm { c, _ -> app.pigeonsms.ui.spaces.NestEmojiViewModel(c.socialRepository) }
-                app.pigeonsms.ui.spaces.NestEmojiScreen(spaceId = spaceId, vm = emojiVm)
+                // Short names, not fully-qualified: the `app: AppViewModel`
+                // parameter shadows the root `app.` package inside this file.
+                val emojiVm: NestEmojiViewModel =
+                    pigeonVm { c, _ -> NestEmojiViewModel(c.socialRepository) }
+                NestEmojiScreen(spaceId = spaceId, vm = emojiVm)
             }
             composable("about") {
                 AboutScreen(username = session.username, onBack = { nav.popBackStack() })
