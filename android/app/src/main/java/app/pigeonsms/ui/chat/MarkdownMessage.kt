@@ -28,6 +28,15 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.text.InlineTextContent
+import androidx.compose.foundation.text.appendInlineContent
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.Placeholder
+import androidx.compose.ui.text.PlaceholderVerticalAlign
+import androidx.compose.ui.unit.sp
+import app.pigeonsms.network.SpaceEmojiDto
+import coil.compose.AsyncImage
 import androidx.compose.ui.unit.dp
 import app.pigeonsms.design.theme.Corners
 import app.pigeonsms.design.theme.Spacing
@@ -47,17 +56,25 @@ fun MarkdownMessage(
     value: String,
     color: Color,
     modifier: Modifier = Modifier,
+    /** This nest's emoji, so `:name:` and `::name::` render as images (2.9.5). */
+    emoji: List<SpaceEmojiDto> = emptyList(),
+    mediaUrl: (String) -> String? = { null },
 ) {
     val blocks = remember(value) { parseMarkdownBlocks(value) }
     val linkColor = MaterialTheme.colorScheme.primary
+    // One inline-content entry per emoji actually referenced in this message.
+    // Compose resolves these by id at draw time, which is what lets an image sit
+    // on the text baseline instead of breaking the paragraph into pieces.
+    val inlineContent = rememberEmojiInlineContent(emoji, mediaUrl)
     SelectionContainer(modifier) {
         Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
             blocks.forEach { block ->
                 when (block) {
                     is MarkdownBlock.Paragraph -> Text(
-                        inlineMarkdown(block.text, color, linkColor),
+                        inlineMarkdown(block.text, color, linkColor, emoji),
                         color = color,
                         style = MaterialTheme.typography.bodyLarge,
+                        inlineContent = inlineContent,
                     )
                     is MarkdownBlock.Heading -> Text(
                         inlineMarkdown(block.text, color, linkColor),
@@ -91,7 +108,12 @@ fun MarkdownMessage(
                         block.values.forEachIndexed { index, item ->
                             Row(horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
                                 Text(if (block.ordered) "${index + 1}." else "•", color = color, fontWeight = FontWeight.Bold)
-                                Text(inlineMarkdown(item, color, linkColor), color = color, style = MaterialTheme.typography.bodyLarge)
+                                Text(
+                                    inlineMarkdown(item, color, linkColor, emoji),
+                                    color = color,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    inlineContent = inlineContent,
+                                )
                             }
                         }
                     }
@@ -221,7 +243,54 @@ private fun looksLikeTableHeader(header: String, divider: String): Boolean =
 
 private fun splitTableRow(value: String): List<String> = value.trim().trim('|').split('|').map(String::trim).take(6)
 
-private fun inlineMarkdown(value: String, color: Color, linkColor: Color): AnnotatedString = buildAnnotatedString {
+/**
+ * `:name:` (emoji, inline-sized) and `::name::` (sticker, larger) — 2.9.5.
+ *
+ * Matched before the other inline tokens so a shortcode containing markdown-ish
+ * characters can't be half-eaten by them. `::name::` is checked first because
+ * `:name:` would otherwise match inside it.
+ */
+private val EMOJI_TOKEN = Regex("::[a-z0-9_]{2,32}::|:[a-z0-9_]{2,32}:")
+
+/** Prefix for the inline-content ids Compose resolves at draw time. */
+internal const val EMOJI_INLINE_PREFIX = "emoji:"
+
+private fun inlineMarkdown(
+    value: String,
+    color: Color,
+    linkColor: Color,
+    emoji: List<SpaceEmojiDto> = emptyList(),
+): AnnotatedString = buildAnnotatedString {
+    if (emoji.isNotEmpty()) {
+        val byName = emoji.associateBy { it.name }
+        var cursor = 0
+        for (match in EMOJI_TOKEN.findAll(value)) {
+            val sticker = match.value.startsWith("::")
+            val name = match.value.trim(':')
+            val found = byName[name]
+            // Unknown shortcodes are left as literal text — someone typing ":)" or
+            // a word between colons shouldn't have it silently vanish.
+            if (found == null || (sticker && found.kind != "sticker")) continue
+            appendInline(value.substring(cursor, match.range.first), color, linkColor)
+            appendInlineContent("$EMOJI_INLINE_PREFIX${found.id}", match.value)
+            cursor = match.range.last + 1
+        }
+        appendInline(value.substring(cursor), color, linkColor)
+        return@buildAnnotatedString
+    }
+    appendInline(value, color, linkColor)
+}
+
+/**
+ * The ordinary inline pass (bold, code, links, mentions...), factored out of
+ * [inlineMarkdown] so the emoji tokenizer can run over the segments between
+ * shortcodes and still get full markdown inside them.
+ */
+private fun androidx.compose.ui.text.AnnotatedString.Builder.appendInline(
+    value: String,
+    color: Color,
+    linkColor: Color,
+) {
     var cursor = 0
     while (cursor < value.length) {
         val token = INLINE.find(value, cursor)
@@ -270,3 +339,33 @@ private val ORDERED = Regex("^\\s*\\d+[.)]\\s+.+")
 private val BULLET_PREFIX = Regex("^\\s*[-+*]\\s+")
 private val ORDERED_PREFIX = Regex("^\\s*\\d+[.)]\\s+")
 private val INLINE = Regex("\\*\\*[^*\\n]+\\*\\*|~~[^~\\n]+~~|`[^`\\n]+`|\\[[^]\\n]+]\\([^ )\\n]+\\)|@[A-Za-z0-9_.-]{1,32}|\\*[^*\\n]+\\*|_[^_\\n]+_")
+
+/**
+ * Build the inline-content map Compose needs to draw emoji images inside text.
+ *
+ * One entry per emoji in the nest, keyed by `emoji:<id>` — the same id the
+ * tokenizer emits. Stickers get a larger box than inline emoji, matching how they
+ * read when sent as a whole message.
+ *
+ * A `Placeholder` reserves space on the text baseline; without it the image would
+ * either break the line or overlap neighbouring glyphs.
+ */
+@Composable
+internal fun rememberEmojiInlineContent(
+    emoji: List<SpaceEmojiDto>,
+    mediaUrl: (String) -> String?,
+): Map<String, InlineTextContent> = remember(emoji) {
+    emoji.associate { item ->
+        val size = if (item.kind == "sticker") 48.sp else 20.sp
+        "$EMOJI_INLINE_PREFIX${item.id}" to InlineTextContent(
+            Placeholder(size, size, PlaceholderVerticalAlign.TextCenter),
+        ) {
+            AsyncImage(
+                model = mediaUrl(item.media_key),
+                contentDescription = ":${item.name}:",
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+    }
+}

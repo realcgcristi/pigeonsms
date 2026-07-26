@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -798,8 +799,17 @@ private fun ProfileContentPorted(
                     ) {
                         Avatar(name, mediaUrl(profile.avatar_key), avatarSize, sharedKey = "avatar-${profile.id}")
                         if (online) {
+                            // BottomEnd is the corner of the *square* bounding box,
+                            // which sits outside a circular avatar — that's why the
+                            // dot appeared to hang off / clip the ring. Pull it back
+                            // along the diagonal onto the circle's rim: for a circle
+                            // the 45-degree point is inset by r*(1 - cos45), i.e.
+                            // ~14.6% of the diameter.
+                            val rimInset = (avatarSize + 12.dp) * 0.146f
                             Box(
-                                Modifier.align(Alignment.BottomEnd).size(30.dp)
+                                Modifier.align(Alignment.BottomEnd)
+                                    .offset(x = -rimInset, y = -rimInset)
+                                    .size(30.dp)
                                     .background(MaterialTheme.colorScheme.surface, CircleShape)
                                     .padding(4.dp).background(PigeonColors.Mint, CircleShape),
                             )
