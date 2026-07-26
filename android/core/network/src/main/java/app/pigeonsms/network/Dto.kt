@@ -148,6 +148,11 @@ data class MessageDto(
     val edited_at: Long? = null,
     val deleted: Boolean = false,
     val reactions: List<ReactionDto> = emptyList(),
+    /**
+     * Emoji this message references, resolved by the server (2.9.6) so a viewer
+     * who isn't in the owning nest still renders the image instead of a blank.
+     */
+    val custom_emoji: List<SpaceEmojiDto> = emptyList(),
     val revisions: List<RevisionDto>? = null,
     val kind: String? = null,
     val metadata: JsonElement? = null,
@@ -463,6 +468,8 @@ data class SpaceEmojiDto(
     val animated: Boolean = false,
     val created_by: String = "",
     val created_at: Long = 0,
+    /** Owning nest's name — the picker groups by it (2.9.6). */
+    val space_name: String? = null,
 )
 
 @Serializable data class SpaceEmojisResponse(val emojis: List<SpaceEmojiDto> = emptyList())

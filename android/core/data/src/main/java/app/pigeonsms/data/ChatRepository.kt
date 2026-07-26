@@ -13,6 +13,9 @@ import app.pigeonsms.network.PigeonApi
 import app.pigeonsms.network.PollDto
 import app.pigeonsms.network.PollOptionCountDto
 import app.pigeonsms.network.ReactionDto
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -128,6 +131,25 @@ class ChatRepository(
     fun stream(channelId: String): Flow<List<MessageEntity>> =
         db.messages().stream(channelId).map { list -> list.distinctBy { it.id } }
 
+    /**
+     * Custom emoji seen on incoming messages (2.9.6).
+     *
+     * The server resolves whatever a message references, including emoji from
+     * nests the viewer isn't in. Room has no column for them and adding one would
+     * mean a schema migration for what is really a render-time lookup, so they're
+     * accumulated here and merged into the view model's emoji set instead.
+     */
+    private val _seenEmoji = MutableStateFlow<Map<String, app.pigeonsms.network.SpaceEmojiDto>>(emptyMap())
+    val seenEmoji: StateFlow<Map<String, app.pigeonsms.network.SpaceEmojiDto>> = _seenEmoji
+
+    private fun rememberEmoji(list: List<app.pigeonsms.network.SpaceEmojiDto>) {
+        if (list.isEmpty()) return
+        _seenEmoji.update { current ->
+            val missing = list.filterNot { current.containsKey(it.id) }
+            if (missing.isEmpty()) current else current + missing.associateBy { it.id }
+        }
+    }
+
     private fun MessageDto.toEntity(state: String = "SENT") = MessageEntity(
         id = id, channelId = channel_id, seq = seq, authorId = author.id,
         authorName = author.display_name ?: author.username, authorAvatar = author.avatar_key,
@@ -135,7 +157,8 @@ class ChatRepository(
         attachmentKey = attachment?.key, attachmentName = attachment?.name,
         attachmentType = attachment?.type, attachmentSize = attachment?.size,
         createdAt = created_at, editedAt = edited_at, deleted = deleted,
-        reactionsJson = json.encodeToString(reactions), revisionsJson = revisions?.let { json.encodeToString(it) },
+        reactionsJson = json.encodeToString(reactions.also { rememberEmoji(custom_emoji) }),
+        revisionsJson = revisions?.let { json.encodeToString(it) },
         kind = kind, metadataJson = metadata?.toString(), pollJson = poll?.let { json.encodeToString(it) },
         state = state,
     )

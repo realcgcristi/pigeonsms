@@ -107,6 +107,65 @@ export async function serializeMessages(
     reactions.set(r.message_id, list);
   }
 
+  // 2.9.6: resolve every custom emoji these messages REFERENCE, so a viewer who
+  // isn't in the owning nest still sees the image instead of a placeholder.
+  //
+  // Deliberately no membership join here. Membership is enforced where it
+  // matters — when *using* an emoji (reacting, sending) — but once it's on a
+  // message you can already read, hiding it just renders the conversation
+  // wrong for outsiders. The only thing exposed is an image key that is already
+  // being served to everyone else in that conversation.
+  const emojiIds = new Set<string>();
+  const shortcodes = new Set<string>();
+  for (const row of rows) {
+    for (const list of [reactions.get(row.id) ?? []]) {
+      for (const reaction of list) {
+        if (reaction.emoji.startsWith('custom:')) emojiIds.add(reaction.emoji.slice(7));
+      }
+    }
+    for (const match of row.content.matchAll(/::?([a-z0-9_]{2,32})::?/g)) {
+      if (match[1]) shortcodes.add(match[1]);
+    }
+  }
+
+  const customEmoji = new Map<string, {
+    id: string; name: string; kind: string; media_key: string; animated: boolean;
+  }>();
+  if (emojiIds.size || shortcodes.size) {
+    const idList = [...emojiIds];
+    const nameList = [...shortcodes];
+    const clauses: string[] = [];
+    const binds: unknown[] = [];
+    if (idList.length) {
+      clauses.push(`id IN (${ph(idList.length)})`);
+      binds.push(...idList);
+    }
+    if (nameList.length) {
+      // A shortcode is only unambiguous within a nest, so scope name lookups to
+      // the nests these messages actually live in.
+      clauses.push(
+        `(name IN (${ph(nameList.length)}) AND space_id IN (
+           SELECT space_id FROM channels WHERE id IN (${ph(ids.length)}) AND space_id IS NOT NULL))`,
+      );
+      binds.push(...nameList, ...rows.map((r) => r.channel_id));
+    }
+    const { results } = await env.DB.prepare(
+      `SELECT id, name, kind, media_key, animated FROM space_emojis WHERE ${clauses.join(' OR ')} LIMIT 300`,
+    )
+      .bind(...binds)
+      .all<{ id: string; name: string; kind: string; media_key: string; animated: number }>();
+    for (const row of results) {
+      customEmoji.set(row.id, {
+        id: row.id,
+        name: row.name,
+        kind: row.kind,
+        media_key: row.media_key,
+        animated: Number(row.animated) === 1,
+      });
+    }
+  }
+  const customEmojiList = [...customEmoji.values()];
+
   const revisions = new Map<string, { content: string; edited_at: number }[]>();
   if (isAdmin) {
     const revRows = (
@@ -298,6 +357,7 @@ export async function serializeMessages(
       expires_at: m.expires_at ?? null,
       encrypted: (m.encrypted ?? 0) === 1,
       reactions: reactions.get(m.id) ?? [],
+      custom_emoji: customEmojiList,
       poll: polls.get(m.id) ?? null,
       revisions: isAdmin ? (revisions.get(m.id) ?? []) : undefined,
       // Forum-post-only fields; omitted (undefined) for every other kind.

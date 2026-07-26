@@ -127,6 +127,18 @@ class ChatViewModel(
         loadCustomEmoji()
         loadChannelIndex()
         viewModelScope.launch {
+            // Merge server-resolved emoji (2.9.6) so messages referencing a nest
+            // you're not in still render their images.
+            repo.seenEmoji.collect { seen ->
+                if (seen.isNotEmpty()) {
+                    _customEmoji.update { mine ->
+                        val known = mine.map { it.id }.toSet()
+                        mine + seen.values.filterNot { it.id in known }
+                    }
+                }
+            }
+        }
+        viewModelScope.launch {
             repo.reads.collect { all ->
                 val peerSeq = all[channelId]?.filterKeys { it != selfId }?.values?.maxOrNull() ?: 0L
                 if (peerSeq != _ui.value.peerReadSeq) _ui.update { it.copy(peerReadSeq = peerSeq) }
