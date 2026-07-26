@@ -65,6 +65,12 @@ fun MarkdownMessage(
     emoji: List<SpaceEmojiDto> = emptyList(),
     mediaUrl: (String) -> String? = { null },
     /**
+     * Multiplier for inline emoji size. Messages that are *only* emoji render them
+     * large, matching how Unicode emoji get `displaySmall` in the same case —
+     * without this, a custom-emoji-only message looked tiny next to a Unicode one.
+     */
+    emojiScale: Float = 1f,
+    /**
      * Tap handler for the annotated tokens (2.9.5): tag is one of `CHANNEL`,
      * `INVITE`, `POST` or `URL`, value is the payload.
      */
@@ -75,7 +81,7 @@ fun MarkdownMessage(
     // One inline-content entry per emoji actually referenced in this message.
     // Compose resolves these by id at draw time, which is what lets an image sit
     // on the text baseline instead of breaking the paragraph into pieces.
-    val inlineContent = rememberEmojiInlineContent(emoji, mediaUrl)
+    val inlineContent = rememberEmojiInlineContent(emoji, mediaUrl, emojiScale)
     SelectionContainer(modifier) {
         Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
             blocks.forEach { block ->
@@ -418,11 +424,15 @@ internal val TOKEN_TAGS = listOf("INVITE", "CHANNEL", "POST", "URL")
 internal fun rememberEmojiInlineContent(
     emoji: List<SpaceEmojiDto>,
     mediaUrl: (String) -> String?,
-): Map<String, InlineTextContent> = remember(emoji) {
+    scale: Float = 1f,
+): Map<String, InlineTextContent> = remember(emoji, scale) {
     emoji.associate { item ->
-        // Emoji sit slightly above the cap height of body text so they read as
-        // emoji rather than punctuation; stickers render at image scale.
-        val size = if (item.kind == "sticker") 128.sp else 26.sp
+        // Emoji sit above the cap height of body text so they read as emoji rather
+        // than punctuation; stickers render at image scale. Custom emoji images
+        // usually carry transparent padding, so the box has to be noticeably
+        // larger than the text to look the same size as a Unicode glyph.
+        val base = if (item.kind == "sticker") 128f else 34f
+        val size = (base * scale).sp
         "$EMOJI_INLINE_PREFIX${item.id}" to InlineTextContent(
             Placeholder(size, size, PlaceholderVerticalAlign.TextCenter),
         ) {
