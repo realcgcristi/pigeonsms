@@ -192,7 +192,13 @@ fun NestRolesScreen(
                 draftPermissions = setOf("VIEW_CHANNEL", "SEND_MESSAGES")
                 creating = true
             }) {
-                Icon(Icons.Outlined.Add, contentDescription = "new role")
+                Icon(
+                    Icons.Outlined.Add,
+                    contentDescription = "new role",
+                    // Same fix as the emoji screen: the default onSurfaceVariant
+                    // tint disappears against the dark Nova header.
+                    tint = MaterialTheme.colorScheme.onSurface,
+                )
             }
         }
         Text(

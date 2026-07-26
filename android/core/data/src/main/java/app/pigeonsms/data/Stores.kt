@@ -180,3 +180,33 @@ class NicknameStore(private val context: Context) {
 /** Your nickname for someone, falling back to whatever the server calls them. */
 fun Map<String, String>.displayNameFor(userId: String, fallback: String): String =
     this[userId]?.takeIf { it.isNotBlank() } ?: fallback
+
+/**
+ * Per-post "last seen reply count" for the forum's new-activity dot (2.9.6).
+ *
+ * Local only, like read state generally: it's about *your* attention, and syncing
+ * it would need a server round-trip on every post you glance at. A post shows a
+ * dot when its reply count has grown since you last opened it; a post you've
+ * never opened doesn't nag, because "new to you" and "has new replies" are
+ * different things and only the second deserves a dot.
+ */
+class ForumSeenStore(private val context: Context) {
+
+    val seen: Flow<Map<String, Int>> = context.dataStore.data.map { prefs ->
+        prefs.asMap().mapNotNull { (key, value) ->
+            val name = key.name
+            if (!name.startsWith(FORUM_PREFIX)) return@mapNotNull null
+            val count = value as? Int ?: return@mapNotNull null
+            name.removePrefix(FORUM_PREFIX) to count
+        }.toMap()
+    }
+
+    suspend fun markSeen(postId: String, replyCount: Int) {
+        val key = androidx.datastore.preferences.core.intPreferencesKey("$FORUM_PREFIX$postId")
+        context.dataStore.edit { it[key] = replyCount }
+    }
+
+    private companion object {
+        const val FORUM_PREFIX = "forumseen:"
+    }
+}
