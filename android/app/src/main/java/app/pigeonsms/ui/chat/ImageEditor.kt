@@ -106,6 +106,33 @@ private enum class CropPreset(val label: String, val ratio: Float?) {
     Landscape("16:9", 16f / 9f),
 }
 
+/**
+ * A free-form crop, stored in normalised 0..1 image coordinates (2.9.7).
+ *
+ * Normalised rather than pixels so it survives rotation and preview scaling
+ * without needing to be recomputed — the same rect means the same region of the
+ * picture whatever size it's being displayed at.
+ */
+private data class FreeCrop(
+    val left: Float = 0f,
+    val top: Float = 0f,
+    val right: Float = 1f,
+    val bottom: Float = 1f,
+) {
+    val isFull: Boolean get() = left <= 0.001f && top <= 0.001f && right >= 0.999f && bottom >= 0.999f
+    fun clampedTo(l: Float, tp: Float, r: Float, b: Float) = FreeCrop(
+        l.coerceIn(0f, r - MIN_SPAN),
+        tp.coerceIn(0f, b - MIN_SPAN),
+        r.coerceIn(l + MIN_SPAN, 1f),
+        b.coerceIn(tp + MIN_SPAN, 1f),
+    )
+
+    companion object {
+        /** Never let the box collapse to nothing — you can't grab it back. */
+        const val MIN_SPAN = 0.08f
+    }
+}
+
 private data class EditStroke(val points: List<Offset>, val blur: Boolean = false)
 private data class EditOverlay(val value: String, val x: Float, val y: Float, val emoji: Boolean)
 
@@ -135,6 +162,10 @@ fun ImageEditorDialog(
 
     var rotation by remember { mutableStateOf(0) }
     var crop by remember { mutableStateOf(CropPreset.Original) }
+    // 2.9.7 free-form crop. Null until the user drags, so the preset behaviour is
+    // untouched for anyone who doesn't want it.
+    var freeCrop by remember { mutableStateOf<FreeCrop?>(null) }
+    var cropMode by remember { mutableStateOf(false) }
     var tool by remember { mutableStateOf(EditorTool.Move) }
     var sendOriginal by remember { mutableStateOf(initialSendOriginal) }
     var currentStroke by remember { mutableStateOf<List<Offset>>(emptyList()) }
@@ -146,7 +177,11 @@ fun ImageEditorDialog(
     var busy by remember { mutableStateOf(false) }
     var processingError by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
-    val preview = remember(decoded, rotation, crop) { transformBitmap(decoded, rotation, crop.ratio) }
+    // While cropping, show the UNcropped image so the box can be dragged over the
+    // whole picture; the crop is applied on exit and on save.
+    val preview = remember(decoded, rotation, crop, freeCrop, cropMode) {
+        transformBitmap(decoded, rotation, crop.ratio, if (cropMode) null else freeCrop)
+    }
     val pixelatedPreview = remember(preview) { pixelate(preview) }
 
     fun sendEdited() {
@@ -160,6 +195,7 @@ fun ImageEditorDialog(
                         originalName = filename,
                         rotation = rotation,
                         cropRatio = crop.ratio,
+                        freeCrop = freeCrop,
                         strokes = strokes.toList(),
                         overlays = overlays.toList(),
                         sendOriginal = sendOriginal,
@@ -223,6 +259,79 @@ fun ImageEditorDialog(
                             contentScale = ContentScale.Fit,
                             modifier = Modifier.fillMaxSize(),
                         )
+                        // 2.9.7 free crop: drag inside to move the box, drag near an
+                        // edge to resize it. Coordinates are normalised against the
+                        // drawn size, so the same gesture means the same region
+                        // regardless of how the preview is scaled.
+                        if (cropMode) {
+                            val rect = freeCrop ?: FreeCrop()
+                            androidx.compose.foundation.Canvas(
+                                Modifier.fillMaxSize().pointerInput(cropMode) {
+                                    detectDragGestures { change, drag ->
+                                        change.consume()
+                                        val dx = drag.x / size.width
+                                        val dy = drag.y / size.height
+                                        val start = change.position
+                                        val nx = start.x / size.width
+                                        val ny = start.y / size.height
+                                        val current = freeCrop ?: FreeCrop()
+                                        // Which part of the box the finger is on
+                                        // decides move vs resize — an edge grab
+                                        // within 12% resizes, anything else moves.
+                                        val edge = 0.12f
+                                        val nearLeft = kotlin.math.abs(nx - current.left) < edge
+                                        val nearRight = kotlin.math.abs(nx - current.right) < edge
+                                        val nearTop = kotlin.math.abs(ny - current.top) < edge
+                                        val nearBottom = kotlin.math.abs(ny - current.bottom) < edge
+                                        freeCrop = when {
+                                            nearLeft || nearRight || nearTop || nearBottom -> current.clampedTo(
+                                                if (nearLeft) current.left + dx else current.left,
+                                                if (nearTop) current.top + dy else current.top,
+                                                if (nearRight) current.right + dx else current.right,
+                                                if (nearBottom) current.bottom + dy else current.bottom,
+                                            )
+                                            else -> {
+                                                val w = current.right - current.left
+                                                val h = current.bottom - current.top
+                                                val l = (current.left + dx).coerceIn(0f, 1f - w)
+                                                val tp = (current.top + dy).coerceIn(0f, 1f - h)
+                                                FreeCrop(l, tp, l + w, tp + h)
+                                            }
+                                        }
+                                    }
+                                },
+                            ) {
+                                val l = rect.left * size.width
+                                val tp = rect.top * size.height
+                                val r = rect.right * size.width
+                                val b = rect.bottom * size.height
+                                // Dim everything outside the selection so the crop
+                                // reads at a glance.
+                                val shade = Color.Black.copy(alpha = 0.55f)
+                                drawRect(shade, size = androidx.compose.ui.geometry.Size(size.width, tp))
+                                drawRect(
+                                    shade,
+                                    topLeft = Offset(0f, b),
+                                    size = androidx.compose.ui.geometry.Size(size.width, size.height - b),
+                                )
+                                drawRect(
+                                    shade,
+                                    topLeft = Offset(0f, tp),
+                                    size = androidx.compose.ui.geometry.Size(l, b - tp),
+                                )
+                                drawRect(
+                                    shade,
+                                    topLeft = Offset(r, tp),
+                                    size = androidx.compose.ui.geometry.Size(size.width - r, b - tp),
+                                )
+                                drawRect(
+                                    Color.White,
+                                    topLeft = Offset(l, tp),
+                                    size = androidx.compose.ui.geometry.Size(r - l, b - tp),
+                                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3f),
+                                )
+                            }
+                        }
                         Canvas(
                             Modifier.fillMaxSize().pointerInput(tool, overlays.size, strokes.size) {
                                 detectDragGestures(
@@ -296,6 +405,20 @@ fun ImageEditorDialog(
                 ) {
                     EditorButton(Icons.Rounded.Crop, "Crop ${crop.label}") {
                         crop = CropPreset.entries[(crop.ordinal + 1) % CropPreset.entries.size]
+                        // Choosing a preset ratio clears a free crop — the two are
+                        // different answers to the same question.
+                        freeCrop = null
+                    }
+                    // 2.9.7: free-form crop. Toggling out of it keeps whatever box
+                    // you dragged; tapping it again lets you adjust the same box.
+                    EditorButton(
+                        Icons.Rounded.Crop,
+                        if (cropMode) "Apply free crop" else "Free crop",
+                        selected = cropMode,
+                    ) {
+                        if (!cropMode && freeCrop == null) freeCrop = FreeCrop(0.1f, 0.1f, 0.9f, 0.9f)
+                        cropMode = !cropMode
+                        if (cropMode) crop = CropPreset.Original
                     }
                     EditorButton(Icons.Rounded.RotateRight, "Rotate image") { rotation = (rotation + 90) % 360 }
                     EditorButton(
@@ -472,7 +595,12 @@ private fun applyExifOrientation(bytes: ByteArray, bitmap: Bitmap): Bitmap {
     }.getOrDefault(bitmap)
 }
 
-private fun transformBitmap(source: Bitmap, rotation: Int, cropRatio: Float?): Bitmap {
+private fun transformBitmap(
+    source: Bitmap,
+    rotation: Int,
+    cropRatio: Float?,
+    free: FreeCrop? = null,
+): Bitmap {
     val rotated = if (rotation == 0) source else Bitmap.createBitmap(
         source,
         0,
@@ -482,6 +610,17 @@ private fun transformBitmap(source: Bitmap, rotation: Int, cropRatio: Float?): B
         Matrix().apply { postRotate(rotation.toFloat()) },
         true,
     )
+    // A free crop wins over the ratio presets: it's the more specific instruction,
+    // and applying both would fight each other.
+    if (free != null && !free.isFull) {
+        val x = (free.left * rotated.width).toInt().coerceIn(0, rotated.width - 1)
+        val y = (free.top * rotated.height).toInt().coerceIn(0, rotated.height - 1)
+        val w = ((free.right - free.left) * rotated.width).toInt().coerceAtLeast(1)
+            .coerceAtMost(rotated.width - x)
+        val h = ((free.bottom - free.top) * rotated.height).toInt().coerceAtLeast(1)
+            .coerceAtMost(rotated.height - y)
+        return Bitmap.createBitmap(rotated, x, y, w, h)
+    }
     if (cropRatio == null) return rotated
     val current = rotated.width.toFloat() / rotated.height.coerceAtLeast(1)
     val (width, height) = if (current > cropRatio) {
@@ -573,6 +712,7 @@ private fun renderEditedImage(
     originalName: String,
     rotation: Int,
     cropRatio: Float?,
+    freeCrop: FreeCrop? = null,
     strokes: List<EditStroke>,
     overlays: List<EditOverlay>,
     sendOriginal: Boolean,
@@ -581,7 +721,7 @@ private fun renderEditedImage(
     if (sendOriginal && untouched) return EditedImage(originalBytes, originalName, originalType, true)
 
     val decoded = requireNotNull(decodeBitmap(originalBytes, if (sendOriginal) 8_192 else 2_560))
-    val transformed = transformBitmap(decoded, rotation, cropRatio)
+    val transformed = transformBitmap(decoded, rotation, cropRatio, freeCrop)
     val marked = applyMarkup(transformed, strokes, overlays)
     val outputBitmap = if (sendOriginal) marked else scaleDown(marked, 1_920)
     val png = originalType.equals("image/png", ignoreCase = true) && outputBitmap.hasAlpha()
