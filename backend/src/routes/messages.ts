@@ -511,12 +511,41 @@ messages.post('/channels/:id/messages', async (c) => {
   const attachment: AttachmentInput | null = rawAttachment?.key
     ? await assertOwnedAttachment(c.env, user.id, rawAttachment)
     : null;
-  const metadata = normalizeMessageMetadata(kind, body['metadata'], channel.space_id !== null);
+  let metadata = normalizeMessageMetadata(kind, body['metadata'], channel.space_id !== null);
   const poll: PollInput | null = kind === 'poll' ? normalizePoll(body['poll']) : null;
   if (poll && !content.trim()) content = poll.question;
   if (kind === 'event' && !content.trim()) content = String(metadata?.['title'] ?? 'Event');
-  if (kind === 'sticker' && (!attachment || !attachment.type.startsWith('image/'))) {
-    throw new ApiError(400, 'bad_sticker', 'stickers require an owned image attachment');
+  if (kind === 'sticker') {
+    // 2.9.5: a sticker may reference one of the NEST's stickers by id instead of
+    // carrying an owned attachment. Whoever added it to the nest owns the upload
+    // (usually an admin), so the owned-attachment rule alone meant every other
+    // member was permanently unable to send it.
+    const stickerId = String(metadata?.['sticker_id'] ?? '').trim();
+    if (stickerId) {
+      if (!channel.space_id) {
+        throw new ApiError(400, 'bad_sticker', 'nest stickers only work inside a nest');
+      }
+      const sticker = await c.env.DB.prepare(
+        `SELECT id, name, media_key, content_type FROM space_emojis
+         WHERE id = ? AND space_id = ? AND kind = 'sticker'`,
+      )
+        .bind(stickerId, channel.space_id)
+        .first<{ id: string; name: string; media_key: string; content_type: string | null }>();
+      if (!sticker) throw new ApiError(400, 'bad_sticker', 'that sticker is not in this nest');
+
+      // Stamp the media key from the database rather than echoing the client's:
+      // otherwise anyone could point a "sticker" at an arbitrary media key and
+      // have every member's client fetch it.
+      metadata = {
+        sticker_id: sticker.id,
+        alt: sticker.name,
+        media_key: sticker.media_key,
+        content_type: sticker.content_type,
+      };
+      if (!content.trim()) content = `:${sticker.name}:`;
+    } else if (!attachment || !attachment.type.startsWith('image/')) {
+      throw new ApiError(400, 'bad_sticker', 'stickers need a nest sticker id or an owned image attachment');
+    }
   }
   if (!content.trim() && !attachment && kind !== 'poll') {
     throw new ApiError(400, 'empty_message', 'say something');

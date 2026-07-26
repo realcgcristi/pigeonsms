@@ -140,6 +140,19 @@ class ChatRepository(
         state = state,
     )
 
+    /**
+     * Send one of the nest's stickers (2.9.5).
+     *
+     * Deliberately not routed through the optimistic outbox: a sticker carries no
+     * user-typed text to lose, and the server has to resolve the media key before
+     * the message means anything, so there is nothing useful to render optimistically.
+     * A [sync] afterwards pulls the real row in through the normal path.
+     */
+    suspend fun sendSticker(channelId: String, stickerId: String) {
+        api.sendSticker(channelId, stickerId, java.util.UUID.randomUUID().toString())
+        runCatching { sync(channelId) }
+    }
+
     suspend fun sync(channelId: String) {
         val lastKnown = db.cursors().get(channelId)
         val page = api.messagesPage(channelId)
