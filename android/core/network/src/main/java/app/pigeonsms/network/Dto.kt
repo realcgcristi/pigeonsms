@@ -445,7 +445,7 @@ data class ScheduledMessageDto(
 
 @Serializable data class ScheduledResponse(val scheduled: List<ScheduledMessageDto> = emptyList())
 
-// ── v2.9.5: custom emoji, roles/permissions, threads, reminders, uploads ────
+// ── v2.9.5: custom emoji, roles/permissions, threads, uploads ──────────────
 
 /**
  * A nest's custom emoji or sticker. `media_key` goes through
@@ -536,20 +536,6 @@ data class ThreadMessagesResponse(
     val next_before: Long? = null,
 )
 
-/** A pending or fired reminder. Delivered as a notification, never as a message. */
-@Serializable
-data class ReminderDto(
-    val id: String,
-    val message_id: String? = null,
-    val channel_id: String? = null,
-    val text: String = "",
-    val remind_at: Long = 0,
-    val created_at: Long = 0,
-    val fired_at: Long? = null,
-)
-
-@Serializable data class RemindersResponse(val reminders: List<ReminderDto> = emptyList())
-@Serializable data class ReminderResponse(val reminder: ReminderDto)
 
 /**
  * A resumable upload session. `uploaded_parts` is what makes resume work: after

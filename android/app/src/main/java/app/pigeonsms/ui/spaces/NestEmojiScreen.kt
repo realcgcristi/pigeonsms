@@ -41,6 +41,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import app.pigeonsms.design.theme.Spacing
+import app.pigeonsms.ui.settings.SettingsSubHeader
 import app.pigeonsms.network.SpaceEmojiDto
 import coil.compose.AsyncImage
 import kotlinx.coroutines.Dispatchers
@@ -61,8 +62,24 @@ import kotlinx.coroutines.withContext
  * client shows.
  */
 
-/** 256 KB. Emoji render at ~20dp — anything larger is wasted bytes on every message. */
-private const val MAX_EMOJI_BYTES = 256 * 1024
+/**
+ * What the user may PICK. Generous, because rejecting someone's 4 MB PNG for
+ * being 4 MB is a pointless wall when we can simply shrink it.
+ */
+private const val MAX_PICK_BYTES = 8 * 1024 * 1024
+
+/**
+ * What we UPLOAD after downscaling. Emoji render at ~20dp and stickers at ~140dp,
+ * so anything past this is bytes every viewer pays for and nobody can see.
+ *
+ * The shrinking happens on-device on purpose: Cloudflare Workers has no image
+ * library, so the server genuinely cannot resize (that needs the paid Cloudflare
+ * Images product). Doing it here also saves the uploader's bandwidth.
+ */
+private const val TARGET_EMOJI_BYTES = 256 * 1024
+
+/** Longest edge after downscaling — comfortably sharp for a sticker at 140dp. */
+private const val MAX_EMOJI_EDGE = 320
 
 private class PickedEmojiImage(val bytes: ByteArray, val type: String)
 
@@ -70,6 +87,7 @@ private class PickedEmojiImage(val bytes: ByteArray, val type: String)
 fun NestEmojiScreen(
     spaceId: String,
     vm: NestEmojiViewModel,
+    onBack: () -> Unit,
 ) {
     val ui by vm.ui.collectAsState()
     val context = LocalContext.current
@@ -95,13 +113,14 @@ fun NestEmojiScreen(
         }
     }
 
-    Column(Modifier.fillMaxSize().padding(Spacing.m)) {
+    Column(Modifier.fillMaxSize().padding(horizontal = Spacing.m)) {
+        // Shared skin-aware header (owns the status-bar inset + skin styling).
         Row(
             Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
+            verticalAlignment = Alignment.Bottom,
         ) {
-            Text("nest emoji", style = MaterialTheme.typography.titleLarge)
+            Box(Modifier.weight(1f)) { SettingsSubHeader("nest emoji", onBack) }
             IconButton(
                 onClick = {
                     picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
@@ -111,7 +130,7 @@ fun NestEmojiScreen(
             }
         }
         Text(
-            "png, gif or webp, under 256kb. use them anywhere in this nest by typing :name:",
+            "png, gif or webp. big images are shrunk automatically; animated gifs must be under 256kb.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -247,7 +266,7 @@ private fun readEmojiImage(context: Context, uri: Uri): PickedEmojiImage {
         ?.takeIf { it in setOf("image/png", "image/gif", "image/webp", "image/jpeg") }
         ?: throw IllegalArgumentException("emoji must be png, gif, webp or jpeg")
 
-    val output = java.io.ByteArrayOutputStream(minOf(MAX_EMOJI_BYTES, 64 * 1024))
+    val output = java.io.ByteArrayOutputStream(64 * 1024)
     resolver.openInputStream(uri)?.use { input ->
         val buffer = ByteArray(8 * 1024)
         var total = 0
@@ -255,10 +274,60 @@ private fun readEmojiImage(context: Context, uri: Uri): PickedEmojiImage {
             val read = input.read(buffer)
             if (read < 0) break
             total += read
-            if (total > MAX_EMOJI_BYTES) throw IllegalArgumentException("emoji must be under 256kb")
+            if (total > MAX_PICK_BYTES) throw IllegalArgumentException("pick an image under 8mb")
             output.write(buffer, 0, read)
         }
     } ?: throw IllegalArgumentException("couldn't open that image")
-    if (output.size() == 0) throw IllegalArgumentException("that image is empty")
-    return PickedEmojiImage(output.toByteArray(), type)
+    val raw = output.toByteArray()
+    if (raw.isEmpty()) throw IllegalArgumentException("that image is empty")
+
+    // GIFs are left alone: decoding one to a Bitmap keeps only the first frame,
+    // which would silently turn an animated emoji into a still. An oversized GIF
+    // is rejected rather than quietly ruined.
+    if (type == "image/gif") {
+        if (raw.size > TARGET_EMOJI_BYTES) {
+            throw IllegalArgumentException("animated gifs must be under 256kb — try a shorter or smaller one")
+        }
+        return PickedEmojiImage(raw, type)
+    }
+
+    if (raw.size <= TARGET_EMOJI_BYTES) return PickedEmojiImage(raw, type)
+    return PickedEmojiImage(downscale(raw), "image/webp")
+}
+
+/**
+ * Shrink a still image until it fits [TARGET_EMOJI_BYTES].
+ *
+ * Two stages: bound the longest edge (which does most of the work), then step
+ * quality down if it's still too big. WebP because it beats PNG/JPEG at this size
+ * and keeps transparency, which emoji need.
+ */
+private fun downscale(raw: ByteArray): ByteArray {
+    val source = android.graphics.BitmapFactory.decodeByteArray(raw, 0, raw.size)
+        ?: throw IllegalArgumentException("couldn't read that image")
+    val longest = maxOf(source.width, source.height)
+    val scaled = if (longest <= MAX_EMOJI_EDGE) {
+        source
+    } else {
+        val ratio = MAX_EMOJI_EDGE.toFloat() / longest
+        android.graphics.Bitmap.createScaledBitmap(
+            source,
+            (source.width * ratio).toInt().coerceAtLeast(1),
+            (source.height * ratio).toInt().coerceAtLeast(1),
+            true,
+        )
+    }
+
+    val format = if (android.os.Build.VERSION.SDK_INT >= 30) {
+        android.graphics.Bitmap.CompressFormat.WEBP_LOSSY
+    } else {
+        @Suppress("DEPRECATION")
+        android.graphics.Bitmap.CompressFormat.WEBP
+    }
+    for (quality in intArrayOf(90, 80, 70, 60, 50)) {
+        val out = java.io.ByteArrayOutputStream()
+        scaled.compress(format, quality, out)
+        if (out.size() <= TARGET_EMOJI_BYTES) return out.toByteArray()
+    }
+    throw IllegalArgumentException("couldn't shrink that image enough — try a simpler one")
 }

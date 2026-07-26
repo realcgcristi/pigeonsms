@@ -28,7 +28,6 @@ import androidx.compose.material.icons.outlined.Devices
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Image
-import androidx.compose.material.icons.outlined.Alarm
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Palette
@@ -124,8 +123,6 @@ fun SettingsScreen(
     onNotifications: () -> Unit,
     onNests: () -> Unit,
     onAbout: () -> Unit,
-    /** Opens the reminders list (2.9.5). */
-    onReminders: () -> Unit = {},
     onSignOut: () -> Unit,
 ) {
     val skin = LocalUiSkin.current
@@ -197,7 +194,6 @@ fun SettingsScreen(
 
             Group("app")
             GroupCard {
-                MenuRow(Icons.Outlined.Alarm, "reminders", "things you asked to be nudged about", onReminders)
                 MenuRow(Icons.Outlined.Info, "about", "version, creator, updates", onAbout)
             }
 

@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.pigeonsms.design.theme.Spacing
+import app.pigeonsms.ui.settings.SettingsSubHeader
 import app.pigeonsms.network.MessageDto
 import app.pigeonsms.network.PigeonApi
 import app.pigeonsms.network.ThreadDto
@@ -151,13 +152,9 @@ fun ThreadsScreen(
     val ui by vm.ui.collectAsState()
     LaunchedEffect(channelId) { vm.load(channelId) }
 
-    Column(Modifier.fillMaxSize().padding(Spacing.m)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "back")
-            }
-            Text("threads", style = MaterialTheme.typography.titleLarge)
-        }
+    Column(Modifier.fillMaxSize().padding(horizontal = Spacing.m)) {
+        // Shared skin-aware header — owns the status-bar inset and the skin styling.
+        SettingsSubHeader("threads", onBack)
 
         ui.error?.let {
             Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
@@ -206,16 +203,15 @@ fun ThreadScreen(
     var draft by remember { mutableStateOf("") }
     LaunchedEffect(threadId) { vm.load(threadId) }
 
-    Column(Modifier.fillMaxSize().padding(Spacing.m)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "back")
+    Column(Modifier.fillMaxSize().padding(horizontal = Spacing.m)) {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Bottom,
+        ) {
+            Box(Modifier.weight(1f)) {
+                SettingsSubHeader(ui.thread?.title ?: "thread", onBack)
             }
-            Text(
-                ui.thread?.title ?: "thread",
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.weight(1f),
-            )
             ui.thread?.let { thread ->
                 TextButton(onClick = { vm.setArchived(threadId, !thread.archived) }) {
                     Text(if (thread.archived) "unarchive" else "archive")
