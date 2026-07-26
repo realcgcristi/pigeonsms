@@ -635,4 +635,21 @@ class PigeonApi(
         client.delete("$baseUrl/uploads/$uploadId") { auth() }.unwrap<OkResponse>()
     }
 
+
+    /**
+     * Send one of the nest's stickers (2.9.5).
+     *
+     * Only the id travels: the server resolves the media key from `space_emojis`
+     * and stamps it into the message metadata, so a client can't point a
+     * "sticker" at an arbitrary media key.
+     */
+    suspend fun sendSticker(channelId: String, stickerId: String, nonce: String): SendResponse =
+        client.post("$baseUrl/channels/$channelId/messages") {
+            auth(); contentType(ContentType.Application.Json)
+            setBody(buildJsonObject {
+                put("content", ""); put("nonce", nonce); put("kind", "sticker")
+                put("metadata", buildJsonObject { put("sticker_id", stickerId) })
+            })
+        }.unwrap<SendResponse>()
+
 }

@@ -75,6 +75,7 @@ import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.EmojiEmotions
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Call
@@ -673,6 +674,9 @@ fun ChatScreen(
             onTyping = vm::typing,
             onAttachment = vm::sendAttachment,
             onAttachmentError = vm::reportError,
+            stickers = customEmoji.filter { it.kind == "sticker" },
+            onSendSticker = vm::sendSticker,
+            mediaUrlFor = vm::mediaUrl,
             onClearReply = { vm.setReply(null) },
             onClearEdit = { vm.setEditing(null) },
             onMentionLookup = vm::loadMentionCandidates,
@@ -1727,6 +1731,13 @@ private fun MessageBubble(
                                     metadataJson = message.metadataJson,
                                     contentColor = bubbleContentColor(self),
                                 )
+                                // 2.9.5: a nest sticker. The media key is stamped by
+                                // the server into metadata, so it renders straight
+                                // from there rather than needing the emoji list.
+                                message.kind == "sticker" -> StickerMessageContent(
+                                    metadataJson = message.metadataJson,
+                                    mediaUrl = mediaUrl,
+                                )
                                 message.content.isNotBlank() -> if (isEmojiOnly(message.content)) Text(
                                     message.content,
                                     color = bubbleContentColor(self),
@@ -2732,6 +2743,10 @@ private fun Composer(
     onTyping: () -> Unit,
     onAttachment: (ByteArray, String, String, String) -> Unit,
     onAttachmentError: (String) -> Unit,
+    /** This nest's stickers (2.9.5); empty hides the composer's sticker button. */
+    stickers: List<SpaceEmojiDto> = emptyList(),
+    onSendSticker: (String) -> Unit = {},
+    mediaUrlFor: (String) -> String? = { null },
     onClearReply: () -> Unit,
     onClearEdit: () -> Unit,
     onMentionLookup: () -> Unit = {},
@@ -2741,6 +2756,8 @@ private fun Composer(
     // gates the "encrypt" affordance — off by default (E2EE ships flag-off)
     e2eeEnabled: Boolean = false,
 ) {
+    // 2.9.5 sticker sheet, owned by the composer that opens it.
+    var showStickerPicker by remember { mutableStateOf(false) }
     var text by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue("")) }
     var readingAttachment by remember { mutableStateOf(false) }
     var showAttachmentOptions by remember { mutableStateOf(false) }
@@ -3130,6 +3147,40 @@ private fun Composer(
                     ) { Icon(Icons.Outlined.Send, "send voice message") }
                 }
             } else Row(verticalAlignment = Alignment.Bottom) {
+                // 2.9.5: only offered when this nest actually has stickers, so DMs
+                // and sticker-less nests don't get a button that opens an empty sheet.
+                if (stickers.isNotEmpty()) {
+                    IconButton(
+                        onClick = { showStickerPicker = true },
+                        enabled = !ui.sending && ui.editing == null,
+                        modifier = Modifier.size(48.dp),
+                    ) {
+                        Icon(
+                            Icons.Outlined.EmojiEmotions,
+                            "send a sticker",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                if (showStickerPicker) {
+                    androidx.compose.material3.AlertDialog(
+                        onDismissRequest = { showStickerPicker = false },
+                        title = { Text("stickers") },
+                        text = {
+                            StickerPickerRow(
+                                emoji = stickers,
+                                mediaUrl = mediaUrlFor,
+                                onPick = { sticker ->
+                                    showStickerPicker = false
+                                    onSendSticker(sticker.id)
+                                },
+                            )
+                        },
+                        confirmButton = {
+                            TextButton(onClick = { showStickerPicker = false }) { Text("close") }
+                        },
+                    )
+                }
                 IconButton(
                     onClick = { showAttachmentOptions = true },
                     enabled = !readingAttachment && !ui.sending && ui.editing == null,

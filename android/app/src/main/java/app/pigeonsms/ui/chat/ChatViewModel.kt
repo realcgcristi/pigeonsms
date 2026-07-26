@@ -171,6 +171,16 @@ class ChatViewModel(
         }
     }
 
+    /** Send a nest sticker (2.9.5). Errors surface in the normal chat error slot. */
+    fun sendSticker(stickerId: String) {
+        viewModelScope.launch {
+            runCatching { repo.sendSticker(channelId, stickerId) }
+                .onFailure { e ->
+                    _ui.update { it.copy(error = e.message ?: "couldn't send that sticker") }
+                }
+        }
+    }
+
     fun mediaUrl(key: String) = repo.mediaUrl(key)
 
     fun isOwn(message: MessageEntity): Boolean =

@@ -180,3 +180,36 @@ fun StickerPickerRow(
         }
     }
 }
+
+/**
+ * A sticker message body (2.9.5).
+ *
+ * The server stamps `media_key` into the message metadata when the sticker is
+ * sent, so this renders without needing the nest's emoji list loaded — which
+ * matters because a sticker can arrive over the gateway before that list does.
+ */
+@Composable
+fun StickerMessageContent(
+    metadataJson: String?,
+    mediaUrl: (String) -> String?,
+    modifier: Modifier = Modifier,
+) {
+    val parsed = remember(metadataJson) {
+        runCatching {
+            val obj = org.json.JSONObject(metadataJson ?: "{}")
+            obj.optString("media_key").takeIf { it.isNotBlank() } to
+                obj.optString("alt", "sticker")
+        }.getOrNull()
+    }
+    val key = parsed?.first
+    if (key == null) {
+        Text("sticker", style = MaterialTheme.typography.bodyMedium)
+        return
+    }
+    AsyncImage(
+        model = mediaUrl(key),
+        contentDescription = parsed.second,
+        contentScale = ContentScale.Fit,
+        modifier = modifier.size(140.dp),
+    )
+}
