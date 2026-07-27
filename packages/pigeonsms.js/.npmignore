@@ -1,0 +1,12 @@
+# `files` in package.json is the allowlist; this is the belt to its braces.
+.github/
+.vscode/
+node_modules/
+test/
+tests/
+examples/
+*.log
+*.tgz
+.DS_Store
+.env
+.env.*

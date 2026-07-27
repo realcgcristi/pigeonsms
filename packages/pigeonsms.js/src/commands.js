@@ -1,0 +1,234 @@
+import { PigeonError } from './errors.js';
+
+export const OPTION_TYPES = ['string', 'integer', 'number', 'boolean', 'user', 'channel'];
+const NAME_RE = /^[a-z0-9_-]{1,32}$/;
+/** Only these three have an ordering, so only these take choices / min / max. */
+const BOUNDED_TYPES = new Set(['string', 'integer', 'number']);
+
+/**
+ * Chainable option declarator.
+ *
+ * Every method returns `this`, so a command's options read as one expression:
+ *
+ *   (o) => o.string('text', 'what to say', { required: true })
+ *           .integer('times', 'how many', { min: 1, max: 10 })
+ */
+export class OptionBuilder {
+  constructor(options = []) {
+    this.options = [...options];
+  }
+
+  string(name, description, opts) {
+    return this.#add('string', name, description, opts);
+  }
+
+  integer(name, description, opts) {
+    return this.#add('integer', name, description, opts);
+  }
+
+  number(name, description, opts) {
+    return this.#add('number', name, description, opts);
+  }
+
+  boolean(name, description, opts) {
+    return this.#add('boolean', name, description, opts);
+  }
+
+  user(name, description, opts) {
+    return this.#add('user', name, description, opts);
+  }
+
+  channel(name, description, opts) {
+    return this.#add('channel', name, description, opts);
+  }
+
+  #add(type, name, description, opts) {
+    this.options.push(normalizeOption({ ...opts, name, description, type }));
+    return this;
+  }
+
+  toJSON() {
+    return this.options.map((option) => ({ ...option }));
+  }
+}
+
+/**
+ * One option, validated against the same rules the server applies.
+ *
+ * Failing here rather than at PUT time means a typo in a command declaration
+ * surfaces at import, with the option name in the message, instead of as a
+ * 400 `invalid_option` after the process is already up.
+ */
+export function normalizeOption(source) {
+  if (!source || typeof source !== 'object') {
+    throw new PigeonError('each option must be an object', { code: 'invalid_option' });
+  }
+  const name = String(source.name ?? '').trim().toLowerCase();
+  if (!NAME_RE.test(name)) {
+    throw new PigeonError(`option name ${JSON.stringify(source.name)} must match ${NAME_RE}`, {
+      code: 'invalid_option',
+    });
+  }
+  const type = String(source.type ?? 'string');
+  if (!OPTION_TYPES.includes(type)) {
+    throw new PigeonError(`${name}: unknown option type ${type}`, { code: 'invalid_option' });
+  }
+  const description = String(source.description ?? '').trim().slice(0, 200);
+  if (!description) {
+    throw new PigeonError(`${name}: description is required`, { code: 'invalid_option' });
+  }
+
+  const option = { name, description, type, required: source.required === true };
+
+  const choices = normalizeChoices(source.choices, type, name);
+  if (choices.length) option.choices = choices;
+
+  for (const bound of ['min', 'max']) {
+    const value = source[bound];
+    if (value === undefined || value === null) continue;
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      throw new PigeonError(`${name}: ${bound} must be a number`, { code: 'invalid_option' });
+    }
+    if (!BOUNDED_TYPES.has(type)) {
+      throw new PigeonError(`${name}: ${bound} needs a string or numeric type`, { code: 'invalid_option' });
+    }
+    option[bound] = value;
+  }
+  if (option.min !== undefined && option.max !== undefined && option.min > option.max) {
+    throw new PigeonError(`${name}: min is greater than max`, { code: 'invalid_option' });
+  }
+  return option;
+}
+
+/** Accepts `['plain','loud']`, `[1,2]` or `[{ name, value }]`. */
+function normalizeChoices(choices, type, optionName) {
+  if (choices === undefined || choices === null) return [];
+  if (!Array.isArray(choices)) {
+    throw new PigeonError(`${optionName}: choices must be an array`, { code: 'invalid_option' });
+  }
+  if (choices.length && !BOUNDED_TYPES.has(type)) {
+    throw new PigeonError(`${optionName}: ${type} options cannot have choices`, { code: 'invalid_option' });
+  }
+  if (choices.length > 25) {
+    throw new PigeonError(`${optionName}: at most 25 choices`, { code: 'invalid_option' });
+  }
+  return choices.map((choice) => {
+    const entry = choice && typeof choice === 'object' ? choice : { name: String(choice), value: choice };
+    const name = String(entry.name ?? entry.value ?? '').slice(0, 64);
+    if (!name) throw new PigeonError(`${optionName}: a choice needs a name`, { code: 'invalid_option' });
+    const value = entry.value ?? entry.name;
+    if (type === 'string' ? typeof value !== 'string' : typeof value !== 'number') {
+      throw new PigeonError(`${optionName}: choice ${name} does not match type ${type}`, {
+        code: 'invalid_option',
+      });
+    }
+    return { name, value };
+  });
+}
+
+/**
+ * A declared command in wire shape.
+ *
+ * `dm_enabled` is forced to false for nest-scoped commands exactly like the
+ * server does — if we sent `true` there, the stored row would come back false
+ * and the sync diff would rewrite the same set on every boot.
+ */
+export function normalizeCommand(definition) {
+  const name = String(definition?.name ?? '').trim().toLowerCase();
+  if (!NAME_RE.test(name)) {
+    throw new PigeonError(`command name ${JSON.stringify(definition?.name)} must match ${NAME_RE}`, {
+      code: 'invalid_command_name',
+    });
+  }
+  const description = String(definition.description ?? '').trim().slice(0, 200);
+  if (!description) throw new PigeonError(`${name}: description is required`, { code: 'bad_request' });
+
+  const spaceId = definition.spaceId ?? definition.space_id ?? null;
+  const space_id = spaceId === null || spaceId === undefined || spaceId === '' ? null : String(spaceId);
+  const declaredDm = definition.dmEnabled ?? definition.dm_enabled;
+
+  return {
+    name,
+    description,
+    options: resolveOptions(definition.options),
+    space_id,
+    dm_enabled: space_id ? false : declaredDm === undefined || declaredDm !== false,
+  };
+}
+
+/** An OptionBuilder, an array of option objects, or `(o) => o.string(...)`. */
+export function resolveOptions(source) {
+  if (source === undefined || source === null) return [];
+  if (source instanceof OptionBuilder) return source.toJSON();
+  if (typeof source === 'function') {
+    const builder = new OptionBuilder();
+    const returned = source(builder);
+    return resolveOptions(returned instanceof OptionBuilder || Array.isArray(returned) ? returned : builder);
+  }
+  if (Array.isArray(source)) return source.map(normalizeOption);
+  throw new PigeonError('options must be an array, an OptionBuilder, or a builder function', {
+    code: 'invalid_option',
+  });
+}
+
+/** `${space_id}:${name}` — the server's uniqueness key, and ours. */
+export function commandKey(command) {
+  return `${command.space_id ?? command.spaceId ?? ''}:${String(command.name).toLowerCase()}`;
+}
+
+/**
+ * Compare a declared set against what the server holds.
+ *
+ * Only the fields we can actually write are compared — `id`, `bot_id` and
+ * `created_at` come back from the server and would make every set look changed.
+ */
+export function diffCommands(local, remote) {
+  const mine = new Map(local.map((command) => [commandKey(command), command]));
+  const theirs = new Map((remote ?? []).map((command) => [commandKey(command), command]));
+
+  const added = [];
+  const updated = [];
+  const removed = [];
+
+  for (const [key, command] of mine) {
+    const other = theirs.get(key);
+    if (!other) added.push(command);
+    else if (canonical(command) !== canonical(other)) updated.push(command);
+  }
+  for (const [key, command] of theirs) {
+    if (!mine.has(key)) removed.push(command);
+  }
+
+  return { changed: added.length + updated.length + removed.length > 0, added, updated, removed };
+}
+
+function canonical(command) {
+  return JSON.stringify({
+    name: String(command.name).toLowerCase(),
+    description: String(command.description ?? ''),
+    space_id: command.space_id ?? command.spaceId ?? null,
+    dm_enabled: (command.space_id ?? command.spaceId ?? null) ? false : command.dm_enabled !== false,
+    options: (command.options ?? []).map((option) => ({
+      name: String(option.name).toLowerCase(),
+      description: String(option.description ?? ''),
+      type: String(option.type ?? 'string'),
+      required: option.required === true,
+      choices: (option.choices ?? []).map((choice) => ({ name: String(choice.name), value: choice.value })),
+      min: option.min ?? null,
+      max: option.max ?? null,
+    })),
+  });
+}
+
+/**
+ * Coerce the raw options object of an interaction into something a handler can
+ * use without re-checking types. The server has already validated and coerced
+ * everything; this only guarantees the object exists and drops prototype keys.
+ */
+export function readOptions(raw) {
+  const options = Object.create(null);
+  if (raw && typeof raw === 'object') {
+    for (const [key, value] of Object.entries(raw)) options[key] = value;
+  }
+  return options;
+}

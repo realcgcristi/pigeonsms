@@ -1,0 +1,49 @@
+{
+  "name": "pigeonsms.js",
+  "version": "0.1.0",
+  "description": "PigeonSMS bot SDK — slash commands, interactions, long-poll or webhook delivery, gateway events. Zero dependencies.",
+  "type": "module",
+  "main": "./src/index.js",
+  "module": "./src/index.js",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./src/index.js",
+      "default": "./src/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "index.d.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "sideEffects": false,
+  "scripts": {
+    "test": "node --check src/index.js && node --check src/client.js && node --check src/rest.js && node --check src/commands.js && node --check src/interaction.js && node --check src/gateway.js && node --check src/errors.js"
+  },
+  "keywords": [
+    "pigeonsms",
+    "bot",
+    "chat",
+    "sdk",
+    "slash-commands",
+    "interactions",
+    "webhook"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/realcgcristi/pigeonsms.git",
+    "directory": "packages/pigeonsms.js"
+  },
+  "homepage": "https://github.com/realcgcristi/pigeonsms/tree/main/packages/pigeonsms.js#readme",
+  "bugs": {
+    "url": "https://github.com/realcgcristi/pigeonsms/issues"
+  },
+  "license": "MIT"
+}
