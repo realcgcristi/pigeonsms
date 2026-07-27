@@ -1,0 +1,34 @@
+.settings__card {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-m);
+  width: calc(100% - var(--sp-l) * 2);
+  margin: var(--sp-m) var(--sp-l);
+  padding: var(--sp-m);
+  border: 0;
+  border-radius: var(--r-group);
+  background: var(--surface);
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+.settings__card-text { flex: 1 1 auto; min-width: 0; }
+.settings__card-name { display: block; font-size: 18px; font-weight: 600; }
+.settings__card-handle { display: block; color: var(--text-secondary); font-size: 14px; }
+.settings__form { display: flex; flex-direction: column; gap: var(--sp-m); padding: var(--sp-l); }
+.settings__swatches { display: flex; flex-wrap: wrap; gap: var(--sp-s); padding: var(--sp-s) var(--sp-l) var(--sp-l); }
+.settings__swatch { width: 40px; height: 40px; border-radius: 999px; border: 2px solid transparent; cursor: pointer; }
+.settings__swatch--on { border-color: var(--text-primary); }
+.settings__row-toggle { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-m); padding: var(--sp-m) var(--sp-l); }
+.settings__code {
+  padding: var(--sp-m);
+  margin: 0 var(--sp-l);
+  border-radius: var(--r-chip);
+  background: var(--surface);
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 13px;
+  word-break: break-all;
+}
+.settings__about { text-align: center; padding: var(--sp-xxl) var(--sp-l); }
+.settings__about-mark { font-size: 64px; }
+.settings__about-version { color: var(--text-secondary); }

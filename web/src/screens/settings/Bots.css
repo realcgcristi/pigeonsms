@@ -1,0 +1,88 @@
+.bots__hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-xs);
+  padding: var(--sp-l) var(--sp-l) var(--sp-s);
+}
+.bots__hero-name {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-s);
+  font-size: 20px;
+  font-weight: 600;
+}
+.bots__hero-handle { color: var(--text-secondary); font-size: 14px; }
+
+.bots__name { display: inline-flex; align-items: center; gap: var(--sp-s); }
+.bots__tag {
+  padding: 1px 6px;
+  border-radius: var(--r-chip);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.bots__hint { display: block; color: var(--text-secondary); font-size: 12px; line-height: 16px; }
+
+.bots__toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-m);
+}
+.bots__toggle-text { display: flex; flex-direction: column; gap: var(--sp-xxs); min-width: 0; }
+
+.bots__warning {
+  padding: var(--sp-m);
+  border-radius: var(--r-chip);
+  background: var(--surface-high);
+  color: var(--amber);
+  font-size: 13px;
+  line-height: 18px;
+}
+.bots__token {
+  display: block;
+  margin-top: var(--sp-m);
+  padding: var(--sp-m);
+  border-radius: var(--r-chip);
+  background: var(--surface-high);
+  color: var(--text-primary);
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 12px;
+  line-height: 17px;
+  word-break: break-all;
+  user-select: all;
+}
+
+.bots__section {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-m);
+  padding: var(--sp-l) var(--sp-l) 0;
+}
+.bots__section-label { color: var(--text-secondary); font-size: 12px; font-weight: 600; text-transform: lowercase; }
+
+.bots__option {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-m);
+  padding: var(--sp-m);
+  border: 1px solid var(--outline);
+  border-radius: var(--r-group);
+}
+.bots__option-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-s);
+}
+.bots__option-index { color: var(--text-secondary); font-size: 12px; font-weight: 600; }
+.bots__choice { display: flex; align-items: center; gap: var(--sp-s); }
+.bots__choice > .ui-textfield { flex: 1 1 0; min-width: 0; }
+.bots__inline { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-s); }
+.bots__empty-note { padding: 0 var(--sp-l) var(--sp-s); color: var(--text-tertiary); font-size: 13px; }
