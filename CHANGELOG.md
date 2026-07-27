@@ -1,5 +1,12 @@
 # changelog
 
+## v2.9.7
+
+- `:emoji:` inside a message now renders for everyone, in every chat. emoji are resolved when the message is sent rather than when it's read, so one from another nest — or used in a DM, which has no nest at all — no longer falls back to plain text.
+- kick and ban members from the member list. a ban survives the next invite link; a kick doesn't.
+- free-form cropping: drag a box anywhere on the image instead of picking a fixed ratio.
+- a message that never sent can finally be deleted. it only ever existed on your device, but "delete" asked the server about an id it had never seen, so nothing happened and the outbox kept retrying forever.
+
 ## v2.9.6
 
 - custom emoji now render for everyone who can see the message, not just people in the nest that owns them. the server resolves what a message references and sends it along, so an outsider sees the image instead of a blank square.
