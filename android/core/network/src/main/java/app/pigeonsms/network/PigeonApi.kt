@@ -636,6 +636,49 @@ class PigeonApi(
         client.get("$baseUrl/spaces/invites/${q(code)}/preview") { auth() }.unwrap<InvitePreviewResponse>()
 
 
+    // --- v3: bots you own ---
+    suspend fun bots() = client.get("$baseUrl/bots") { auth() }.unwrap<BotsResponse>().bots
+
+    /** The raw token comes back exactly once — show it, then it is gone. */
+    suspend fun createBot(name: String, description: String?) = client.post("$baseUrl/bots") {
+        auth(); contentType(ContentType.Application.Json)
+        setBody(buildJsonObject {
+            put("name", name)
+            if (!description.isNullOrBlank()) put("description", description)
+        })
+    }.unwrap<BotCreatedResponse>()
+
+    suspend fun updateBot(botId: String, fields: Map<String, String?>) =
+        client.patch("$baseUrl/bots/$botId") {
+            auth(); contentType(ContentType.Application.Json)
+            setBody(JsonObject(fields.mapValues { JsonPrimitive(it.value) }))
+        }.unwrap<BotResponse>().bot
+
+    suspend fun rotateBotToken(botId: String) =
+        client.post("$baseUrl/bots/$botId/token") { auth() }.unwrap<BotTokenResponse>()
+
+    suspend fun deleteBot(botId: String) {
+        client.delete("$baseUrl/bots/$botId") { auth() }.unwrap<OkResponse>()
+    }
+
+    suspend fun botCommands(botId: String) =
+        client.get("$baseUrl/bots/$botId/commands") { auth() }.unwrap<BotCommandsResponse>().commands
+
+    suspend fun botSpaces(botId: String) =
+        client.get("$baseUrl/bots/$botId/spaces") { auth() }.unwrap<BotSpacesResponse>().spaces
+
+    /** Add the bot to a nest you own or manage. */
+    suspend fun botJoinSpace(botId: String, spaceId: String) {
+        client.post("$baseUrl/bots/$botId/join") {
+            auth(); contentType(ContentType.Application.Json)
+            setBody(buildJsonObject { put("space_id", spaceId) })
+        }.unwrap<JsonObject>()
+    }
+
+    suspend fun botLeaveSpace(botId: String, spaceId: String) {
+        client.delete("$baseUrl/bots/$botId/spaces/$spaceId") { auth() }.unwrap<OkResponse>()
+    }
+
     // --- v3: bot slash commands ---
     /** Commands usable in this channel: every bot in the nest, or the peer bot in a DM. */
     suspend fun channelCommands(channelId: String) =

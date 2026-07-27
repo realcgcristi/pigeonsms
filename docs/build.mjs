@@ -26,13 +26,13 @@ function shell(page, body) {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${page.title} — PigeonSMS docs</title>
 <meta name="theme-color" content="#16131A">
-<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon.png" type="image/png">
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
 <header class="top">
   <a class="brand" href="/">
-    <img src="/icon.svg" alt="" width="28" height="28">
+    <img src="/logo.png" alt="" width="30" height="30">
     <span>pigeonsms <em>docs</em></span>
   </a>
   <nav>${nav}</nav>

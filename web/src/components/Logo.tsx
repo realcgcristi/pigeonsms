@@ -2,11 +2,14 @@ import type { SVGProps } from 'react'
 
 export function Logo({ size = 96, className }: { size?: number; className?: string }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 108 108" className={className} aria-hidden="true">
-      <rect width="108" height="108" rx="24" fill="#FF9D76" />
-      <path d="M26 56 L84 30 L60 80 L51 62 Z" fill="#2A150C" />
-      <path d="M51 62 L84 30 L56 58 Z" fill="#4A2818" />
-    </svg>
+    <img
+      src="/logo.png"
+      width={size}
+      height={size}
+      alt=""
+      className={className}
+      style={{ borderRadius: Math.round(size * 0.235) }}
+    />
   )
 }
 

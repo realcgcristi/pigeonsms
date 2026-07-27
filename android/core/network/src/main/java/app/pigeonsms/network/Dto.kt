@@ -296,6 +296,63 @@ data class SpaceMemberDto(
     val is_bot: Boolean = false,
 )
 
+
+/** A bot you own (v3). The raw token only ever rides on create/rotate. */
+@Serializable
+data class BotDto(
+    val id: String,
+    val user_id: String = "",
+    val owner_id: String = "",
+    val name: String = "",
+    val description: String? = null,
+    val interactions_url: String? = null,
+    val public: Boolean = false,
+    val dm_enabled: Boolean = true,
+    val created_at: Long = 0,
+    val updated_at: Long = 0,
+    val username: String? = null,
+    val display_name: String? = null,
+    val avatar_key: String? = null,
+    val avatar_square_key: String? = null,
+)
+
+@Serializable data class BotsResponse(val bots: List<BotDto> = emptyList())
+@Serializable data class BotResponse(val bot: BotDto, val signing_secret: String? = null)
+
+@Serializable
+data class BotCreatedResponse(
+    val bot: BotDto,
+    val token: String = "",
+    val signing_secret: String? = null,
+)
+
+@Serializable data class BotTokenResponse(val token: String = "", val signing_secret: String? = null)
+
+@Serializable
+data class BotCommandDto(
+    val id: String,
+    val bot_id: String = "",
+    val space_id: String? = null,
+    val name: String = "",
+    val description: String = "",
+    val options: List<BotCommandOptionDto> = emptyList(),
+    val dm_enabled: Boolean = true,
+    val created_at: Long = 0,
+)
+
+@Serializable data class BotCommandsResponse(val commands: List<BotCommandDto> = emptyList())
+
+@Serializable
+data class BotSpaceDto(
+    val id: String,
+    val name: String = "",
+    val icon_key: String? = null,
+    val icon_square_key: String? = null,
+    val joined_at: Long = 0,
+)
+
+@Serializable data class BotSpacesResponse(val spaces: List<BotSpaceDto> = emptyList())
+
 /** One option a bot's slash command accepts (2.9.9 / v3). */
 @Serializable
 data class BotCommandOptionDto(

@@ -81,6 +81,7 @@ import app.pigeonsms.ui.profile.EditProfileScreen
 import app.pigeonsms.ui.profile.ProfileScreen
 import app.pigeonsms.ui.profile.ProfileViewModel
 import app.pigeonsms.ui.settings.AboutScreen
+import app.pigeonsms.ui.settings.BotsScreen
 import app.pigeonsms.ui.settings.AppIconScreen
 import app.pigeonsms.ui.settings.AppearanceScreen
 import app.pigeonsms.ui.settings.BlockedScreen
@@ -293,6 +294,7 @@ fun AppShell(session: LocalSession) {
                     onNotifications = { nav.navigate("notifications") },
                     onNests = { nav.navigate("nestsettings") },
                     onAbout = { nav.navigate("about") },
+                    onBots = { nav.navigate("bots") },
                     onSignOut = { app.viewModelScopeSignOut() },
                 )
             }
@@ -390,6 +392,7 @@ fun AppShell(session: LocalSession) {
                     pigeonVm { c, _ -> NestEmojiViewModel(c.socialRepository) }
                 NestEmojiScreen(spaceId = spaceId, vm = emojiVm, onBack = { nav.popBackStack() })
             }
+            composable("bots") { BotsScreen(onBack = { nav.popBackStack() }) }
             composable("about") {
                 AboutScreen(username = session.username, onBack = { nav.popBackStack() })
             }

@@ -29,6 +29,7 @@ import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.SmartToy
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Person
@@ -123,6 +124,7 @@ fun SettingsScreen(
     onNotifications: () -> Unit,
     onNests: () -> Unit,
     onAbout: () -> Unit,
+    onBots: () -> Unit = {},
     onSignOut: () -> Unit,
 ) {
     val skin = LocalUiSkin.current
@@ -194,6 +196,8 @@ fun SettingsScreen(
 
             Group("app")
             GroupCard {
+                MenuRow(Icons.Outlined.SmartToy, "bots", "slash commands for your nests", onBots)
+                RowDivider()
                 MenuRow(Icons.Outlined.Info, "about", "version, creator, updates", onAbout)
             }
 
