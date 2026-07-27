@@ -1,0 +1,24 @@
+.call { background: radial-gradient(120% 60% at 50% 0%, color-mix(in srgb, var(--accent) 14%, transparent), var(--ink)); }
+.call__stage { flex: 1 1 auto; display: grid; place-items: center; gap: var(--sp-m); }
+.call__video { width: min(90%, 320px); border-radius: var(--r-card); background: var(--surface); aspect-ratio: 3 / 4; object-fit: cover; }
+.call__hint { color: var(--text-tertiary); font-size: 13px; }
+.call__controls { display: flex; justify-content: center; gap: var(--sp-xl); padding: var(--sp-xl) 0 calc(var(--sp-xxl) + env(safe-area-inset-bottom)); }
+.call__waiting { display: grid; place-items: center; gap: var(--sp-m); }
+.call__peers {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: var(--sp-m);
+  width: 100%;
+  padding: var(--sp-l);
+}
+.call__peer { display: grid; place-items: center; gap: var(--sp-s); }
+.call__peer-name { font-size: 13px; color: var(--text-secondary); }
+.call__video--self {
+  position: absolute;
+  right: var(--sp-l);
+  bottom: 120px;
+  width: 96px;
+  aspect-ratio: 3 / 4;
+  border-radius: var(--r-chip);
+  border: 1px solid var(--outline);
+}
