@@ -1,0 +1,818 @@
+package app.pigeonsms.ui.chat
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import app.pigeonsms.data.ChatRepository
+import app.pigeonsms.data.PinEvent
+import app.pigeonsms.data.SocialRepository
+import app.pigeonsms.db.MessageDao
+import app.pigeonsms.db.MessageEntity
+import app.pigeonsms.network.ChannelCommandDto
+import app.pigeonsms.network.MessageDto
+import app.pigeonsms.network.SpaceEmojiDto
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+
+/** One row in the composer's @mention autocomplete popup. */
+data class MentionCandidate(
+    val id: String,
+    val username: String,
+    val displayName: String? = null,
+    val avatarKey: String? = null,
+)
+
+data class ChatUiState(
+    val initialLoading: Boolean = true,
+    val loadingOlder: Boolean = false,
+    val canLoadOlder: Boolean = true,
+    val sending: Boolean = false,
+    val composerClearToken: Int = 0,
+    val typingUser: String? = null,
+    val replyTo: MessageEntity? = null,
+    val editing: MessageEntity? = null,
+    val searchOpen: Boolean = false,
+    val searchResults: List<MessageDto> = emptyList(),
+    val searching: Boolean = false,
+    /** Conversation-info screen: offline Room LIKE search over cached messages. */
+    val localSearchResults: List<MessageEntity> = emptyList(),
+    val localSearching: Boolean = false,
+    val pinsOpen: Boolean = false,
+    val pins: List<MessageDto> = emptyList(),
+    val pinnedMessageIds: Set<String> = emptySet(),
+    val superPin: MessageDto? = null,
+    val loadingPins: Boolean = false,
+    val busyMessageIds: Set<String> = emptySet(),
+    val error: String? = null,
+    val isAdmin: Boolean = false,
+    /** Highest seq any other member has read — drives the "seen" marker. */
+    val peerReadSeq: Long = 0,
+    /** DM peer's last-online epoch millis (null for group channels or unknown) — drives conversation-info presence. */
+    val peerLastOnline: Long? = null,
+    /** Slash-command palette (v3): every bot command usable in this channel. */
+    val commands: List<ChannelCommandDto> = emptyList(),
+    /** Filtered to what the composer's "/…" prefix matches right now. */
+    val commandMatches: List<ChannelCommandDto> = emptyList(),
+    val runningCommand: Boolean = false,
+    /** @mention autocomplete: space members (space channels) or the DM peer. */
+    val mentionCandidates: List<MentionCandidate> = emptyList(),
+    /** @everyone is space-admin-only server side — only offer it when it would succeed. */
+    val canMentionEveryone: Boolean = false,
+    /**
+     * Roster for this channel (space members, or the DM peer) used by the
+     * "seen by" info action. Loaded eagerly for spaces; [channelMemberCount]
+     * gates showing the action to small nests only. -1 = unknown/not loaded.
+     */
+    val channelMembers: List<MentionCandidate> = emptyList(),
+    val channelMemberCount: Int = -1,
+)
+
+class ChatViewModel(
+    private val repo: ChatRepository,
+    private val channelId: String,
+    private val selfId: String,
+    private val selfName: String,
+    isAdmin: Boolean,
+    private val messageDao: MessageDao,
+    private val social: SocialRepository? = null,
+    private val isSpace: Boolean = false,
+) : ViewModel() {
+    val messages: StateFlow<List<MessageEntity>> =
+        repo.stream(channelId).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /** Every cached image/video attachment in this conversation, newest first.
+     *  Deduped by id, mirroring [ChatRepository.stream] — otherwise a media message
+     *  can appear twice during the pending->sent window (local optimistic row +
+     *  server-confirmed row before the outbox reconciles them). */
+    val media: StateFlow<List<MessageEntity>> =
+        messageDao.mediaStream(channelId).map { list -> list.distinctBy { it.id } }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    private val _ui = MutableStateFlow(ChatUiState(isAdmin = isAdmin))
+    val ui: StateFlow<ChatUiState> = _ui
+
+    /**
+     * This nest's custom emoji + stickers (2.9.5), for the reaction picker and for
+     * rendering `custom:<id>` reactions others have already left.
+     *
+     * Empty for DMs — custom emoji belong to a nest, and a DM has none. Loaded
+     * once per conversation and served from the repository's cache thereafter, so
+     * opening a chat costs at most one extra request.
+     */
+    private val _customEmoji = MutableStateFlow<List<SpaceEmojiDto>>(emptyList())
+    val customEmoji: StateFlow<List<SpaceEmojiDto>> = _customEmoji
+
+    /** Resolve a `custom:<id>` reaction to the emoji it names, if we know it. */
+    fun emojiById(id: String): SpaceEmojiDto? = _customEmoji.value.firstOrNull { it.id == id }
+
+    private var searchJob: Job? = null
+    private var localSearchJob: Job? = null
+    private var mentionJob: Job? = null
+    private var mentionsLoaded = false
+    private var typingClearJob: Job? = null
+    private var lastTypingSentAt = 0L
+
+    init {
+        refresh()
+        viewModelScope.launch { runCatching { repo.flushOutbox(channelId) } }
+        refreshPins(showLoading = false)
+        refreshSuperPin()
+        viewModelScope.launch {
+            // eager DM-peer presence for the conversation-info header
+            runCatching { social?.dms()?.firstOrNull { it.channel_id == channelId }?.peer?.last_online }
+                .getOrNull()?.let { last -> _ui.update { it.copy(peerLastOnline = last) } }
+        }
+        // eager channel roster for the "seen by" info action (member avatars + count)
+        loadChannelRoster()
+        loadCustomEmoji()
+        loadChannelIndex()
+        viewModelScope.launch {
+            // Merge server-resolved emoji (2.9.6) so messages referencing a nest
+            // you're not in still render their images.
+            repo.seenEmoji.collect { seen ->
+                if (seen.isNotEmpty()) {
+                    _customEmoji.update { mine ->
+                        val known = mine.map { it.id }.toSet()
+                        mine + seen.values.filterNot { it.id in known }
+                    }
+                }
+            }
+        }
+        viewModelScope.launch {
+            repo.reads.collect { all ->
+                val peerSeq = all[channelId]?.filterKeys { it != selfId }?.values?.maxOrNull() ?: 0L
+                if (peerSeq != _ui.value.peerReadSeq) _ui.update { it.copy(peerReadSeq = peerSeq) }
+            }
+        }
+        viewModelScope.launch {
+            // Other members' pin/super-pin changes arrive over the gateway;
+            // apply them so the pins tab and banner don't go stale.
+            repo.pinEvents.collect { event ->
+                if (event.channelId != channelId) return@collect
+                when (event) {
+                    is PinEvent.Pinned -> {
+                        _ui.update { it.copy(pinnedMessageIds = it.pinnedMessageIds + event.messageId) }
+                        if (_ui.value.pinsOpen) refreshPins(showLoading = false)
+                    }
+                    is PinEvent.Unpinned -> _ui.update { state ->
+                        state.copy(
+                            pinnedMessageIds = state.pinnedMessageIds - event.messageId,
+                            pins = state.pins.filterNot { it.id == event.messageId },
+                        )
+                    }
+                    is PinEvent.SuperPinSet -> _ui.update { it.copy(superPin = event.message) }
+                    is PinEvent.SuperPinRemoved -> _ui.update { it.copy(superPin = null) }
+                }
+            }
+        }
+    }
+
+    /**
+     * Load the nest's emoji set. Best-effort and silent: a nest with no emoji, a
+     * DM, or a failed request all mean "no custom emoji", and none of those should
+     * surface an error in a chat screen the user opened to read messages.
+     */
+    private fun loadCustomEmoji() {
+        val repository = social ?: return
+        viewModelScope.launch {
+            // Every nest's emoji, not just this channel's: emoji are usable
+            // anywhere as of 2.9.5, including DMs (which have no nest at all).
+            runCatching { repository.myEmojis() }
+                .getOrNull()
+                ?.let { emoji -> _customEmoji.value = emoji }
+        }
+    }
+
+    /**
+     * Load this channel's slash commands once, lazily — the first time the user
+     * types "/" rather than on every chat open, since most channels have no bots.
+     */
+    fun loadCommands() {
+        if (_ui.value.commands.isNotEmpty()) return
+        viewModelScope.launch {
+            val loaded = repo.channelCommands(channelId)
+            _ui.update { it.copy(commands = loaded) }
+        }
+    }
+
+    /** Filter the palette as the composer text changes. Null query closes it. */
+    fun filterCommands(query: String?) {
+        if (query == null) {
+            if (_ui.value.commandMatches.isNotEmpty()) _ui.update { it.copy(commandMatches = emptyList()) }
+            return
+        }
+        loadCommands()
+        val needle = query.trim().lowercase()
+        val matches = _ui.value.commands.filter { it.name.startsWith(needle) }
+        _ui.update { it.copy(commandMatches = matches) }
+    }
+
+    /**
+     * Run "/name key:value …". Bare values fill the required options in order so
+     * `/echo hello` works as well as `/echo text:hello`.
+     */
+    fun runCommand(raw: String) {
+        val body = raw.trim().removePrefix("/")
+        if (body.isBlank()) return
+        val name = body.substringBefore(' ').lowercase()
+        val command = _ui.value.commands.firstOrNull { it.name == name } ?: run {
+            _ui.update { it.copy(error = "no /$name here") }
+            return
+        }
+        val rest = body.substringAfter(' ', "").trim()
+        val options = parseCommandOptions(command, rest)
+        _ui.update { it.copy(runningCommand = true, commandMatches = emptyList()) }
+        viewModelScope.launch {
+            runCatching { repo.runCommand(channelId, command.name, options, command.bot.id) }
+                .onFailure { e -> _ui.update { it.copy(error = e.message ?: "that command failed") } }
+            _ui.update {
+                it.copy(runningCommand = false, composerClearToken = it.composerClearToken + 1)
+            }
+        }
+    }
+
+    /** Send a nest sticker (2.9.5). Errors surface in the normal chat error slot. */
+    fun sendSticker(stickerId: String) {
+        viewModelScope.launch {
+            runCatching { repo.sendSticker(channelId, stickerId) }
+                .onFailure { e ->
+                    _ui.update { it.copy(error = e.message ?: "couldn't send that sticker") }
+                }
+        }
+    }
+
+    /**
+     * Resolve a tapped `#channel` to (id, name) within this conversation's nest
+     * (2.9.5). Returns null when the name doesn't match a channel the user can
+     * see, so an unknown #word simply does nothing rather than erroring.
+     */
+    fun resolveChannel(name: String): Pair<String, String>? {
+        val wanted = name.trim().lowercase()
+        return _channelIndex.value.firstOrNull { it.second.lowercase() == wanted }
+    }
+
+    /** Channels of this nest, cached for #mention resolution. */
+    private val _channelIndex = MutableStateFlow<List<Pair<String, String>>>(emptyList())
+
+    private fun loadChannelIndex() {
+        val repository = social ?: return
+        if (!isSpace) return
+        viewModelScope.launch {
+            runCatching {
+                val space = repository.cachedSpaces().firstOrNull { s -> s.channels.any { it.id == channelId } }
+                    ?: repository.spaces().firstOrNull { s -> s.channels.any { it.id == channelId } }
+                space?.channels?.map { it.id to (it.name ?: "") }.orEmpty()
+            }.getOrNull()?.let { _channelIndex.value = it }
+        }
+    }
+
+    /** Accept a nest invite tapped in a message (2.9.5). */
+    fun joinFromInvite(code: String) {
+        val repository = social ?: return
+        viewModelScope.launch {
+            runCatching { repository.joinSpace(code) }
+                .onFailure { e ->
+                    _ui.update { it.copy(error = e.message ?: "couldn't join that nest") }
+                }
+        }
+    }
+
+    fun mediaUrl(key: String) = repo.mediaUrl(key)
+
+    fun isOwn(message: MessageEntity): Boolean =
+        message.authorId == selfId || message.authorId == "me"
+
+    fun refresh() {
+        _ui.update { it.copy(initialLoading = messages.value.isEmpty(), error = null) }
+        viewModelScope.launch {
+            runCatching { repo.sync(channelId) }
+                .onFailure { _ui.update { state -> state.copy(error = "couldn't refresh messages") } }
+            _ui.update { it.copy(initialLoading = false) }
+        }
+    }
+
+    /**
+     * Composer send. [ttl] (seconds) marks a disappearing message, [sendAt] (epoch ms)
+     * schedules it, and [encrypted] is the composer's per-message E2EE intent (already
+     * gated on the beta flag, default OFF, in the UI layer) — the repository still
+     * verifies keys are established before actually encrypting. Edits ignore all three.
+     */
+    fun send(text: String, ttl: Long? = null, sendAt: Long? = null, encrypted: Boolean = false) {
+        val content = text.trim()
+        val editing = _ui.value.editing
+        if (editing != null) {
+            if (content.isBlank()) {
+                _ui.update { it.copy(error = "a message can't be empty") }
+                return
+            }
+            if (content == editing.content.trim()) {
+                _ui.update { it.copy(editing = null) }
+                return
+            }
+            if (!beginMessageAction(editing.id)) return
+            _ui.update { it.copy(sending = true, error = null) }
+            viewModelScope.launch {
+                runCatching { repo.edit(editing.id, content) }
+                    .onSuccess {
+                        _ui.update { state ->
+                            state.copy(editing = null, composerClearToken = state.composerClearToken + 1)
+                        }
+                    }
+                    .onFailure { _ui.update { state -> state.copy(error = "couldn't edit message") } }
+                finishMessageAction(editing.id)
+                _ui.update { it.copy(sending = false) }
+            }
+            return
+        }
+
+        if (content.isBlank() || _ui.value.sending) return
+        val reply = _ui.value.replyTo?.id
+        _ui.update { it.copy(sending = true, error = null) }
+        viewModelScope.launch {
+            runCatching { repo.send(channelId, content, reply, null, selfName, ttl = ttl, sendAt = sendAt, e2eeEnabled = encrypted, isDm = !isSpace) }
+                .onSuccess {
+                    _ui.update { state ->
+                        state.copy(replyTo = null, composerClearToken = state.composerClearToken + 1)
+                    }
+                    runCatching { repo.flushOutbox(channelId) }
+                        .onFailure { _ui.update { state -> state.copy(error = "message queued for retry") } }
+                }
+                .onFailure { _ui.update { state -> state.copy(error = "couldn't queue message") } }
+            _ui.update { it.copy(sending = false) }
+        }
+    }
+
+    /**
+     * Send a large attachment without ever holding it in memory (2.9.5).
+     *
+     * Used for anything past the resumable threshold; [openStream] re-opens the
+     * picked `Uri` so the uploader can stream and resume.
+     */
+    fun sendStreamedAttachment(
+        openStream: () -> java.io.InputStream,
+        filename: String,
+        type: String,
+        totalSize: Long,
+        caption: String,
+    ) {
+        if (_ui.value.sending) return
+        val reply = _ui.value.replyTo?.id
+        val repository = social
+        if (repository == null) {
+            _ui.update { it.copy(error = "can't upload right now") }
+            return
+        }
+        viewModelScope.launch {
+            _ui.update { it.copy(sending = true, error = null) }
+            runCatching {
+                repo.sendStreamedAttachment(
+                    channelId = channelId,
+                    social = repository,
+                    openStream = openStream,
+                    filename = filename,
+                    type = type,
+                    totalSize = totalSize,
+                    caption = caption,
+                    replyTo = reply,
+                    selfName = selfName,
+                    isDm = !isSpace,
+                )
+            }.onSuccess {
+                _ui.update { it.copy(sending = false, replyTo = null, composerClearToken = it.composerClearToken + 1) }
+            }.onFailure { e ->
+                _ui.update { it.copy(sending = false, error = e.message ?: "couldn't send that file") }
+            }
+        }
+    }
+
+    fun sendAttachment(
+        bytes: ByteArray,
+        filename: String,
+        type: String,
+        caption: String,
+        ttl: Long? = null,
+        sendAt: Long? = null,
+        encrypted: Boolean = false,
+    ) {
+        if (_ui.value.sending) return
+        val reply = _ui.value.replyTo?.id
+        viewModelScope.launch {
+            _ui.update { it.copy(sending = true, error = null) }
+            runCatching {
+                val attachment = repo.uploadFile(bytes, filename, type)
+                repo.send(channelId, caption.trim(), reply, attachment, selfName, ttl = ttl, sendAt = sendAt, e2eeEnabled = encrypted, isDm = !isSpace)
+            }.onSuccess {
+                _ui.update {
+                    it.copy(replyTo = null, composerClearToken = it.composerClearToken + 1)
+                }
+                runCatching { repo.flushOutbox(channelId) }
+                    .onFailure { _ui.update { state -> state.copy(error = "message queued for retry") } }
+            }.onFailure {
+                _ui.update { it.copy(error = "couldn't upload attachment") }
+            }
+            _ui.update { it.copy(sending = false) }
+        }
+    }
+
+    fun setReply(message: MessageEntity?) {
+        if (message != null && (message.deleted || message.state != "SENT")) return
+        _ui.update { it.copy(replyTo = message, editing = null) }
+    }
+
+    fun setEditing(message: MessageEntity?) {
+        if (message != null && (!isOwn(message) || message.deleted || message.state != "SENT")) return
+        _ui.update { it.copy(editing = message, replyTo = null, error = null) }
+    }
+
+    fun delete(message: MessageEntity) {
+        // 2.9.7: a message that never sent lives only on this device, and the
+        // outbox will keep retrying it forever. Deleting one used to be impossible
+        // — this guard returned early and nothing happened — so drop the local row
+        // and its outbox entry instead of asking the server about an id it has
+        // never seen.
+        if (message.state != "SENT") {
+            if (!isOwn(message)) return
+            viewModelScope.launch {
+                runCatching { repo.discardUnsent(message) }
+                    .onFailure { _ui.update { it.copy(error = "couldn't discard that message") } }
+                _ui.update { state ->
+                    state.copy(
+                        editing = state.editing?.takeUnless { it.id == message.id },
+                        replyTo = state.replyTo?.takeUnless { it.id == message.id },
+                    )
+                }
+            }
+            return
+        }
+        if ((!isOwn(message) && !_ui.value.isAdmin) || message.deleted) return
+        if (!beginMessageAction(message.id)) return
+        viewModelScope.launch {
+            runCatching { repo.delete(message.id) }
+                .onSuccess {
+                    _ui.update { state ->
+                        state.copy(
+                            editing = state.editing?.takeUnless { it.id == message.id },
+                            replyTo = state.replyTo?.takeUnless { it.id == message.id },
+                        )
+                    }
+                }
+                .onFailure { _ui.update { state -> state.copy(error = "couldn't delete message") } }
+            finishMessageAction(message.id)
+        }
+    }
+
+    fun toggleReaction(message: MessageEntity, emoji: String, on: Boolean) {
+        if (message.deleted || message.state != "SENT" || emoji.isBlank()) return
+        if (!beginMessageAction(message.id)) return
+        viewModelScope.launch {
+            runCatching { repo.react(message.id, emoji, on) }
+                .onFailure { _ui.update { state -> state.copy(error = "couldn't update reaction") } }
+            finishMessageAction(message.id)
+        }
+    }
+
+    fun sendPoll(question: String, options: List<String>, anonymous: Boolean) {
+        viewModelScope.launch {
+            runCatching { repo.sendPoll(channelId, question, options, anonymous) }
+                .onFailure { e -> _ui.update { state -> state.copy(error = e.message ?: "couldn't create poll") } }
+        }
+    }
+
+    fun sendEvent(title: String, startsAt: Long, endsAt: Long?, location: String?, description: String?) {
+        viewModelScope.launch {
+            runCatching { repo.sendEvent(channelId, title, startsAt, endsAt, location, description) }
+                .onFailure { e -> _ui.update { state -> state.copy(error = e.message ?: "couldn't create event") } }
+        }
+    }
+
+    fun votePoll(message: MessageEntity, optionId: String?) {
+        if (message.deleted || message.state != "SENT") return
+        if (!beginMessageAction(message.id)) return
+        viewModelScope.launch {
+            runCatching { repo.votePoll(message.id, optionId) }
+                .onFailure { _ui.update { state -> state.copy(error = "couldn't update vote") } }
+            finishMessageAction(message.id)
+        }
+    }
+
+    fun retry(message: MessageEntity) {
+        val nonce = message.nonce ?: return
+        if (message.state != "FAILED" || !beginMessageAction(message.id)) return
+        viewModelScope.launch {
+            runCatching { repo.retry(nonce, channelId) }
+                .onFailure { _ui.update { state -> state.copy(error = "couldn't retry message") } }
+            finishMessageAction(message.id)
+        }
+    }
+
+    fun typing() {
+        val now = System.currentTimeMillis()
+        if (now - lastTypingSentAt < 3_000) return
+        lastTypingSentAt = now
+        viewModelScope.launch { runCatching { repo.typing(channelId) } }
+    }
+
+    fun loadOlder() {
+        val state = _ui.value
+        if (state.loadingOlder || !state.canLoadOlder || state.initialLoading || messages.value.isEmpty()) return
+        _ui.update { it.copy(loadingOlder = true) }
+        viewModelScope.launch {
+            runCatching { repo.loadOlder(channelId) }
+                .onSuccess { foundMore -> _ui.update { state -> state.copy(canLoadOlder = foundMore) } }
+                .onFailure { _ui.update { state -> state.copy(error = "couldn't load older messages") } }
+            _ui.update { it.copy(loadingOlder = false) }
+        }
+    }
+
+    fun openSearch() = _ui.update { it.copy(searchOpen = true) }
+
+    fun closeSearch() {
+        searchJob?.cancel()
+        _ui.update { it.copy(searchOpen = false, searchResults = emptyList(), searching = false) }
+    }
+
+    fun search(query: String) {
+        searchJob?.cancel()
+        val q = query.trim()
+        if (q.length < 2) {
+            _ui.update { it.copy(searchResults = emptyList(), searching = false) }
+            return
+        }
+        searchJob = viewModelScope.launch {
+            delay(250)
+            _ui.update { it.copy(searching = true) }
+            runCatching { repo.search(channelId, q) }
+                .onSuccess { results -> _ui.update { state -> state.copy(searchResults = results) } }
+                .onFailure { _ui.update { state -> state.copy(error = "couldn't search messages") } }
+            _ui.update { it.copy(searching = false) }
+        }
+    }
+
+    /**
+     * Space-wide FTS5 search passthrough (2.8.0) to [ChatRepository.searchSpace] →
+     * [app.pigeonsms.network.PigeonApi.searchSpace]. Paginate with [before]; the server
+     * skips encrypted messages. Kept as a thin repo passthrough so callers that already
+     * hold a spaceId (e.g. the nest search screen) can route through the repository layer.
+     */
+    suspend fun searchSpace(spaceId: String, query: String, before: Long? = null) =
+        repo.searchSpace(spaceId, query.trim(), before)
+
+    /** Debounced Room LIKE search over the locally cached history (conversation info screen). */
+    fun localSearch(query: String) {
+        localSearchJob?.cancel()
+        val q = query.trim()
+        if (q.length < 2) {
+            _ui.update { it.copy(localSearchResults = emptyList(), localSearching = false) }
+            return
+        }
+        localSearchJob = viewModelScope.launch {
+            delay(250)
+            _ui.update { it.copy(localSearching = true) }
+            val escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            runCatching { messageDao.searchLocal(channelId, escaped) }
+                .onSuccess { results -> _ui.update { state -> state.copy(localSearchResults = results) } }
+                .onFailure { _ui.update { state -> state.copy(error = "couldn't search messages") } }
+            _ui.update { it.copy(localSearching = false) }
+        }
+    }
+
+    fun clearLocalSearch() {
+        localSearchJob?.cancel()
+        _ui.update { it.copy(localSearchResults = emptyList(), localSearching = false) }
+    }
+
+    fun loadPins() {
+        _ui.update { it.copy(pinsOpen = true) }
+        refreshPins(showLoading = true)
+    }
+
+    private fun refreshPins(showLoading: Boolean) {
+        if (showLoading) _ui.update { it.copy(loadingPins = true) }
+        viewModelScope.launch {
+            runCatching { repo.pins(channelId) }
+                .onSuccess { pins ->
+                    _ui.update { state ->
+                        state.copy(
+                            pins = pins,
+                            pinnedMessageIds = pins.map { it.id }.toSet(),
+                        )
+                    }
+                }
+                .onFailure {
+                    if (showLoading) {
+                        _ui.update { state -> state.copy(error = "couldn't load pinned messages") }
+                    }
+                }
+            if (showLoading) _ui.update { it.copy(loadingPins = false) }
+        }
+    }
+
+    fun closePins() = _ui.update { it.copy(pinsOpen = false) }
+
+    fun refreshSuperPin() = viewModelScope.launch {
+        runCatching { repo.superPin(channelId) }.onSuccess { pin ->
+            _ui.update { it.copy(superPin = pin?.let { value -> value.message.takeUnless { value.dismissed } }) }
+        }
+    }
+
+    fun setSuperPin(message: MessageEntity, on: Boolean) = viewModelScope.launch {
+        runCatching {
+            if (on) repo.setSuperPin(message.id) else repo.removeSuperPin(channelId)
+        }.onSuccess { refreshSuperPin() }
+            .onFailure { _ui.update { it.copy(error = "couldn't update Super Pin") } }
+    }
+
+    fun dismissSuperPin() = viewModelScope.launch {
+        runCatching { repo.dismissSuperPin(channelId) }
+            .onSuccess { _ui.update { it.copy(superPin = null) } }
+    }
+
+    fun pin(message: MessageEntity, on: Boolean) {
+        if (message.deleted || message.state != "SENT") return
+        setPin(message.id, on)
+    }
+
+    fun unpin(messageId: String) = setPin(messageId, false)
+
+    private fun setPin(messageId: String, on: Boolean) {
+        if (messageId.isBlank() || !beginMessageAction(messageId)) return
+        viewModelScope.launch {
+            runCatching { repo.pin(messageId, on) }
+                .onSuccess {
+                    _ui.update { state ->
+                        state.copy(
+                            pinnedMessageIds = if (on) {
+                                state.pinnedMessageIds + messageId
+                            } else {
+                                state.pinnedMessageIds - messageId
+                            },
+                            pins = if (on) state.pins else state.pins.filterNot { it.id == messageId },
+                        )
+                    }
+                    if (_ui.value.pinsOpen) refreshPins(showLoading = false)
+                }
+                .onFailure { _ui.update { state -> state.copy(error = "couldn't update pin") } }
+            finishMessageAction(messageId)
+        }
+    }
+
+    /**
+     * Lazily fetch @mention candidates the first time the user types "@".
+     * Space channels: members of the space that owns this channel (spaces list →
+     * spaceId lookup, since only the channel id is routed here). DMs: the peer.
+     * Intentionally NOT the Room message cache — cached authorName is
+     * display_name ?: username, and the backend only accepts real usernames.
+     */
+    fun loadMentionCandidates() {
+        val social = social ?: return
+        if (mentionsLoaded || mentionJob?.isActive == true) return
+        mentionJob = viewModelScope.launch {
+            runCatching {
+                if (isSpace) {
+                    val space = social.spaces().firstOrNull { s -> s.channels.any { it.id == channelId } }
+                        ?: return@runCatching
+                    val members = social.spaceMembers(space.id)
+                    _ui.update { state ->
+                        state.copy(
+                            mentionCandidates = members.map { m ->
+                                MentionCandidate(m.id, m.username, m.display_name, m.avatar_key)
+                            },
+                            // server rejects @everyone from non-admins — don't offer it
+                            canMentionEveryone = space.role == "owner" || space.role == "admin",
+                        )
+                    }
+                } else {
+                    val peer = social.dms().firstOrNull { it.channel_id == channelId }?.peer
+                        ?: return@runCatching
+                    _ui.update { state ->
+                        state.copy(
+                            mentionCandidates = listOf(
+                                MentionCandidate(peer.id, peer.username, peer.display_name, peer.avatar_key),
+                            ),
+                            peerLastOnline = peer.last_online,
+                        )
+                    }
+                }
+            }.onSuccess { mentionsLoaded = true }
+            // on failure stay unloaded so the next "@" retries silently
+        }
+    }
+
+    fun onTypingEvent(username: String) {
+        if (username.equals(selfName, ignoreCase = true)) return
+        typingClearJob?.cancel()
+        _ui.update { it.copy(typingUser = username) }
+        typingClearJob = viewModelScope.launch {
+            delay(4_000)
+            _ui.update { it.copy(typingUser = null) }
+        }
+    }
+
+    fun clearError() = _ui.update { it.copy(error = null) }
+
+    fun reportError(message: String) = _ui.update { it.copy(error = message) }
+
+    fun markRead(seq: Long) = viewModelScope.launch { runCatching { repo.markRead(channelId, seq) } }
+
+    /**
+     * Load the channel roster for the "seen by" action. Spaces → the owning
+     * space's members; DMs → the single peer. Runs once eagerly from init;
+     * on failure leaves [ChatUiState.channelMemberCount] at -1 so the info
+     * action falls back to "show for space channels generally".
+     */
+    private fun loadChannelRoster() {
+        val social = social ?: return
+        viewModelScope.launch {
+            runCatching {
+                if (isSpace) {
+                    val space = social.spaces().firstOrNull { s -> s.channels.any { it.id == channelId } }
+                        ?: return@runCatching
+                    val members = social.spaceMembers(space.id)
+                    _ui.update { state ->
+                        state.copy(
+                            channelMembers = members.map { m ->
+                                MentionCandidate(m.id, m.username, m.display_name, m.avatar_key)
+                            },
+                            channelMemberCount = members.size,
+                        )
+                    }
+                } else {
+                    val peer = social.dms().firstOrNull { it.channel_id == channelId }?.peer
+                        ?: return@runCatching
+                    _ui.update { state ->
+                        state.copy(
+                            channelMembers = listOf(
+                                MentionCandidate(peer.id, peer.username, peer.display_name, peer.avatar_key),
+                            ),
+                            channelMemberCount = 2,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Members who have read [message] — derived from the read map
+     * (channelId → userId → last-read seq): a member has seen the message when
+     * their last-read seq >= the message's seq. Self is excluded. Ordered as the
+     * roster is. Empty when no roster/read data is available yet.
+     */
+    fun seenBy(message: MessageEntity): List<MentionCandidate> {
+        if (message.seq <= 0L) return emptyList()
+        val channelReads = repo.reads.value[channelId] ?: emptyMap()
+        return _ui.value.channelMembers.filter { member ->
+            member.id != selfId && (channelReads[member.id] ?: 0L) >= message.seq
+        }
+    }
+
+    private fun beginMessageAction(id: String): Boolean {
+        if (id in _ui.value.busyMessageIds) return false
+        _ui.update { it.copy(busyMessageIds = it.busyMessageIds + id, error = null) }
+        return true
+    }
+
+    private fun finishMessageAction(id: String) {
+        _ui.update { it.copy(busyMessageIds = it.busyMessageIds - id) }
+    }
+}
+
+/**
+ * Split a slash-command argument string into the option map the API wants.
+ *
+ * `key:value` pairs win; anything left over fills the command's required
+ * options in declaration order, so both `/echo text:hi` and `/echo hi` work.
+ * Quoted values keep their spaces.
+ */
+internal fun parseCommandOptions(command: ChannelCommandDto, rest: String): Map<String, String> {
+    if (rest.isBlank()) return emptyMap()
+    val named = linkedMapOf<String, String>()
+    val bare = mutableListOf<String>()
+    val token = Regex("([a-z0-9_-]+):(\"[^\"]*\"|\\S+)|\"([^\"]*)\"|(\\S+)", RegexOption.IGNORE_CASE)
+    for (match in token.findAll(rest)) {
+        val (key, quotedValue, quotedBare, plain) = match.destructured
+        when {
+            key.isNotEmpty() -> named[key.lowercase()] = quotedValue.trim('"')
+            quotedBare.isNotEmpty() -> bare += quotedBare
+            plain.isNotEmpty() -> bare += plain
+        }
+    }
+    if (bare.isNotEmpty()) {
+        val unfilled = command.options.filter { it.name !in named }
+        val targets = unfilled.filter { it.required }.ifEmpty { unfilled }
+        targets.forEachIndexed { index, option ->
+            if (index == targets.lastIndex && index < bare.size) {
+                named[option.name] = bare.drop(index).joinToString(" ")
+            } else if (index < bare.size) {
+                named[option.name] = bare[index]
+            }
+        }
+    }
+    return named
+}
