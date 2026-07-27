@@ -1,0 +1,746 @@
+package app.pigeonsms.ui.chat
+
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.BitmapShader
+import android.graphics.Canvas as AndroidCanvas
+import android.graphics.Color as AndroidColor
+import android.graphics.ImageDecoder
+import android.graphics.Matrix
+import android.graphics.Paint
+import android.graphics.Shader
+import android.media.ExifInterface
+import android.os.Build
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.BlurOn
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Crop
+import androidx.compose.material.icons.rounded.Draw
+import androidx.compose.material.icons.rounded.EmojiEmotions
+import androidx.compose.material.icons.rounded.HighQuality
+import androidx.compose.material.icons.rounded.OpenWith
+import androidx.compose.material.icons.rounded.RotateRight
+import androidx.compose.material.icons.rounded.Send
+import androidx.compose.material.icons.rounded.TextFields
+import androidx.compose.material.icons.rounded.Undo
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import app.pigeonsms.design.theme.Corners
+import app.pigeonsms.design.theme.Dimens
+import app.pigeonsms.design.theme.Spacing
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
+import java.nio.ByteBuffer
+import kotlin.math.max
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+data class EditedImage(
+    val bytes: ByteArray,
+    val filename: String,
+    val type: String,
+    val sentOriginal: Boolean,
+)
+
+private enum class EditorTool { Move, Draw, Blur }
+
+/** Pixelation downscale factor and stroke width (fraction of the shorter image edge) for the blur tool. */
+private const val BLUR_PIXELATION = 16
+private const val BLUR_STROKE_FRACTION = 0.12f
+
+private enum class CropPreset(val label: String, val ratio: Float?) {
+    Original("free", null),
+    Square("1:1", 1f),
+    Portrait("4:5", 4f / 5f),
+    Landscape("16:9", 16f / 9f),
+}
+
+/**
+ * A free-form crop, stored in normalised 0..1 image coordinates (2.9.7).
+ *
+ * Normalised rather than pixels so it survives rotation and preview scaling
+ * without needing to be recomputed — the same rect means the same region of the
+ * picture whatever size it's being displayed at.
+ */
+private data class FreeCrop(
+    val left: Float = 0f,
+    val top: Float = 0f,
+    val right: Float = 1f,
+    val bottom: Float = 1f,
+) {
+    val isFull: Boolean get() = left <= 0.001f && top <= 0.001f && right >= 0.999f && bottom >= 0.999f
+    fun clampedTo(l: Float, tp: Float, r: Float, b: Float) = FreeCrop(
+        l.coerceIn(0f, r - MIN_SPAN),
+        tp.coerceIn(0f, b - MIN_SPAN),
+        r.coerceIn(l + MIN_SPAN, 1f),
+        b.coerceIn(tp + MIN_SPAN, 1f),
+    )
+
+    companion object {
+        /** Never let the box collapse to nothing — you can't grab it back. */
+        const val MIN_SPAN = 0.08f
+    }
+}
+
+private data class EditStroke(val points: List<Offset>, val blur: Boolean = false)
+private data class EditOverlay(val value: String, val x: Float, val y: Float, val emoji: Boolean)
+
+/**
+ * WhatsApp-style pre-send editor. Drawing and overlays are stored in normalized
+ * image coordinates, so output remains sharp regardless of preview size.
+ */
+@Composable
+fun ImageEditorDialog(
+    originalBytes: ByteArray,
+    filename: String,
+    type: String,
+    initialSendOriginal: Boolean = false,
+    onDismiss: () -> Unit,
+    onSend: (EditedImage, caption: String) -> Unit,
+) {
+    val decoded = remember(originalBytes) { decodeBitmap(originalBytes, 3_072) }
+    if (decoded == null) {
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text("Can't edit this image") },
+            text = { Text("The selected file isn't a supported bitmap image.") },
+            confirmButton = { TextButton(onClick = onDismiss) { Text("close") } },
+        )
+        return
+    }
+
+    var rotation by remember { mutableStateOf(0) }
+    var crop by remember { mutableStateOf(CropPreset.Original) }
+    // 2.9.7 free-form crop. Null until the user drags, so the preset behaviour is
+    // untouched for anyone who doesn't want it.
+    var freeCrop by remember { mutableStateOf<FreeCrop?>(null) }
+    var cropMode by remember { mutableStateOf(false) }
+    var tool by remember { mutableStateOf(EditorTool.Move) }
+    var sendOriginal by remember { mutableStateOf(initialSendOriginal) }
+    var currentStroke by remember { mutableStateOf<List<Offset>>(emptyList()) }
+    val strokes = remember { mutableStateListOf<EditStroke>() }
+    val overlays = remember { mutableStateListOf<EditOverlay>() }
+    var overlayDialog by remember { mutableStateOf<Boolean?>(null) } // false=text, true=emoji
+    var overlayValue by remember { mutableStateOf("") }
+    var caption by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var processingError by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    // While cropping, show the UNcropped image so the box can be dragged over the
+    // whole picture; the crop is applied on exit and on save.
+    val preview = remember(decoded, rotation, crop, freeCrop, cropMode) {
+        transformBitmap(decoded, rotation, crop.ratio, if (cropMode) null else freeCrop)
+    }
+    val pixelatedPreview = remember(preview) { pixelate(preview) }
+
+    fun sendEdited() {
+        busy = true
+        scope.launch {
+            val result = runCatching {
+                withContext(Dispatchers.Default) {
+                    renderEditedImage(
+                        originalBytes = originalBytes,
+                        originalType = type,
+                        originalName = filename,
+                        rotation = rotation,
+                        cropRatio = crop.ratio,
+                        freeCrop = freeCrop,
+                        strokes = strokes.toList(),
+                        overlays = overlays.toList(),
+                        sendOriginal = sendOriginal,
+                    )
+                }
+            }
+            busy = false
+            result
+                .onSuccess { edited -> onSend(edited, caption.trim()) }
+                .onFailure { processingError = "Couldn't process this image" }
+        }
+    }
+
+    Dialog(
+        onDismissRequest = { if (!busy) onDismiss() },
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+    ) {
+        Surface(color = Color.Black, modifier = Modifier.fillMaxSize()) {
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+                    .navigationBarsPadding()
+                    .imePadding(),
+            ) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = Spacing.s, vertical = Spacing.xs),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
+                ) {
+                    IconButton(onClick = onDismiss, enabled = !busy) {
+                        Icon(Icons.Rounded.Close, "Close image editor", tint = Color.White, modifier = Modifier.size(24.dp))
+                    }
+                    Text(filename, color = Color.White, style = MaterialTheme.typography.titleSmall, maxLines = 1, modifier = Modifier.weight(1f).padding(horizontal = Spacing.xs))
+                    IconButton(
+                        onClick = {
+                            when {
+                                currentStroke.isNotEmpty() -> currentStroke = emptyList()
+                                strokes.isNotEmpty() -> strokes.removeAt(strokes.lastIndex)
+                                overlays.isNotEmpty() -> overlays.removeAt(overlays.lastIndex)
+                            }
+                        },
+                        enabled = !busy && (currentStroke.isNotEmpty() || strokes.isNotEmpty() || overlays.isNotEmpty()),
+                    ) { Icon(Icons.Rounded.Undo, "Undo last edit", tint = Color.White, modifier = Modifier.size(24.dp)) }
+                }
+
+                BoxWithConstraints(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                    val imageRatio = preview.width.toFloat() / preview.height.coerceAtLeast(1)
+                    val boxRatio = maxWidth.value / maxHeight.value.coerceAtLeast(1f)
+                    val mediaModifier = if (imageRatio >= boxRatio) {
+                        Modifier.fillMaxWidth().aspectRatio(imageRatio)
+                    } else {
+                        Modifier.fillMaxHeight().aspectRatio(imageRatio)
+                    }
+                    Box(mediaModifier.then(Modifier.background(Color.Black)), contentAlignment = Alignment.Center) {
+                        Image(
+                            bitmap = preview.asImageBitmap(),
+                            contentDescription = "Image editing preview",
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                        // 2.9.7 free crop: drag inside to move the box, drag near an
+                        // edge to resize it. Coordinates are normalised against the
+                        // drawn size, so the same gesture means the same region
+                        // regardless of how the preview is scaled.
+                        if (cropMode) {
+                            val rect = freeCrop ?: FreeCrop()
+                            androidx.compose.foundation.Canvas(
+                                Modifier.fillMaxSize().pointerInput(cropMode) {
+                                    detectDragGestures { change, drag ->
+                                        change.consume()
+                                        val dx = drag.x / size.width
+                                        val dy = drag.y / size.height
+                                        val start = change.position
+                                        val nx = start.x / size.width
+                                        val ny = start.y / size.height
+                                        val current = freeCrop ?: FreeCrop()
+                                        // Which part of the box the finger is on
+                                        // decides move vs resize — an edge grab
+                                        // within 12% resizes, anything else moves.
+                                        val edge = 0.12f
+                                        val nearLeft = kotlin.math.abs(nx - current.left) < edge
+                                        val nearRight = kotlin.math.abs(nx - current.right) < edge
+                                        val nearTop = kotlin.math.abs(ny - current.top) < edge
+                                        val nearBottom = kotlin.math.abs(ny - current.bottom) < edge
+                                        freeCrop = when {
+                                            nearLeft || nearRight || nearTop || nearBottom -> current.clampedTo(
+                                                if (nearLeft) current.left + dx else current.left,
+                                                if (nearTop) current.top + dy else current.top,
+                                                if (nearRight) current.right + dx else current.right,
+                                                if (nearBottom) current.bottom + dy else current.bottom,
+                                            )
+                                            else -> {
+                                                val w = current.right - current.left
+                                                val h = current.bottom - current.top
+                                                val l = (current.left + dx).coerceIn(0f, 1f - w)
+                                                val tp = (current.top + dy).coerceIn(0f, 1f - h)
+                                                FreeCrop(l, tp, l + w, tp + h)
+                                            }
+                                        }
+                                    }
+                                },
+                            ) {
+                                val l = rect.left * size.width
+                                val tp = rect.top * size.height
+                                val r = rect.right * size.width
+                                val b = rect.bottom * size.height
+                                // Dim everything outside the selection so the crop
+                                // reads at a glance.
+                                val shade = Color.Black.copy(alpha = 0.55f)
+                                drawRect(shade, size = androidx.compose.ui.geometry.Size(size.width, tp))
+                                drawRect(
+                                    shade,
+                                    topLeft = Offset(0f, b),
+                                    size = androidx.compose.ui.geometry.Size(size.width, size.height - b),
+                                )
+                                drawRect(
+                                    shade,
+                                    topLeft = Offset(0f, tp),
+                                    size = androidx.compose.ui.geometry.Size(l, b - tp),
+                                )
+                                drawRect(
+                                    shade,
+                                    topLeft = Offset(r, tp),
+                                    size = androidx.compose.ui.geometry.Size(size.width - r, b - tp),
+                                )
+                                drawRect(
+                                    Color.White,
+                                    topLeft = Offset(l, tp),
+                                    size = androidx.compose.ui.geometry.Size(r - l, b - tp),
+                                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3f),
+                                )
+                            }
+                        }
+                        Canvas(
+                            Modifier.fillMaxSize().pointerInput(tool, overlays.size, strokes.size) {
+                                detectDragGestures(
+                                    onDragStart = { point ->
+                                        if (tool != EditorTool.Move) currentStroke = listOf(point.normalized(size.width, size.height))
+                                    },
+                                    onDragEnd = {
+                                        if (tool != EditorTool.Move && currentStroke.size > 1) strokes += EditStroke(currentStroke, blur = tool == EditorTool.Blur)
+                                        currentStroke = emptyList()
+                                    },
+                                    onDragCancel = { currentStroke = emptyList() },
+                                ) { change, amount ->
+                                    change.consume()
+                                    if (tool != EditorTool.Move) {
+                                        currentStroke = currentStroke + change.position.normalized(size.width, size.height)
+                                    } else if (overlays.isNotEmpty()) {
+                                        val last = overlays.last()
+                                        overlays[overlays.lastIndex] = last.copy(
+                                            x = (last.x + amount.x / size.width.coerceAtLeast(1)).coerceIn(0.05f, 0.95f),
+                                            y = (last.y + amount.y / size.height.coerceAtLeast(1)).coerceIn(0.05f, 0.95f),
+                                        )
+                                    }
+                                }
+                            },
+                        ) {
+                            val liveStrokes = strokes.toList() +
+                                listOfNotNull(currentStroke.takeIf { it.isNotEmpty() }?.let { EditStroke(it, blur = tool == EditorTool.Blur) })
+                            val blurPaint = if (liveStrokes.any(EditStroke::blur)) {
+                                blurStrokePaint(pixelatedPreview, size.width, size.height, size.minDimension * BLUR_STROKE_FRACTION)
+                            } else null
+                            liveStrokes.forEach { stroke ->
+                                val points = stroke.points
+                                if (points.size > 1) {
+                                    if (stroke.blur && blurPaint != null) {
+                                        val path = android.graphics.Path().apply {
+                                            moveTo(points.first().x * size.width, points.first().y * size.height)
+                                            points.drop(1).forEach { lineTo(it.x * size.width, it.y * size.height) }
+                                        }
+                                        drawContext.canvas.nativeCanvas.drawPath(path, blurPaint)
+                                    } else {
+                                        val path = Path().apply {
+                                            moveTo(points.first().x * size.width, points.first().y * size.height)
+                                            points.drop(1).forEach { lineTo(it.x * size.width, it.y * size.height) }
+                                        }
+                                        drawPath(path, Color(0xFFFFD54F), style = Stroke(width = 5.dp.toPx(), cap = StrokeCap.Round))
+                                    }
+                                }
+                            }
+                            drawContext.canvas.nativeCanvas.apply {
+                                overlays.forEach { overlay ->
+                                    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                                        color = AndroidColor.WHITE
+                                        textAlign = Paint.Align.CENTER
+                                        textSize = if (overlay.emoji) size.minDimension * 0.16f else size.minDimension * 0.075f
+                                        typeface = if (overlay.emoji) android.graphics.Typeface.DEFAULT else android.graphics.Typeface.DEFAULT_BOLD
+                                        setShadowLayer(5f, 0f, 2f, AndroidColor.BLACK)
+                                    }
+                                    drawText(overlay.value, overlay.x * size.width, overlay.y * size.height, paint)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = Spacing.xs, vertical = Spacing.xs),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    EditorButton(Icons.Rounded.Crop, "Crop ${crop.label}") {
+                        crop = CropPreset.entries[(crop.ordinal + 1) % CropPreset.entries.size]
+                        // Choosing a preset ratio clears a free crop — the two are
+                        // different answers to the same question.
+                        freeCrop = null
+                    }
+                    // 2.9.7: free-form crop. Toggling out of it keeps whatever box
+                    // you dragged; tapping it again lets you adjust the same box.
+                    EditorButton(
+                        Icons.Rounded.Crop,
+                        if (cropMode) "Apply free crop" else "Free crop",
+                        selected = cropMode,
+                    ) {
+                        if (!cropMode && freeCrop == null) freeCrop = FreeCrop(0.1f, 0.1f, 0.9f, 0.9f)
+                        cropMode = !cropMode
+                        if (cropMode) crop = CropPreset.Original
+                    }
+                    EditorButton(Icons.Rounded.RotateRight, "Rotate image") { rotation = (rotation + 90) % 360 }
+                    EditorButton(
+                        if (tool == EditorTool.Draw) Icons.Rounded.OpenWith else Icons.Rounded.Draw,
+                        if (tool == EditorTool.Draw) "Move overlay" else "Draw on image",
+                        selected = tool == EditorTool.Draw,
+                    ) { tool = if (tool == EditorTool.Draw) EditorTool.Move else EditorTool.Draw }
+                    EditorButton(
+                        Icons.Rounded.BlurOn,
+                        if (tool == EditorTool.Blur) "Stop blurring" else "Blur parts of image",
+                        selected = tool == EditorTool.Blur,
+                    ) { tool = if (tool == EditorTool.Blur) EditorTool.Move else EditorTool.Blur }
+                    EditorButton(Icons.Rounded.TextFields, "Add text") { overlayValue = ""; overlayDialog = false }
+                    EditorButton(Icons.Rounded.EmojiEmotions, "Add emoji") { overlayValue = ""; overlayDialog = true }
+                }
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = Spacing.l, vertical = Spacing.xs),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Rounded.HighQuality, null, tint = Color.White.copy(alpha = 0.84f), modifier = Modifier.size(24.dp))
+                    Text("Send original quality", color = Color.White, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(start = Spacing.s).weight(1f))
+                    Switch(checked = sendOriginal, onCheckedChange = { sendOriginal = it }, enabled = !busy)
+                }
+
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = Spacing.s, vertical = Spacing.s),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Spacing.s),
+                ) {
+                    TextField(
+                        value = caption,
+                        onValueChange = { caption = it },
+                        modifier = Modifier.weight(1f),
+                        placeholder = { Text("Add a caption…") },
+                        maxLines = 4,
+                        shape = Corners.input,
+                        enabled = !busy,
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = Color.White.copy(alpha = 0.10f),
+                            unfocusedContainerColor = Color.White.copy(alpha = 0.10f),
+                            disabledContainerColor = Color.White.copy(alpha = 0.06f),
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            cursorColor = Color.White,
+                            focusedPlaceholderColor = Color.White.copy(alpha = 0.55f),
+                            unfocusedPlaceholderColor = Color.White.copy(alpha = 0.55f),
+                            focusedIndicatorColor = Color.Transparent,
+                            unfocusedIndicatorColor = Color.Transparent,
+                            disabledIndicatorColor = Color.Transparent,
+                        ),
+                    )
+                    FilledIconButton(
+                        onClick = { sendEdited() },
+                        enabled = !busy,
+                        modifier = Modifier.size(Dimens.touchTarget),
+                    ) {
+                        if (busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                        else Icon(Icons.Rounded.Send, "Send image", modifier = Modifier.size(24.dp))
+                    }
+                }
+            }
+        }
+    }
+
+    overlayDialog?.let { emoji ->
+        AlertDialog(
+            onDismissRequest = { overlayDialog = null },
+            title = { Text(if (emoji) "Add emoji" else "Add text") },
+            text = {
+                TextField(
+                    value = overlayValue,
+                    onValueChange = { overlayValue = it.take(if (emoji) 8 else 80) },
+                    label = { Text(if (emoji) "Emoji" else "Text") },
+                    singleLine = true,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val value = overlayValue.trim()
+                        if (value.isNotEmpty()) overlays += EditOverlay(value, 0.5f, 0.5f, emoji)
+                        tool = EditorTool.Move
+                        overlayDialog = null
+                    },
+                    enabled = overlayValue.isNotBlank(),
+                ) { Text("add") }
+            },
+            dismissButton = { TextButton(onClick = { overlayDialog = null }) { Text("cancel") } },
+        )
+    }
+    processingError?.let { message ->
+        AlertDialog(
+            onDismissRequest = { processingError = null },
+            title = { Text("Image edit failed") },
+            text = { Text(message) },
+            confirmButton = { TextButton(onClick = { processingError = null }) { Text("ok") } },
+        )
+    }
+}
+
+@Composable
+private fun EditorButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    description: String,
+    selected: Boolean = false,
+    onClick: () -> Unit,
+) {
+    val selectionColor by animateColorAsState(
+        if (selected) Color.White.copy(alpha = 0.18f) else Color.Transparent,
+        label = "editorToolSelection",
+    )
+    IconButton(
+        onClick = onClick,
+        modifier = Modifier
+            .size(Dimens.touchTarget)
+            .background(selectionColor, Corners.chip),
+    ) { Icon(icon, description, tint = Color.White, modifier = Modifier.size(24.dp)) }
+}
+
+private fun Offset.normalized(width: Int, height: Int) = Offset(
+    x = (x / width.coerceAtLeast(1)).coerceIn(0f, 1f),
+    y = (y / height.coerceAtLeast(1)).coerceIn(0f, 1f),
+)
+
+private fun decodeBitmap(bytes: ByteArray, maxDimension: Int): Bitmap? {
+    val decoded = runCatching {
+        if (Build.VERSION.SDK_INT >= 28) {
+            ImageDecoder.decodeBitmap(ImageDecoder.createSource(ByteBuffer.wrap(bytes))) { decoder, info, _ ->
+                decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+                val largest = max(info.size.width, info.size.height)
+                if (largest > maxDimension) {
+                    val scale = maxDimension.toFloat() / largest
+                    decoder.setTargetSize((info.size.width * scale).toInt(), (info.size.height * scale).toInt())
+                }
+            }
+        } else {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+            var sample = 1
+            while (max(bounds.outWidth, bounds.outHeight) / sample > maxDimension) sample *= 2
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
+                ?.let { applyExifOrientation(bytes, it) }
+        }
+    }.getOrNull() ?: return null
+    return decoded.copy(Bitmap.Config.ARGB_8888, false)
+}
+
+/**
+ * BitmapFactory (the API<28 decode path) ignores EXIF orientation, so camera JPEGs
+ * came out sideways on Android 8; ImageDecoder on 28+ applies it automatically.
+ * Uses the framework ExifInterface — the androidx artifact isn't a dependency.
+ */
+private fun applyExifOrientation(bytes: ByteArray, bitmap: Bitmap): Bitmap {
+    val orientation = runCatching {
+        @Suppress("DEPRECATION")
+        ExifInterface(ByteArrayInputStream(bytes))
+            .getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+    }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
+    val matrix = Matrix()
+    when (orientation) {
+        ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+        ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+        ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+        ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
+        ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
+        ExifInterface.ORIENTATION_TRANSPOSE -> { matrix.postRotate(90f); matrix.postScale(-1f, 1f) }
+        ExifInterface.ORIENTATION_TRANSVERSE -> { matrix.postRotate(270f); matrix.postScale(-1f, 1f) }
+        else -> return bitmap
+    }
+    return runCatching {
+        Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+    }.getOrDefault(bitmap)
+}
+
+private fun transformBitmap(
+    source: Bitmap,
+    rotation: Int,
+    cropRatio: Float?,
+    free: FreeCrop? = null,
+): Bitmap {
+    val rotated = if (rotation == 0) source else Bitmap.createBitmap(
+        source,
+        0,
+        0,
+        source.width,
+        source.height,
+        Matrix().apply { postRotate(rotation.toFloat()) },
+        true,
+    )
+    // A free crop wins over the ratio presets: it's the more specific instruction,
+    // and applying both would fight each other.
+    if (free != null && !free.isFull) {
+        val x = (free.left * rotated.width).toInt().coerceIn(0, rotated.width - 1)
+        val y = (free.top * rotated.height).toInt().coerceIn(0, rotated.height - 1)
+        val w = ((free.right - free.left) * rotated.width).toInt().coerceAtLeast(1)
+            .coerceAtMost(rotated.width - x)
+        val h = ((free.bottom - free.top) * rotated.height).toInt().coerceAtLeast(1)
+            .coerceAtMost(rotated.height - y)
+        return Bitmap.createBitmap(rotated, x, y, w, h)
+    }
+    if (cropRatio == null) return rotated
+    val current = rotated.width.toFloat() / rotated.height.coerceAtLeast(1)
+    val (width, height) = if (current > cropRatio) {
+        (rotated.height * cropRatio).toInt().coerceAtLeast(1) to rotated.height
+    } else {
+        rotated.width to (rotated.width / cropRatio).toInt().coerceAtLeast(1)
+    }
+    return Bitmap.createBitmap(rotated, (rotated.width - width) / 2, (rotated.height - height) / 2, width, height)
+}
+
+private fun applyMarkup(source: Bitmap, strokes: List<EditStroke>, overlays: List<EditOverlay>): Bitmap {
+    if (strokes.isEmpty() && overlays.isEmpty()) return source
+    val output = source.copy(Bitmap.Config.ARGB_8888, true)
+    val canvas = AndroidCanvas(output)
+    val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = AndroidColor.rgb(255, 213, 79)
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+        strokeWidth = output.width.coerceAtMost(output.height) * 0.012f
+    }
+    val blurPaint = if (strokes.any(EditStroke::blur)) {
+        blurStrokePaint(
+            pixelated = pixelate(source),
+            targetWidth = output.width.toFloat(),
+            targetHeight = output.height.toFloat(),
+            strokeWidth = output.width.coerceAtMost(output.height) * BLUR_STROKE_FRACTION,
+        )
+    } else null
+    strokes.forEach { stroke ->
+        if (stroke.points.size > 1) {
+            val path = android.graphics.Path().apply {
+                moveTo(stroke.points.first().x * output.width, stroke.points.first().y * output.height)
+                stroke.points.drop(1).forEach { lineTo(it.x * output.width, it.y * output.height) }
+            }
+            canvas.drawPath(path, if (stroke.blur && blurPaint != null) blurPaint else strokePaint)
+        }
+    }
+    overlays.forEach { overlay ->
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = AndroidColor.WHITE
+            textAlign = Paint.Align.CENTER
+            textSize = if (overlay.emoji) output.width.coerceAtMost(output.height) * 0.16f else output.width.coerceAtMost(output.height) * 0.075f
+            typeface = if (overlay.emoji) android.graphics.Typeface.DEFAULT else android.graphics.Typeface.DEFAULT_BOLD
+            setShadowLayer(output.width.coerceAtMost(output.height) * 0.009f, 0f, 2f, AndroidColor.BLACK)
+        }
+        canvas.drawText(overlay.value, overlay.x * output.width, overlay.y * output.height, paint)
+    }
+    return output
+}
+
+/** Heavy mosaic pixelation: average-downscale ~16x, then nearest-neighbor upscale back. Cheap on all API levels. */
+private fun pixelate(source: Bitmap): Bitmap {
+    val down = Bitmap.createScaledBitmap(
+        source,
+        (source.width / BLUR_PIXELATION).coerceAtLeast(1),
+        (source.height / BLUR_PIXELATION).coerceAtLeast(1),
+        true,
+    )
+    return Bitmap.createScaledBitmap(down, source.width, source.height, false)
+}
+
+/** Stroke paint whose shader paints the pixelated bitmap stretched to the target canvas, so strokes reveal a blurred copy. */
+private fun blurStrokePaint(pixelated: Bitmap, targetWidth: Float, targetHeight: Float, strokeWidth: Float): Paint =
+    Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+        this.strokeWidth = strokeWidth
+        shader = BitmapShader(pixelated, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).apply {
+            setLocalMatrix(
+                Matrix().apply {
+                    setScale(targetWidth / pixelated.width.coerceAtLeast(1), targetHeight / pixelated.height.coerceAtLeast(1))
+                },
+            )
+        }
+    }
+
+private fun scaleDown(source: Bitmap, maxDimension: Int): Bitmap {
+    val largest = max(source.width, source.height)
+    if (largest <= maxDimension) return source
+    val scale = maxDimension.toFloat() / largest
+    return Bitmap.createScaledBitmap(source, (source.width * scale).toInt(), (source.height * scale).toInt(), true)
+}
+
+private fun renderEditedImage(
+    originalBytes: ByteArray,
+    originalType: String,
+    originalName: String,
+    rotation: Int,
+    cropRatio: Float?,
+    freeCrop: FreeCrop? = null,
+    strokes: List<EditStroke>,
+    overlays: List<EditOverlay>,
+    sendOriginal: Boolean,
+): EditedImage {
+    val untouched = rotation == 0 && cropRatio == null && strokes.isEmpty() && overlays.isEmpty()
+    if (sendOriginal && untouched) return EditedImage(originalBytes, originalName, originalType, true)
+
+    val decoded = requireNotNull(decodeBitmap(originalBytes, if (sendOriginal) 8_192 else 2_560))
+    val transformed = transformBitmap(decoded, rotation, cropRatio, freeCrop)
+    val marked = applyMarkup(transformed, strokes, overlays)
+    val outputBitmap = if (sendOriginal) marked else scaleDown(marked, 1_920)
+    val png = originalType.equals("image/png", ignoreCase = true) && outputBitmap.hasAlpha()
+    val output = ByteArrayOutputStream()
+    outputBitmap.compress(
+        if (png) Bitmap.CompressFormat.PNG else Bitmap.CompressFormat.JPEG,
+        if (sendOriginal) 98 else 82,
+        output,
+    )
+    val extension = if (png) "png" else "jpg"
+    val baseName = originalName.substringBeforeLast('.', originalName).ifBlank { "photo" }
+    return EditedImage(output.toByteArray(), "$baseName.$extension", if (png) "image/png" else "image/jpeg", sendOriginal)
+}
+
+/** Build the stored 1:1 default variant while callers retain/upload the original bytes separately. */
+suspend fun squareImageVariant(bytes: ByteArray): ByteArray = withContext(Dispatchers.Default) {
+    val decoded = requireNotNull(decodeBitmap(bytes, 2_048)) { "unsupported image" }
+    val square = transformBitmap(decoded, 0, 1f)
+    val output = ByteArrayOutputStream()
+    scaleDown(square, 1_024).compress(Bitmap.CompressFormat.JPEG, 88, output)
+    output.toByteArray()
+}

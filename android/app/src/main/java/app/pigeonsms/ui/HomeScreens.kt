@@ -1,0 +1,817 @@
+package app.pigeonsms.ui
+
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import app.pigeonsms.design.components.NovaAnimatedCount
+import app.pigeonsms.design.components.NovaHero
+import app.pigeonsms.design.components.NovaSectionLabel
+import app.pigeonsms.design.theme.LocalReducedMotion
+import app.pigeonsms.design.theme.LocalUiSkin
+import app.pigeonsms.design.theme.UiSkin
+import app.pigeonsms.design.theme.NovaCorners
+import app.pigeonsms.design.theme.NovaDepth
+import app.pigeonsms.design.theme.PigeonColors
+import app.pigeonsms.design.theme.PigeonMotion
+import app.pigeonsms.design.theme.Spacing
+import app.pigeonsms.design.theme.novaAuroraBackground
+import app.pigeonsms.design.theme.novaElevation
+import app.pigeonsms.design.theme.novaHalo
+import app.pigeonsms.design.theme.rememberNovaPulse
+import app.pigeonsms.network.DmDto
+import app.pigeonsms.ui.util.Avatar
+import app.pigeonsms.ui.util.Empty
+import app.pigeonsms.ui.util.ErrorState
+import app.pigeonsms.ui.util.ScreenHeader
+import app.pigeonsms.ui.util.SkeletonList
+import app.pigeonsms.ui.util.clickableScale
+import app.pigeonsms.ui.util.presence
+import app.pigeonsms.ui.util.smartTime
+import kotlinx.coroutines.delay
+
+// --- Shared list primitives ------------------------------------------------------
+// Glass is reserved for floating layers (nav pill, FABs, sheets). List rows across
+// home / friends / spaces / forum stay calm: plain full-bleed surfaces, spacing-only
+// separation, one appear animation, one unread pill.
+
+/**
+ * Entrance for list items: fade + 12dp rise on a smooth spring, staggered for the
+ * first screenful, instant under reduced motion. Cheap — one graphicsLayer, no blur.
+ */
+internal fun Modifier.itemAppear(index: Int): Modifier = composed {
+    val reduced = LocalReducedMotion.current
+    if (reduced) return@composed this
+    var shown by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        delay(index.coerceAtMost(8) * 24L)
+        shown = true
+    }
+    val settle by animateFloatAsState(
+        targetValue = if (shown) 1f else 0f,
+        animationSpec = PigeonMotion.smooth(),
+        label = "itemAppear",
+    )
+    graphicsLayer {
+        alpha = settle
+        translationY = (1f - settle) * 12.dp.toPx()
+    }
+}
+
+/** Unread count pill: min 20dp, bright accent, capped at 99+. */
+@Composable
+internal fun UnreadPill(count: Int, modifier: Modifier = Modifier) {
+    Box(
+        modifier
+            .defaultMinSize(minWidth = 20.dp, minHeight = 20.dp)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.primary)
+            .padding(horizontal = Spacing.xs),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            if (count > 99) "99+" else "$count",
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onPrimary,
+        )
+    }
+}
+
+/** Section label: quiet, no box, generous air above. */
+@Composable
+internal fun ListSectionHeader(text: String, modifier: Modifier = Modifier) {
+    Text(
+        text.lowercase(),
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = modifier.padding(top = Spacing.xl, bottom = Spacing.s, start = Spacing.l, end = Spacing.l),
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MessagesScreen(
+    app: AppViewModel,
+    onOpenChat: (DmDto) -> Unit,
+    onOpenProfile: (String) -> Unit,
+) {
+    when (LocalUiSkin.current) {
+        UiSkin.Nova -> NovaMessagesScreen(app, onOpenChat, onOpenProfile)
+        UiSkin.Galaxy -> GalaxyMessagesScreen(app, onOpenChat, onOpenProfile)
+        UiSkin.Classic -> ClassicMessagesScreen(app, onOpenChat, onOpenProfile)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ClassicMessagesScreen(
+    app: AppViewModel,
+    onOpenChat: (DmDto) -> Unit,
+    onOpenProfile: (String) -> Unit,
+) {
+    val home by app.home.collectAsState()
+    LaunchedEffect(Unit) { app.refreshDms() }
+    Column(Modifier.fillMaxSize()) {
+        ScreenHeader("messages")
+        if (home.dmsLoading && home.dms.isEmpty()) SkeletonList()
+        else if (home.dmsError != null && home.dms.isEmpty()) ErrorState(home.dmsError!!, app::refreshDms)
+        else if (home.dms.isEmpty()) Empty("no messages yet", "start a chat from friends")
+        else PullToRefreshBox(isRefreshing = home.dmsLoading, onRefresh = { app.refreshDms() }, modifier = Modifier.fillMaxSize()) {
+            LazyColumn(
+                Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(vertical = Spacing.s),
+            ) {
+                itemsIndexed(home.dms, key = { _, dm -> dm.channel_id }) { index, dm ->
+                    DmRow(
+                        dm = dm,
+                        avatarUrl = app.mediaUrl(dm.peer.avatar_key),
+                        modifier = Modifier.animateItem().itemAppear(index),
+                        onOpen = { onOpenChat(dm) },
+                        onOpenProfile = { onOpenProfile(dm.peer.id) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DmRow(
+    dm: DmDto,
+    avatarUrl: String?,
+    modifier: Modifier = Modifier,
+    onOpen: () -> Unit,
+    onOpenProfile: () -> Unit,
+) {
+    val name = dm.peer.display_name ?: dm.peer.username
+    val online = presence(dm.peer.last_online)
+    val unread = dm.unread > 0
+    Row(
+        modifier
+            .fillMaxWidth()
+            .heightIn(min = 72.dp)
+            .clickableScale(pressedScale = 0.98f, onClick = onOpen)
+            .padding(horizontal = Spacing.l, vertical = Spacing.s),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier
+                .then(if (online) Modifier.border(2.dp, PigeonColors.Mint, CircleShape).padding(3.dp) else Modifier)
+                .clip(CircleShape)
+                .clickable(onClick = onOpenProfile)
+                .semantics {
+                    role = Role.Button
+                    contentDescription = "open $name profile"
+                },
+        ) {
+            Avatar(name, avatarUrl, 52.dp, sharedKey = "chat-avatar-${dm.channel_id}")
+        }
+        Spacer(Modifier.width(Spacing.l))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Spacing.xxs)) {
+            Text(
+                name.lowercase(),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = if (unread) FontWeight.Bold else null,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                dm.last_message?.let { if (it.deleted) "message deleted" else it.content } ?: "say hi 👋",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = if (unread) FontWeight.Medium else null,
+                color = if (unread) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Spacer(Modifier.width(Spacing.s))
+        Column(
+            horizontalAlignment = Alignment.End,
+            verticalArrangement = Arrangement.spacedBy(Spacing.xs),
+        ) {
+            dm.last_message?.let {
+                Text(
+                    smartTime(it.created_at),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (unread) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (unread) UnreadPill(dm.unread)
+        }
+    }
+}
+
+// --- GALAXY ----------------------------------------------------------------------
+// A structurally distinct DM list floating over a breathing aurora mesh: a shared
+// hero header with an animated unread counter, a horizontal "online now" strip of
+// avatars wearing breathing cyan presence rings, then conversations as elevated
+// rounded cards — real accent-tinted shadow + lit rim, 60dp avatar with a pulsing
+// presence ring, a leading iris→cyan unread bar, and an animated unread pill.
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun GalaxyMessagesScreen(
+    app: AppViewModel,
+    onOpenChat: (DmDto) -> Unit,
+    onOpenProfile: (String) -> Unit,
+) {
+    val home by app.home.collectAsState()
+    LaunchedEffect(Unit) { app.refreshDms() }
+    val accent = MaterialTheme.colorScheme.primary
+    // Aurora mesh drawn once behind the whole tab (fixed, not per-row) so the
+    // space-indigo canvas breathes under the scrolling content.
+    Box(
+        Modifier
+            .fillMaxSize()
+            .novaAuroraBackground(accent, animate = true),
+    ) {
+        Column(Modifier.fillMaxSize()) {
+            GalaxyMessagesHeader(unread = home.dms.sumOf { it.unread }, count = home.dms.size)
+            if (home.dmsLoading && home.dms.isEmpty()) SkeletonList()
+            else if (home.dmsError != null && home.dms.isEmpty()) ErrorState(home.dmsError!!, app::refreshDms)
+            else if (home.dms.isEmpty()) Empty(
+                "no messages yet",
+                "start a chat from friends and it'll show up here",
+            )
+            else PullToRefreshBox(isRefreshing = home.dmsLoading, onRefresh = { app.refreshDms() }, modifier = Modifier.fillMaxSize()) {
+                val online = home.dms.filter { presence(it.peer.last_online) }
+                LazyColumn(
+                    Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(start = Spacing.m, end = Spacing.m, top = Spacing.xs, bottom = Spacing.xl),
+                    verticalArrangement = Arrangement.spacedBy(Spacing.s),
+                ) {
+                    if (online.isNotEmpty()) {
+                        item(key = "galaxy-online-strip") {
+                            GalaxyOnlineStrip(
+                                dms = online,
+                                mediaUrl = { app.mediaUrl(it) },
+                                onOpen = onOpenChat,
+                                modifier = Modifier.itemAppear(0),
+                            )
+                        }
+                    }
+                    itemsIndexed(home.dms, key = { _, dm -> dm.channel_id }) { index, dm ->
+                        GalaxyDmCard(
+                            dm = dm,
+                            avatarUrl = app.mediaUrl(dm.peer.avatar_key),
+                            modifier = Modifier.animateItem().itemAppear(index + 1),
+                            onOpen = { onOpenChat(dm) },
+                            onOpenProfile = { onOpenProfile(dm.peer.id) },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Galaxy messages hero. Routes through the shared [NovaHero] so this tab shares the
+ * exact display-title rhythm with Friends/Spaces (title fades + rises in). The
+ * unread total then animates via [NovaAnimatedCount] on a custom stat line — the
+ * number users watch tick down — rendered in cyan when there's unread so the
+ * dual-accent identity reaches the header instead of leaving it mono-violet.
+ *
+ * No trailing search affordance: this screen exposes no search route, and a badge
+ * that presses but goes nowhere reads as broken. The stat line carries the header.
+ */
+@Composable
+private fun GalaxyMessagesHeader(unread: Int, count: Int) {
+    NovaHero(title = "messages")
+    // Custom animated stat line under the hero so the unread total slides on
+    // change; NovaHero's static subtitle can't animate the number.
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = Spacing.xl, end = Spacing.l, top = Spacing.xxs, bottom = Spacing.s),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (unread > 0) {
+            NovaAnimatedCount(
+                unread,
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.secondary,
+            )
+            Spacer(Modifier.width(Spacing.xs))
+            Text(
+                "unread · $count chats",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.secondary,
+            )
+        } else {
+            Text(
+                if (count > 0) "you're all caught up · $count chats" else "no conversations yet",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/** Horizontal favorites/online strip: circular avatars w/ cyan presence ring. */
+@Composable
+private fun GalaxyOnlineStrip(
+    dms: List<DmDto>,
+    mediaUrl: (String?) -> String?,
+    onOpen: (DmDto) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val cyan = MaterialTheme.colorScheme.secondary
+    // One shared breathing value so every presence ring pulses in unison — a
+    // single living cue rather than N independent flickers. Reduced-motion safe.
+    val pulse = rememberNovaPulse(periodMillis = 2400)
+    Column(modifier.padding(top = Spacing.xs, bottom = Spacing.xs)) {
+        Row(
+            Modifier.padding(start = Spacing.xs, bottom = Spacing.s),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            NovaSectionLabel("online now", accent = true)
+            Spacer(Modifier.width(Spacing.xs))
+            Text(
+                "${dms.size}",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+                color = cyan,
+            )
+        }
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.m),
+        ) {
+            dms.forEach { dm ->
+                val name = dm.peer.display_name ?: dm.peer.username
+                Column(
+                    Modifier
+                        .width(64.dp)
+                        .clip(NovaCorners.card)
+                        .clickableScale(pressedScale = 0.94f, onClick = { onOpen(dm) })
+                        .padding(vertical = Spacing.xs),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Box(
+                        // soft cyan halo that breathes behind the avatar — the
+                        // "living presence" cue, halo alpha tracks the pulse.
+                        Modifier
+                            .novaHalo(cyan, alpha = 0.10f + 0.14f * pulse)
+                            .border(2.dp, cyan.copy(alpha = 0.55f + 0.45f * pulse), CircleShape)
+                            .padding(3.dp),
+                    ) {
+                        Avatar(name, mediaUrl(dm.peer.avatar_key), 52.dp, sharedKey = "chat-avatar-${dm.channel_id}")
+                    }
+                    Text(
+                        name.lowercase(),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = Spacing.xs),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Expressive conversation card floating over the aurora: a real accent-tinted
+ *  drop shadow + lifted-top gradient fill + lit rim via [novaElevation], a 60dp
+ *  avatar with a breathing cyan presence ring, a bold name over a two-line
+ *  preview, an animated accent unread pill and an inline timestamp. Unread cards
+ *  lift harder (accent-lit rim + accent glow-shadow) and carry a leading iris→cyan
+ *  accent bar instead of a full outline, so unread reads as "important" rather
+ *  than "selected". */
+@Composable
+private fun GalaxyDmCard(
+    dm: DmDto,
+    avatarUrl: String?,
+    modifier: Modifier = Modifier,
+    onOpen: () -> Unit,
+    onOpenProfile: () -> Unit,
+) {
+    val name = dm.peer.display_name ?: dm.peer.username
+    val online = presence(dm.peer.last_online)
+    val unread = dm.unread > 0
+    val accent = MaterialTheme.colorScheme.primary
+    val cyan = MaterialTheme.colorScheme.secondary
+    val cardBg =
+        if (unread) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceContainer
+    Row(
+        modifier
+            .fillMaxWidth()
+            // Layered depth: soft shadow (accent-tinted + glowing when unread),
+            // lifted-top gradient fill and a lit rim — one call, consistent with
+            // every other Nova surface.
+            .novaElevation(
+                NovaCorners.card,
+                tint = cardBg,
+                accent = accent,
+                accented = unread,
+                glow = unread,
+                elevation = if (unread) NovaDepth.raisedElevation else NovaDepth.cardElevation,
+            )
+            .clickableScale(pressedScale = 0.98f, onClick = onOpen)
+            .heightIn(min = 76.dp)
+            .padding(horizontal = Spacing.m, vertical = Spacing.m),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // Leading iris→cyan accent bar marks unread without the "focus ring" read
+        // of a full outline. Sized to the avatar; invisible when read.
+        Box(
+            Modifier
+                .width(4.dp)
+                .height(48.dp)
+                .clip(CircleShape)
+                .then(
+                    if (unread) Modifier.background(Brush.verticalGradient(listOf(accent, cyan)))
+                    else Modifier,
+                ),
+        )
+        Spacer(Modifier.width(Spacing.s))
+        GalaxyPresenceAvatar(
+            name = name,
+            avatarUrl = avatarUrl,
+            size = 60.dp,
+            online = online,
+            ring = cyan,
+            sharedKey = "chat-avatar-${dm.channel_id}",
+            onClick = onOpenProfile,
+        )
+        Spacer(Modifier.width(Spacing.m))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Spacing.xxs)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    name.lowercase(),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                dm.last_message?.let {
+                    Spacer(Modifier.width(Spacing.s))
+                    Text(
+                        smartTime(it.created_at),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = if (unread) FontWeight.Bold else null,
+                        color = if (unread) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    dm.last_message?.let { if (it.deleted) "message deleted" else it.content } ?: "say hi 👋",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = if (unread) FontWeight.SemiBold else null,
+                    color = if (unread) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                if (unread) {
+                    Spacer(Modifier.width(Spacing.s))
+                    GalaxyUnreadPill(dm.unread)
+                }
+            }
+        }
+    }
+}
+
+/** Nova unread pill: an iris→cyan gradient disc with a soft accent glow and an
+ *  animated sliding-digit count, so the number the user watches actually ticks.
+ *  Nova-only; the classic [UnreadPill] is untouched. */
+@Composable
+private fun GalaxyUnreadPill(count: Int, modifier: Modifier = Modifier) {
+    val accent = MaterialTheme.colorScheme.primary
+    Box(
+        modifier
+            .defaultMinSize(minWidth = 22.dp, minHeight = 22.dp)
+            .novaHalo(accent, alpha = NovaDepth.glowSoft)
+            .clip(CircleShape)
+            .background(Brush.horizontalGradient(listOf(accent, MaterialTheme.colorScheme.secondary)))
+            .padding(horizontal = Spacing.xs),
+        contentAlignment = Alignment.Center,
+    ) {
+        NovaAnimatedCount(
+            count.coerceAtMost(999),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onPrimary,
+        )
+    }
+}
+
+/**
+ * Circular avatar with the Nova presence treatment: when [online], a soft cyan
+ * halo + hairline ring that breathe together via [rememberNovaPulse]; when read
+ * (offline), a plain avatar with no animation at all. Keeping the pulse inside
+ * this composable — and only reaching it on the online branch — means offline
+ * rows in a long list allocate zero infinite transitions, so scrolling stays
+ * crisp. Reduced-motion falls back to a static ring (pulse returns a constant).
+ */
+@Composable
+private fun GalaxyPresenceAvatar(
+    name: String,
+    avatarUrl: String?,
+    size: androidx.compose.ui.unit.Dp,
+    online: Boolean,
+    ring: androidx.compose.ui.graphics.Color,
+    sharedKey: String,
+    onClick: () -> Unit,
+) {
+    val base = Modifier
+        .clip(CircleShape)
+        .clickable(onClick = onClick)
+        .semantics {
+            role = Role.Button
+            contentDescription = "open $name profile"
+        }
+    if (online) {
+        val pulse = rememberNovaPulse(periodMillis = 2400)
+        Box(
+            Modifier
+                .novaHalo(ring, alpha = 0.08f + 0.12f * pulse)
+                .border(2.5.dp, ring.copy(alpha = 0.6f + 0.4f * pulse), CircleShape)
+                .padding(3.dp)
+                .then(base),
+        ) {
+            Avatar(name, avatarUrl, size, sharedKey = sharedKey)
+        }
+    } else {
+        Box(base) {
+            Avatar(name, avatarUrl, size, sharedKey = sharedKey)
+        }
+    }
+}
+
+// --- NOVA (2nd-experiment "-exp" layout) -----------------------------------------
+// A structurally distinct DM list: a bold greeting block + search pill up top, a
+// horizontal "online now" avatar strip when peers are around, then conversations as
+// expressive rounded cards — big 60dp avatar w/ presence ring, loud name, preview
+// with an accent unread pill and repositioned timestamp. Ported from the -exp
+// codebase; uses exp3's flat NovaCorners + MaterialTheme primitives and the shared
+// classic UnreadPill (no aurora/glow — that identity is Galaxy's).
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun NovaMessagesScreen(
+    app: AppViewModel,
+    onOpenChat: (DmDto) -> Unit,
+    onOpenProfile: (String) -> Unit,
+) {
+    val home by app.home.collectAsState()
+    LaunchedEffect(Unit) { app.refreshDms() }
+    Column(Modifier.fillMaxSize()) {
+        NovaMessagesHeader(unread = home.dms.sumOf { it.unread })
+        if (home.dmsLoading && home.dms.isEmpty()) SkeletonList()
+        else if (home.dmsError != null && home.dms.isEmpty()) ErrorState(home.dmsError!!, app::refreshDms)
+        else if (home.dms.isEmpty()) Empty("no messages yet", "start a chat from friends")
+        else PullToRefreshBox(isRefreshing = home.dmsLoading, onRefresh = { app.refreshDms() }, modifier = Modifier.fillMaxSize()) {
+            val online = home.dms.filter { presence(it.peer.last_online) }
+            LazyColumn(
+                Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = Spacing.m, end = Spacing.m, top = Spacing.xs, bottom = Spacing.xl),
+                verticalArrangement = Arrangement.spacedBy(Spacing.s),
+            ) {
+                if (online.isNotEmpty()) {
+                    item(key = "nova-online-strip") {
+                        NovaOnlineStrip(
+                            dms = online,
+                            mediaUrl = { app.mediaUrl(it) },
+                            onOpen = onOpenChat,
+                            modifier = Modifier.itemAppear(0),
+                        )
+                    }
+                }
+                itemsIndexed(home.dms, key = { _, dm -> dm.channel_id }) { index, dm ->
+                    NovaDmCard(
+                        dm = dm,
+                        avatarUrl = app.mediaUrl(dm.peer.avatar_key),
+                        modifier = Modifier.animateItem().itemAppear(index + 1),
+                        onOpen = { onOpenChat(dm) },
+                        onOpenProfile = { onOpenProfile(dm.peer.id) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Bold greeting block: big display title + a tappable-looking search pill. Reads
+ *  as a header hero, not a plain top bar. */
+@Composable
+private fun NovaMessagesHeader(unread: Int) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .statusBarsPadding()
+            .padding(start = Spacing.l, end = Spacing.l, top = Spacing.l, bottom = Spacing.m),
+    ) {
+        Text(
+            "messages",
+            style = MaterialTheme.typography.displaySmall,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Text(
+            if (unread > 0) "$unread unread" else "you're all caught up",
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (unread > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = Spacing.xxs, bottom = Spacing.m),
+        )
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .height(46.dp)
+                .clip(NovaCorners.input)
+                .background(MaterialTheme.colorScheme.surfaceContainer)
+                .padding(horizontal = Spacing.l),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Outlined.Search, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                "search conversations",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(start = Spacing.s),
+            )
+        }
+    }
+}
+
+/** Horizontal favorites/online strip: circular avatars w/ cyan presence ring. */
+@Composable
+private fun NovaOnlineStrip(
+    dms: List<DmDto>,
+    mediaUrl: (String?) -> String?,
+    onOpen: (DmDto) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier.padding(top = Spacing.xs, bottom = Spacing.xs)) {
+        Text(
+            "online now",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.secondary,
+            modifier = Modifier.padding(start = Spacing.xs, bottom = Spacing.s),
+        )
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(Spacing.m),
+        ) {
+            dms.forEach { dm ->
+                val name = dm.peer.display_name ?: dm.peer.username
+                Column(
+                    Modifier
+                        .width(64.dp)
+                        .clip(NovaCorners.card)
+                        .clickableScale(pressedScale = 0.94f, onClick = { onOpen(dm) })
+                        .padding(vertical = Spacing.xs),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Box(
+                        Modifier
+                            .border(2.dp, MaterialTheme.colorScheme.secondary, CircleShape)
+                            .padding(3.dp),
+                    ) {
+                        Avatar(name, mediaUrl(dm.peer.avatar_key), 52.dp, sharedKey = "chat-avatar-${dm.channel_id}")
+                    }
+                    Text(
+                        name.lowercase(),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = Spacing.xs),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Expressive conversation card: rounded filled surface, 60dp avatar with a
+ *  presence ring, bold name over a two-line-hierarchy preview, a vivid accent
+ *  unread pill and a repositioned inline timestamp. Unread cards get a tinted
+ *  surface + accent hairline so they pop. */
+@Composable
+private fun NovaDmCard(
+    dm: DmDto,
+    avatarUrl: String?,
+    modifier: Modifier = Modifier,
+    onOpen: () -> Unit,
+    onOpenProfile: () -> Unit,
+) {
+    val name = dm.peer.display_name ?: dm.peer.username
+    val online = presence(dm.peer.last_online)
+    val unread = dm.unread > 0
+    val cardBg =
+        if (unread) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceContainer
+    Row(
+        modifier
+            .fillMaxWidth()
+            .clip(NovaCorners.card)
+            .background(cardBg)
+            .then(
+                if (unread) Modifier.border(1.dp, MaterialTheme.colorScheme.primary, NovaCorners.card) else Modifier,
+            )
+            .clickableScale(pressedScale = 0.98f, onClick = onOpen)
+            .padding(horizontal = Spacing.m, vertical = Spacing.m),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier
+                .then(
+                    if (online) Modifier.border(2.5.dp, MaterialTheme.colorScheme.secondary, CircleShape).padding(3.dp)
+                    else Modifier,
+                )
+                .clip(CircleShape)
+                .clickable(onClick = onOpenProfile)
+                .semantics {
+                    role = Role.Button
+                    contentDescription = "open $name profile"
+                },
+        ) {
+            Avatar(name, avatarUrl, 60.dp, sharedKey = "chat-avatar-${dm.channel_id}")
+        }
+        Spacer(Modifier.width(Spacing.m))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(Spacing.xxs)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    name.lowercase(),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                dm.last_message?.let {
+                    Spacer(Modifier.width(Spacing.s))
+                    Text(
+                        smartTime(it.created_at),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (unread) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    dm.last_message?.let { if (it.deleted) "message deleted" else it.content } ?: "say hi 👋",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = if (unread) FontWeight.SemiBold else null,
+                    color = if (unread) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                if (unread) {
+                    Spacer(Modifier.width(Spacing.s))
+                    UnreadPill(dm.unread)
+                }
+            }
+        }
+    }
+}
