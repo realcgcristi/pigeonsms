@@ -1,0 +1,9 @@
+.friends__search { padding: var(--sp-m) var(--sp-l) var(--sp-s); }
+.friends__section {
+  padding: var(--sp-l) var(--sp-l) var(--sp-xs);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+}
+.friends__hint { padding: 0 var(--sp-l) var(--sp-m); color: var(--text-tertiary); font-size: 14px; }
+.friends__add { display: flex; flex-direction: column; gap: var(--sp-m); padding: var(--sp-l); }

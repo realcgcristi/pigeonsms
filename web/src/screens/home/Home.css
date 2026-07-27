@@ -1,0 +1,3 @@
+.home__search { padding: 0 var(--sp-l) var(--sp-s); }
+.home__meta { display: flex; flex-direction: column; align-items: flex-end; gap: var(--sp-xs); }
+.home__time { font-size: 12px; color: var(--text-tertiary); }
