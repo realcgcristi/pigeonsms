@@ -1,0 +1,19 @@
+{
+  "name": "pigeonsms-echo-bot",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Runnable PigeonSMS bot example — long-poll and webhook flavours, built on pigeonsms.js",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "pigeonsms.js": "file:../../packages/pigeonsms.js"
+  },
+  "scripts": {
+    "start": "node poll-bot.mjs",
+    "poll": "node poll-bot.mjs",
+    "webhook": "node webhook-bot.mjs"
+  },
+  "license": "MIT"
+}
