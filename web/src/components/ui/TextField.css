@@ -1,0 +1,137 @@
+.ui-textfield {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+}
+
+.ui-textfield__box {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-s);
+  min-height: var(--touch);
+  padding: 0 var(--sp-l);
+  border: 1px solid var(--outline);
+  border-radius: var(--r-input);
+  background: transparent;
+  transition:
+    border-color 120ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    background-color 120ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.ui-textfield--labelled .ui-textfield__box {
+  min-height: var(--cta-h);
+  padding-top: var(--sp-xs);
+}
+
+.ui-textfield--multiline .ui-textfield__box {
+  align-items: flex-start;
+  padding-top: var(--sp-m);
+  padding-bottom: var(--sp-m);
+}
+
+.ui-textfield__box:hover {
+  border-color: color-mix(in srgb, var(--outline) 60%, var(--text-secondary));
+}
+
+.ui-textfield__box:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+
+.ui-textfield.is-error .ui-textfield__box {
+  border-color: var(--danger);
+}
+
+.ui-textfield.is-disabled .ui-textfield__box {
+  opacity: 0.55;
+}
+
+.ui-textfield__field {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  flex: 1;
+  min-width: 0;
+}
+
+.ui-textfield__label {
+  font-size: 11px;
+  line-height: 14px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-transform: lowercase;
+  padding-bottom: 2px;
+  cursor: text;
+}
+
+.ui-textfield__box:focus-within .ui-textfield__label {
+  color: var(--accent);
+}
+
+.ui-textfield.is-error .ui-textfield__label {
+  color: var(--danger);
+}
+
+.ui-textfield__input {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 16px;
+  line-height: 23px;
+  resize: none;
+  outline: none;
+}
+
+.ui-textfield__input::placeholder {
+  color: var(--text-tertiary);
+  text-transform: lowercase;
+}
+
+.ui-textfield__input:-webkit-autofill {
+  -webkit-text-fill-color: var(--text-primary);
+  transition: background-color 100000s;
+}
+
+.ui-textfield__leading,
+.ui-textfield__trailing {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  color: var(--text-secondary);
+}
+
+.ui-textfield__footer {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-s);
+  padding: var(--sp-xs) var(--sp-l) 0;
+}
+
+.ui-textfield__help {
+  font-size: 12px;
+  line-height: 17px;
+  color: var(--text-secondary);
+  text-transform: lowercase;
+}
+
+.ui-textfield.is-error .ui-textfield__help {
+  color: var(--danger);
+}
+
+.ui-textfield__counter {
+  margin-left: auto;
+  font-size: 11px;
+  line-height: 14px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+}

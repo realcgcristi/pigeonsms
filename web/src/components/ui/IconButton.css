@@ -1,0 +1,41 @@
+.ui-icon-button {
+  width: var(--touch);
+  height: var(--touch);
+  min-width: var(--touch);
+  min-height: var(--touch);
+  padding: 0;
+  border-radius: 999px;
+  color: var(--text-primary);
+  flex: none;
+}
+
+.ui-icon-button--accent {
+  color: var(--accent);
+}
+
+.ui-icon-button--danger {
+  color: var(--danger);
+}
+
+.ui-icon-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+}
+
+.ui-icon-button--filled {
+  background: var(--surface-high);
+}
+
+.ui-icon-button--filled:hover:not(:disabled) {
+  background: var(--surface-highest);
+}
+
+.ui-icon-button--badge {
+  border-radius: var(--r-icon-badge);
+  background: var(--surface-high);
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--outline));
+  color: var(--accent);
+}
+
+.ui-icon-button--badge:hover:not(:disabled) {
+  background: var(--surface-highest);
+}
