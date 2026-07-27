@@ -1,0 +1,10 @@
+name = "pigeonsms-docs-proxy"
+main = "src/index.ts"
+account_id = "b612cdaca9aaf283558726408f40b6c8"
+compatibility_date = "2026-07-01"
+workers_dev = false
+
+routes = [
+  { pattern = "docs.pigeonsms.aldi.best", custom_domain = true },
+  { pattern = "docs.pigeonsms.aldi.best/*", zone_name = "aldi.best" }
+]
