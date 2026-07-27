@@ -1,0 +1,29 @@
+.forum__post {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-m);
+  width: 100%;
+  padding: var(--sp-m) var(--sp-l);
+  background: none;
+  border: 0;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+.forum__post:hover { background: color-mix(in srgb, var(--surface-high) 50%, transparent); }
+.forum__post-body { flex: 1 1 auto; min-width: 0; }
+.forum__post-title { display: flex; align-items: center; gap: var(--sp-s); font-size: 16px; font-weight: 600; }
+.forum__post-meta { display: block; font-size: 13px; color: var(--text-secondary); margin-top: 2px; }
+.forum__dot { width: 8px; height: 8px; border-radius: 999px; background: var(--accent); }
+.forum__like {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-tertiary);
+  font-size: 13px;
+}
+.forum__thread { display: flex; flex-direction: column; gap: var(--sp-m); padding: 0 var(--sp-l) var(--sp-l); }
+.forum__root { color: var(--text-primary); }
+.forum__reply { display: flex; gap: var(--sp-s); font-size: 14px; }
+.forum__reply-author { font-size: 12px; color: var(--text-tertiary); }
+.forum__composer { display: flex; align-items: center; gap: var(--sp-s); margin-top: var(--sp-m); }
