@@ -1,0 +1,75 @@
+.spaces__icon { border-radius: var(--r-group); }
+.spaces__icon .ui-avatar__img,
+.spaces__icon .ui-avatar__fallback { border-radius: var(--r-group); }
+.spaces__badge {
+  min-width: 22px;
+  height: 22px;
+  padding: 0 7px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 12px;
+  font-weight: 700;
+}
+.spaces__form { display: flex; flex-direction: column; gap: var(--sp-m); padding: var(--sp-l); }
+.nest__hero {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-m);
+  padding: var(--sp-l);
+}
+.nest__hero-text { min-width: 0; }
+.nest__hero-name { font-size: 24px; font-weight: 700; }
+.nest__hero-meta { color: var(--text-secondary); font-size: 14px; }
+.nest__actions { display: flex; gap: var(--sp-s); padding: 0 var(--sp-l) var(--sp-m); flex-wrap: wrap; }
+.nest__section {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--sp-l) var(--sp-l) var(--sp-xs);
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+.nest__channel-icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--r-icon-badge);
+  background: var(--surface-high);
+  color: var(--text-secondary);
+}
+.nest__form { display: flex; flex-direction: column; gap: var(--sp-m); padding: var(--sp-l); }
+.nest__kinds { display: flex; gap: var(--sp-s); }
+.nest__member-actions { display: flex; gap: var(--sp-xs); }
+.nest__role-dot { width: 12px; height: 12px; border-radius: 999px; }
+.nest__perm {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-m);
+  padding: var(--sp-s) var(--sp-l);
+}
+.nest__emoji-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: var(--sp-m);
+  padding: var(--sp-l);
+}
+.nest__emoji {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-xs);
+  padding: var(--sp-s);
+  border: 1px solid var(--outline);
+  border-radius: var(--r-chip);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  word-break: break-all;
+}
+.nest__emoji img { width: 44px; height: 44px; object-fit: contain; }
