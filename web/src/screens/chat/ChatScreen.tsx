@@ -1,18 +1,27 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api } from '@/api/client'
-import type { ChannelCommandDto, InvitePreviewResponse, SpaceEmojiDto } from '@/api/dto'
+import type { ChannelCommandDto, InvitePreviewResponse, MessageDto, SpaceEmojiDto } from '@/api/dto'
 import {
   AttachFile,
+  Campaign,
+  Close,
   Call,
   EmojiEmotions,
   Forum,
+  Mic,
+  MoreVert,
   Poll,
   PushPin,
   Search,
   Send,
+  Tag,
+  Timer,
 } from '@/components/icons'
+import { ConversationDetails } from '@/components/chat/ConversationDetails'
+import { ImageEditor } from '@/components/chat/ImageEditor'
 import { MessageRow } from '@/components/chat/MessageRow'
+import { NestIcon } from '@/components/Logo'
 import { Avatar } from '@/components/ui/Avatar'
 import { Button } from '@/components/ui/Button'
 import { IconButton } from '@/components/ui/IconButton'
@@ -20,10 +29,11 @@ import { TextField } from '@/components/ui/TextField'
 import { Dialog, Sheet } from '@/components/ui/Overlay'
 import { Screen, TopBar } from '@/components/ui/Layout'
 import { useToast } from '@/components/ui/Toast'
-import { daySeparator, sameDay } from '@/lib/format'
+import { daySeparator, relativeTime, sameDay } from '@/lib/format'
 import { emojiQueryAt } from '@/lib/markdown'
 import type { ChatMessage } from '@/store/chat'
 import { useChat } from '@/store/chat'
+import { usePrefs } from '@/store/prefs'
 import { useSession } from '@/store/session'
 import { useSocial } from '@/store/social'
 import '@/components/chat/chat.css'
@@ -33,6 +43,7 @@ const UNICODE = ['😀', '😂', '🥲', '😍', '🤔', '👍', '🙏', '🔥',
 type CommandOption = NonNullable<ChannelCommandDto['options']>[number]
 type CommandValues = Record<string, string | number | boolean>
 type CommandToken = { key: string | null; value: string }
+type SendOptions = { ttl?: number | null; sendAt?: number | null }
 
 const TOKEN = /([a-zA-Z0-9_-]+):(?:"([^"]*)"|'([^']*)'|(\S+))|"([^"]*)"|'([^']*)'|(\S+)/g
 
@@ -100,8 +111,8 @@ type ComposerProps = {
   emoji: SpaceEmojiDto[]
   editing: { id: string; content: string } | null
   isSpace: boolean
-  onSubmit: (text: string) => void
-  onAttach: (file: File) => void
+  onSubmit: (text: string, options: SendOptions) => void
+  onAttach: (file: File, options: SendOptions) => void
   onSticker: (id: string) => void
   onPoll: () => void
 }
@@ -122,11 +133,19 @@ const Composer = memo(function Composer({
   const [active, setActive] = useState(0)
   const [dismissed, setDismissed] = useState(false)
   const [sending, setSending] = useState(false)
+  const [showOptions, setShowOptions] = useState(false)
+  const [ttl, setTtl] = useState<number | null>(null)
+  const [sendAt, setSendAt] = useState('')
+  const [recording, setRecording] = useState(false)
   const typingAt = useRef(0)
   const requested = useRef<Record<string, boolean>>({})
   const fileRef = useRef<HTMLInputElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const recorderRef = useRef<MediaRecorder | null>(null)
+  const recordingStreamRef = useRef<MediaStream | null>(null)
+  const chunksRef = useRef<Blob[]>([])
   const toast = useToast()
+  const invisible = usePrefs((s) => s.invisible)
 
   useEffect(() => {
     if (editing) {
@@ -143,7 +162,10 @@ const Composer = memo(function Composer({
     api
       .channelCommands(channelId)
       .then((list) => setCommands((prev) => ({ ...prev, [channelId]: list })))
-      .catch(() => setCommands((prev) => ({ ...prev, [channelId]: [] })))
+      .catch(() => {
+        requested.current[channelId] = false
+        setCommands((prev) => ({ ...prev, [channelId]: [] }))
+      })
   }, [channelId, slash])
 
   const available = commands[channelId] ?? []
@@ -156,7 +178,9 @@ const Composer = memo(function Composer({
   const matches = useMemo(() => {
     if (!slash || inArgs) return []
     const needle = head.toLowerCase()
-    return available.filter((c) => c.name.startsWith(needle)).slice(0, 8)
+    const candidates = available.filter((command) => command.name.toLowerCase().startsWith(needle))
+    const exact = candidates.filter((command) => command.name.toLowerCase() === needle)
+    return (exact.length ? exact : candidates).slice(0, 5)
   }, [available, head, inArgs, slash])
 
   const paletteOpen = !dismissed && matches.length > 0
@@ -231,8 +255,55 @@ const Composer = memo(function Composer({
       void runCommand(body)
       return
     }
+    const when = sendAt ? new Date(sendAt).getTime() : null
+    if (when && when <= Date.now() + 15_000) {
+      toast.error('pick a time at least 15 seconds from now')
+      return
+    }
     setText('')
-    onSubmit(body)
+    onSubmit(body, { ttl, sendAt: when })
+    setSendAt('')
+  }
+
+  const stopRecording = () => {
+    recorderRef.current?.stop()
+    recorderRef.current = null
+    setRecording(false)
+  }
+
+  const toggleRecording = async () => {
+    if (recording) {
+      stopRecording()
+      return
+    }
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      toast.error('voice notes are not supported in this browser')
+      return
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const recorder = new MediaRecorder(stream)
+      recordingStreamRef.current = stream
+      chunksRef.current = []
+      recorder.ondataavailable = (event) => {
+        if (event.data.size) chunksRef.current.push(event.data)
+      }
+      recorder.onstop = () => {
+        const type = recorder.mimeType || 'audio/webm'
+        const blob = new Blob(chunksRef.current, { type })
+        recordingStreamRef.current?.getTracks().forEach((track) => track.stop())
+        recordingStreamRef.current = null
+        chunksRef.current = []
+        if (blob.size) {
+          onAttach(new File([blob], `voice-${Date.now()}.webm`, { type }), { ttl, sendAt: null })
+        }
+      }
+      recorder.start(250)
+      recorderRef.current = recorder
+      setRecording(true)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'microphone permission was denied')
+    }
   }
 
   return (
@@ -285,7 +356,37 @@ const Composer = memo(function Composer({
         </div>
       ) : null}
 
-      <div className="composer">
+      {showOptions ? (
+        <div className="composer-options">
+          <span>disappears</span>
+          {[
+            { label: 'off', value: null },
+            { label: '1h', value: 3600 },
+            { label: '1d', value: 86400 },
+            { label: '7d', value: 604800 },
+          ].map((option) => (
+            <button
+              key={option.label}
+              type="button"
+              className={ttl === option.value ? 'composer-options__chip composer-options__chip--on' : 'composer-options__chip'}
+              onClick={() => setTtl(option.value)}
+            >
+              {option.label}
+            </button>
+          ))}
+          <label>
+            send later
+            <input
+              type="datetime-local"
+              value={sendAt}
+              min={new Date(Date.now() + 60_000).toISOString().slice(0, 16)}
+              onChange={(event) => setSendAt(event.target.value)}
+            />
+          </label>
+        </div>
+      ) : null}
+
+      <div className={recording ? 'composer composer--recording' : 'composer'}>
         <IconButton label="attach" onClick={() => fileRef.current?.click()}>
           <AttachFile />
         </IconButton>
@@ -297,6 +398,12 @@ const Composer = memo(function Composer({
             <Poll />
           </IconButton>
         ) : null}
+        <IconButton label="message options" filled={showOptions || !!ttl || !!sendAt} onClick={() => setShowOptions((open) => !open)}>
+          <Timer />
+        </IconButton>
+        <IconButton label={recording ? 'stop voice note' : 'record voice note'} filled={recording} onClick={() => void toggleRecording()}>
+          <Mic />
+        </IconButton>
         <textarea
           ref={inputRef}
           className="composer__input"
@@ -311,7 +418,7 @@ const Composer = memo(function Composer({
             const now = Date.now()
             if (now - typingAt.current > 3000) {
               typingAt.current = now
-              void api.typing(channelId)
+              if (!invisible) void api.typing(channelId)
             }
           }}
           onKeyDown={(e) => {
@@ -330,7 +437,12 @@ const Composer = memo(function Composer({
               e.preventDefault()
               if (paletteOpen) {
                 const command = matches[index]
-                if (command) complete(command)
+                if (command) {
+                  const exact = command.name.toLowerCase() === head.toLowerCase()
+                  const needsOptions = orderedOptions(command).some((option) => option.required)
+                  if (exact && !needsOptions) submit()
+                  else complete(command)
+                }
                 return
               }
               submit()
@@ -348,9 +460,13 @@ const Composer = memo(function Composer({
         hidden
         onChange={(e) => {
           const file = e.target.files?.[0]
-          if (file) onAttach(file)
+          if (file) {
+            if (sendAt) toast.error('scheduled messages cannot include attachments')
+            else onAttach(file, { ttl, sendAt: null })
+          }
           e.target.value = ''
         }}
+        accept="image/*,video/*,audio/*,.pdf,.zip,.txt"
       />
 
       <Sheet open={picker} title="emoji" onClose={() => setPicker(false)}>
@@ -410,6 +526,11 @@ const MessageList = memo(function MessageList({
   onOpenProfile,
   onInvite,
   onVote,
+  onPin,
+  onSuperPin,
+  onThread,
+  onOpenMedia,
+  read,
 }: {
   messages: ChatMessage[]
   meId: string | undefined
@@ -422,6 +543,11 @@ const MessageList = memo(function MessageList({
   onOpenProfile: (id: string) => void
   onInvite: (code: string) => void
   onVote: (id: string, optionId: string) => void
+  onPin: (message: ChatMessage) => void
+  onSuperPin: (message: ChatMessage) => void
+  onThread: (message: ChatMessage) => void
+  onOpenMedia: (message: ChatMessage) => void
+  read: Record<string, number>
 }) {
   return (
     <>
@@ -430,7 +556,11 @@ const MessageList = memo(function MessageList({
         const showDay = !previous || !sameDay(previous.created_at ?? 0, message.created_at ?? 0)
         const showAuthor = !previous || previous.author?.id !== message.author?.id || showDay
         return (
-          <div key={message.id}>
+          <div
+            key={message.id}
+            id={`message-${message.id}`}
+            className="chat__message-anchor"
+          >
             {showDay ? <div className="chat__day">{daySeparator(message.created_at ?? 0)}</div> : null}
             <MessageRow
               message={message}
@@ -446,6 +576,15 @@ const MessageList = memo(function MessageList({
               onOpenProfile={onOpenProfile}
               onInvite={onInvite}
               onVote={(optionId) => onVote(message.id, optionId)}
+              onPin={() => onPin(message)}
+              onSuperPin={() => onSuperPin(message)}
+              onThread={() => onThread(message)}
+              onOpenMedia={() => onOpenMedia(message)}
+              seenCount={
+                message.seq
+                  ? Object.entries(read).filter(([userId, seq]) => userId !== meId && seq >= (message.seq ?? 0)).length
+                  : 0
+              }
             />
           </div>
         )
@@ -461,18 +600,28 @@ export default function ChatScreen() {
   const toast = useToast()
   const me = useSession((s) => s.user)
   const dms = useSocial((s) => s.dms)
+  const spaces = useSocial((s) => s.spaces)
+  const loadSpaces = useSocial((s) => s.loadSpaces)
   const clearUnread = useSocial((s) => s.clearUnread)
 
   const messages = useChat((s) => s.channels[channelId]?.messages)
   const typing = useChat((s) => s.channels[channelId]?.typing)
+  const read = useChat((s) => s.channels[channelId]?.read)
+  const error = useChat((s) => s.channels[channelId]?.error)
+  const pins = useChat((s) => s.channels[channelId]?.pins)
+  const superPin = useChat((s) => s.channels[channelId]?.superPin)
   const load = useChat((s) => s.load)
   const loadMore = useChat((s) => s.loadMore)
+  const loadDetails = useChat((s) => s.loadDetails)
   const send = useChat((s) => s.send)
   const sendSticker = useChat((s) => s.sendSticker)
   const edit = useChat((s) => s.edit)
   const remove = useChat((s) => s.remove)
   const react = useChat((s) => s.react)
   const retry = useChat((s) => s.retry)
+  const togglePin = useChat((s) => s.togglePin)
+  const makeSuperPin = useChat((s) => s.setSuperPin)
+  const removeSuperPin = useChat((s) => s.removeSuperPin)
   const markRead = useChat((s) => s.markRead)
   const emoji = useChat((s) => s.emoji)
   const loadEmoji = useChat((s) => s.loadEmoji)
@@ -486,49 +635,100 @@ export default function ChatScreen() {
   const [options, setOptions] = useState('')
   const [invite, setInvite] = useState<InvitePreviewResponse | null>(null)
   const [inviteCode, setInviteCode] = useState('')
+  const [detailsOpen, setDetailsOpen] = useState(false)
+  const [wideDetails, setWideDetails] = useState(() => window.matchMedia('(min-width: 1200px)').matches)
+  const [mediaMessage, setMediaMessage] = useState<MessageDto | null>(null)
+  const [pendingImage, setPendingImage] = useState<{ file: File; options: SendOptions } | null>(null)
+
+  useEffect(() => {
+    const media = window.matchMedia('(min-width: 1200px)')
+    const update = () => setWideDetails(media.matches)
+    update()
+    media.addEventListener('change', update)
+    return () => media.removeEventListener('change', update)
+  }, [])
 
   const isSpace = params.get('space') === 'true'
   const dm = dms.find((d) => d.channel_id === channelId)
-  const title = params.get('name') ?? dm?.peer.display_name ?? dm?.peer.username ?? 'chat'
+  const space = spaces.find((item) => item.channels?.some((channel) => channel.id === channelId))
+  const spaceChannels = space?.channels ?? []
+  const currentSpaceChannel = spaceChannels.find((channel) => channel.id === channelId)
+  const title =
+    params.get('name') ??
+    currentSpaceChannel?.name ??
+    dm?.peer.display_name ??
+    dm?.peer.username ??
+    'chat'
   const list = messages ?? []
 
   useEffect(() => {
+    if (isSpace) void loadSpaces()
+  }, [isSpace, loadSpaces])
+
+  useEffect(() => {
     void load(channelId, true)
+    void loadDetails(channelId)
     void loadEmoji()
     return subscribe()
-  }, [channelId, load, loadEmoji, subscribe])
+  }, [channelId, load, loadDetails, loadEmoji, subscribe])
 
   useEffect(() => {
     if (!list.length) return
     markRead(channelId)
     clearUnread(channelId)
-    const node = listRef.current
-    if (node) node.scrollTop = node.scrollHeight
-  }, [list.length, channelId, markRead, clearUnread])
+    const targetMessage = params.get('message')
+    const scrollToEnd = () => {
+      const node = listRef.current
+      if (!node) return
+      const target = targetMessage ? document.getElementById(`message-${targetMessage}`) : null
+      if (target) {
+        target.scrollIntoView({ block: 'center' })
+        target.classList.add('chat__message-anchor--highlight')
+        window.setTimeout(() => target.classList.remove('chat__message-anchor--highlight'), 2200)
+      } else {
+        node.scrollTop = node.scrollHeight
+      }
+    }
+    scrollToEnd()
+    const frame = requestAnimationFrame(scrollToEnd)
+    const timeout = window.setTimeout(scrollToEnd, 80)
+    return () => {
+      cancelAnimationFrame(frame)
+      window.clearTimeout(timeout)
+    }
+  }, [list.length, channelId, markRead, clearUnread, params])
 
   const submit = useCallback(
-    (body: string) => {
+    (body: string, options: SendOptions) => {
       if (editing) {
         void edit(channelId, editing.id, body)
         setEditing(null)
         return
       }
-      void send(channelId, body, { replyTo })
+      void send(channelId, body, { replyTo, ...options })
       setReplyTo(null)
     },
     [channelId, edit, editing, replyTo, send],
   )
 
   const attach = useCallback(
-    async (file: File) => {
+    async (file: File, options: SendOptions) => {
       try {
         const attachment = await api.uploadResumable(file)
-        await send(channelId, '', { attachment })
+        await send(channelId, '', { attachment, ttl: options.ttl, sendAt: options.sendAt })
       } catch (err) {
         toast.error(err instanceof Error ? err.message : 'upload failed')
       }
     },
     [channelId, send, toast],
+  )
+
+  const prepareAttachment = useCallback(
+    (file: File, options: SendOptions) => {
+      if (file.type.startsWith('image/')) setPendingImage({ file, options })
+      else void attach(file, options)
+    },
+    [attach],
   )
 
   const openInvite = useCallback(
@@ -558,6 +758,56 @@ export default function ChatScreen() {
     [channelId, load],
   )
 
+  const jumpToMessage = useCallback((id: string) => {
+    const target = document.getElementById(`message-${id}`)
+    if (!target) {
+      toast.error('load older messages to jump to this one')
+      return
+    }
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    target.classList.add('chat__message-anchor--highlight')
+    window.setTimeout(() => target.classList.remove('chat__message-anchor--highlight'), 2200)
+    setDetailsOpen(false)
+  }, [toast])
+
+  const onPin = useCallback(
+    async (message: ChatMessage) => {
+      try {
+        await togglePin(channelId, message.id, !!message.pinned || (pins ?? []).some((item) => item.id === message.id))
+        toast.show(message.pinned ? 'message unpinned' : 'message pinned')
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'could not change pin')
+      }
+    },
+    [channelId, pins, toast, togglePin],
+  )
+
+  const onSuperPin = useCallback(
+    async (message: ChatMessage) => {
+      try {
+        await makeSuperPin(channelId, message.id)
+        toast.show('super pin updated')
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'could not set super pin')
+      }
+    },
+    [channelId, makeSuperPin, toast],
+  )
+
+  const onThread = useCallback(
+    async (message: ChatMessage) => {
+      try {
+        const thread = message.thread_id
+          ? { id: message.thread_id }
+          : await api.createThread(channelId, message.id, message.content.slice(0, 60) || undefined)
+        navigate(`/thread/${thread.id}`)
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'could not open thread')
+      }
+    },
+    [channelId, navigate, toast],
+  )
+
   const createPoll = async () => {
     const opts = options
       .split('\n')
@@ -582,13 +832,100 @@ export default function ChatScreen() {
     (name) => Date.now() - (typing?.[name] ?? 0) < 6000 && name !== me?.username,
   )
 
+  const openSpaceChannel = (id: string, kind: string | undefined, name: string) => {
+    const encodedName = encodeURIComponent(name)
+    if (kind === 'forum') navigate(`/forum/${id}?name=${encodedName}&spaceId=${encodeURIComponent(space?.id ?? '')}`)
+    else if (kind === 'voice') navigate(`/call/${id}?name=${encodedName}&spaceId=${encodeURIComponent(space?.id ?? '')}`)
+    else navigate(`/chat/${id}?space=true&name=${encodedName}`)
+  }
+
   return (
-    <Screen className="chat">
+    <Screen className={detailsOpen ? 'chat chat--workspace chat--details-open' : 'chat chat--workspace'}>
+      <aside className={isSpace ? 'chat__sidebar chat__sidebar--space' : 'chat__sidebar'}>
+        <div className="chat__sidebar-head">
+          {isSpace ? (
+            <span className="chat__sidebar-heading">
+              <NestIcon size={18} />
+              <span>{space?.name ?? 'nest'}</span>
+            </span>
+          ) : (
+            <span>chats</span>
+          )}
+          <button
+            type="button"
+            onClick={() => navigate(isSpace && space ? `/nest/${space.id}` : '/')}
+          >
+            {isSpace ? 'view nest' : 'view all'}
+          </button>
+        </div>
+        <div className="chat__sidebar-list">
+          {isSpace
+            ? spaceChannels.map((channel) => {
+                const channelName = channel.name ?? 'channel'
+                const kind = channel.kind
+                return (
+                  <button
+                    key={channel.id}
+                    type="button"
+                    className={
+                      channel.id === channelId
+                        ? 'chat__sidebar-row chat__sidebar-row--on'
+                        : 'chat__sidebar-row'
+                    }
+                    onClick={() => openSpaceChannel(channel.id, kind, channelName)}
+                  >
+                    <span className="chat__sidebar-channel-icon">
+                      {kind === 'forum' ? <Forum size={18} /> : kind === 'voice' ? <Campaign size={18} /> : <Tag size={18} />}
+                    </span>
+                    <span className="chat__sidebar-copy">
+                      <strong>#{channelName}</strong>
+                      <small>{channel.topic || (kind === 'forum' ? 'forum' : kind === 'voice' ? 'voice' : 'text channel')}</small>
+                    </span>
+                    <span className="chat__sidebar-meta">
+                      {channel.unread && channel.unread > 0 ? <b>{channel.unread > 99 ? '99+' : channel.unread}</b> : null}
+                    </span>
+                  </button>
+                )
+              })
+            : dms.map((item) => {
+                const itemName = item.peer.display_name || item.peer.username
+                return (
+              <button
+                key={item.channel_id}
+                type="button"
+                className={item.channel_id === channelId ? 'chat__sidebar-row chat__sidebar-row--on' : 'chat__sidebar-row'}
+                onClick={() => navigate(`/chat/${item.channel_id}?name=${encodeURIComponent(itemName)}`)}
+              >
+                <Avatar name={itemName} avatarKey={item.peer.avatar_key} size="sm" />
+                <span className="chat__sidebar-copy">
+                  <strong>{itemName}</strong>
+                  <small>{item.last_message?.content || 'start a conversation'}</small>
+                </span>
+                <span className="chat__sidebar-meta">
+                  <small>{relativeTime(item.last_message?.created_at ?? 0)}</small>
+                  {item.unread > 0 ? <b>{item.unread > 99 ? '99+' : item.unread}</b> : null}
+                </span>
+              </button>
+                )
+              })}
+          {isSpace && spaceChannels.length === 0 ? (
+            <div className="chat__sidebar-empty">loading channels...</div>
+          ) : null}
+        </div>
+      </aside>
+
+      <div className="chat__conversation">
       <TopBar
         title={title}
         subtitle={typingNames.length ? `${typingNames.join(', ')} typing…` : undefined}
         onBack={() => navigate(-1)}
-        leading={<Avatar name={title} avatarKey={dm?.peer.avatar_key} size="sm" />}
+        leading={
+          <Avatar
+            name={isSpace ? space?.name ?? 'nest' : title}
+            avatarKey={isSpace ? space?.icon_square_key || space?.icon_key : dm?.peer.avatar_key}
+            size="sm"
+          />
+        }
         actions={
           <>
             {isSpace ? (
@@ -600,15 +937,57 @@ export default function ChatScreen() {
                 <Call />
               </IconButton>
             )}
-            <IconButton label="search" onClick={() => navigate(`/search?channel=${channelId}`)}>
+            <IconButton
+              label="search"
+              onClick={() =>
+                navigate(
+                  `/search?channel=${channelId}${space?.id ? `&space=${encodeURIComponent(space.id)}` : ''}`,
+                )
+              }
+            >
               <Search />
             </IconButton>
-            <IconButton label="pins" onClick={() => void api.pins(channelId)}>
-              <PushPin />
+            <IconButton label="conversation details" filled={detailsOpen} onClick={() => setDetailsOpen((open) => !open)}>
+              <MoreVert />
             </IconButton>
           </>
         }
       />
+
+      {superPin ? (
+        <div
+          className="chat__super-pin"
+          role="button"
+          tabIndex={0}
+          onClick={() => jumpToMessage(superPin.message.id)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' || event.key === ' ') jumpToMessage(superPin.message.id)
+          }}
+        >
+          <PushPin size={17} />
+          <span>
+            <strong>super pin</strong>
+            {superPin.message.content || superPin.message.attachment?.name || 'pinned message'}
+          </span>
+          <button
+            type="button"
+            aria-label="dismiss super pin"
+            onClick={(event) => {
+              event.stopPropagation()
+              void api.dismissSuperPin(channelId).then(() => loadDetails(channelId))
+            }}
+          >
+            <Close size={17} />
+          </button>
+        </div>
+      ) : null}
+
+      {error ? (
+        <div className="chat__error" role="alert">
+          <span>{error}</span>
+          <Button variant="text" onClick={() => void load(channelId, true)}>retry</Button>
+        </div>
+      ) : null}
 
       <div
         className="chat__list"
@@ -616,8 +995,8 @@ export default function ChatScreen() {
         onScroll={(e) => {
           if (e.currentTarget.scrollTop < 60) void loadMore(channelId)
         }}
-      >
-        <MessageList
+          >
+          <MessageList
           messages={list}
           meId={me?.id}
           emoji={emoji}
@@ -629,8 +1008,13 @@ export default function ChatScreen() {
           onOpenProfile={onOpenProfile}
           onInvite={(code) => void openInvite(code)}
           onVote={onVote}
-        />
-      </div>
+          onPin={(message) => void onPin(message)}
+          onSuperPin={(message) => void onSuperPin(message)}
+          onThread={(message) => void onThread(message)}
+          onOpenMedia={setMediaMessage}
+          read={read ?? {}}
+          />
+        </div>
 
       {replyTo ? (
         <div className="composer__reply">
@@ -647,10 +1031,59 @@ export default function ChatScreen() {
         editing={editing}
         isSpace={isSpace}
         onSubmit={submit}
-        onAttach={(file) => void attach(file)}
+        onAttach={prepareAttachment}
         onSticker={(id) => void sendSticker(channelId, id)}
         onPoll={() => setPollOpen(true)}
       />
+      </div>
+
+      {detailsOpen && wideDetails ? (
+        <aside className="chat__details">
+          <ConversationDetails
+            channelId={channelId}
+            title={title}
+            avatarKey={isSpace ? space?.icon_square_key || space?.icon_key : dm?.peer.avatar_key}
+            spaceId={space?.id}
+            messages={list}
+            pins={pins ?? []}
+            superPin={superPin ?? null}
+            onClose={() => setDetailsOpen(false)}
+            onSearch={() =>
+              navigate(`/search?channel=${channelId}${space?.id ? `&space=${encodeURIComponent(space.id)}` : ''}`)
+            }
+            onJump={jumpToMessage}
+            onMedia={setMediaMessage}
+            onUnpin={(id) => {
+              const message = list.find((item) => item.id === id)
+              if (message) void onPin(message)
+              else void api.unpin(id).then(() => loadDetails(channelId))
+            }}
+            onRemoveSuperPin={() => void removeSuperPin(channelId)}
+          />
+        </aside>
+      ) : null}
+
+      {!wideDetails ? <div className="chat__details-sheet">
+        <Sheet open={detailsOpen} title={undefined} onClose={() => setDetailsOpen(false)}>
+          <ConversationDetails
+            channelId={channelId}
+            title={title}
+            avatarKey={isSpace ? space?.icon_square_key || space?.icon_key : dm?.peer.avatar_key}
+            spaceId={space?.id}
+            messages={list}
+            pins={pins ?? []}
+            superPin={superPin ?? null}
+            onClose={() => setDetailsOpen(false)}
+            onSearch={() =>
+              navigate(`/search?channel=${channelId}${space?.id ? `&space=${encodeURIComponent(space.id)}` : ''}`)
+            }
+            onJump={jumpToMessage}
+            onMedia={setMediaMessage}
+            onUnpin={(id) => void api.unpin(id).then(() => loadDetails(channelId))}
+            onRemoveSuperPin={() => void removeSuperPin(channelId)}
+          />
+        </Sheet>
+      </div> : null}
 
       <Sheet open={pollOpen} title="new poll" onClose={() => setPollOpen(false)}>
         <div className="nest__form">
@@ -695,6 +1128,55 @@ export default function ChatScreen() {
           </div>
         </div>
       </Dialog>
+
+      {mediaMessage?.attachment ? (
+        <div
+          className="media-viewer"
+          role="dialog"
+          aria-modal="true"
+          aria-label={mediaMessage.attachment.name || 'media viewer'}
+          onClick={() => setMediaMessage(null)}
+        >
+          <button type="button" className="media-viewer__close" aria-label="close media" onClick={() => setMediaMessage(null)}>
+            <Close />
+          </button>
+          {mediaMessage.attachment.type?.startsWith('video/') ? (
+            <video
+              src={api.mediaUrl(mediaMessage.attachment.key)}
+              controls
+              autoPlay
+              onClick={(event) => event.stopPropagation()}
+            />
+          ) : (
+            <img
+              src={api.mediaUrl(mediaMessage.attachment.key)}
+              alt={mediaMessage.attachment.name || 'shared image'}
+              onClick={(event) => event.stopPropagation()}
+            />
+          )}
+          <a
+            className="media-viewer__download"
+            href={api.mediaUrl(mediaMessage.attachment.key)}
+            target="_blank"
+            rel="noreferrer noopener"
+            onClick={(event) => event.stopPropagation()}
+          >
+            open original
+          </a>
+        </div>
+      ) : null}
+
+      {pendingImage ? (
+        <ImageEditor
+          file={pendingImage.file}
+          onCancel={() => setPendingImage(null)}
+          onSave={(file) => {
+            const options = pendingImage.options
+            setPendingImage(null)
+            void attach(file, options)
+          }}
+        />
+      ) : null}
     </Screen>
   )
 }

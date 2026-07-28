@@ -2,7 +2,7 @@ import { memo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '@/api/client'
 import type { MessageDto, SpaceEmojiDto } from '@/api/dto'
-import { Description, DoneAll, ErrorOutline, Schedule } from '@/components/icons'
+import { Description, DoneAll, ErrorOutline, MoreVert, Schedule } from '@/components/icons'
 import { Avatar } from '@/components/ui/Avatar'
 import { ContextMenu } from '@/components/ui/Overlay'
 import type { MenuItem } from '@/components/ui/Overlay'
@@ -27,6 +27,11 @@ function MessageRowBase({
   onOpenProfile,
   onInvite,
   onVote,
+  onPin,
+  onSuperPin,
+  onThread,
+  onOpenMedia,
+  seenCount,
 }: {
   message: ChatMessage
   mine: boolean
@@ -41,6 +46,11 @@ function MessageRowBase({
   onOpenProfile: (id: string) => void
   onInvite: (code: string) => void
   onVote: (optionId: string) => void
+  onPin: () => void
+  onSuperPin: () => void
+  onThread: () => void
+  onOpenMedia: () => void
+  seenCount?: number
 }) {
   const navigate = useNavigate()
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
@@ -61,6 +71,11 @@ function MessageRowBase({
   ]
   if (mine && message.state !== 'failed') items.push({ key: 'edit', label: 'edit', onSelect: onEdit })
   if (message.state === 'failed') items.push({ key: 'retry', label: 'try again', onSelect: onRetry })
+  if (message.state === 'sent') {
+    items.push({ key: 'pin', label: message.pinned ? 'unpin' : 'pin message', onSelect: onPin })
+    items.push({ key: 'super-pin', label: 'make super pin', onSelect: onSuperPin })
+    items.push({ key: 'thread', label: message.thread_id ? 'open thread' : 'start thread', onSelect: onThread })
+  }
   if (mine) items.push({ key: 'delete', label: 'delete', danger: true, onSelect: onDelete })
 
   if (message.kind === 'command') {
@@ -123,14 +138,18 @@ function MessageRowBase({
 
         {message.attachment ? (
           (message.attachment.type ?? '').startsWith('image/') ? (
+            <button type="button" className="msg__media-button" onClick={onOpenMedia}>
             <img
               className="msg__attachment"
               src={api.mediaUrl(message.attachment.key)}
               alt={message.attachment.name ?? 'image'}
               loading="lazy"
             />
+            </button>
           ) : (message.attachment.type ?? '').startsWith('video/') ? (
-            <video className="msg__attachment" src={api.mediaUrl(message.attachment.key)} controls />
+            <button type="button" className="msg__media-button" onClick={onOpenMedia}>
+              <video className="msg__attachment" src={api.mediaUrl(message.attachment.key)} preload="metadata" />
+            </button>
           ) : (message.attachment.type ?? '').startsWith('audio/') ? (
             <audio src={api.mediaUrl(message.attachment.key)} controls />
           ) : (
@@ -232,8 +251,21 @@ function MessageRowBase({
           {message.state === 'sent' && mine ? <DoneAll size={12} /> : null}
           {timeOfDay(message.created_at ?? 0)}
           {message.edited_at ? ' · edited' : ''}
+          {mine && seenCount ? ` · seen by ${seenCount}` : ''}
         </div>
       </div>
+
+      <button
+        type="button"
+        className="msg__more"
+        aria-label="message actions"
+        onClick={(event) => {
+          const rect = event.currentTarget.getBoundingClientRect()
+          setMenu({ x: rect.left, y: rect.bottom })
+        }}
+      >
+        <MoreVert size={17} />
+      </button>
 
       <ContextMenu
         open={!!menu}

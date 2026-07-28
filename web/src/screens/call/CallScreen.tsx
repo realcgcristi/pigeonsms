@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { connectCall } from '@/api/gateway'
 import type { CallEvent, CallMode, CallParticipant, CallSocket } from '@/api/gateway'
-import { CallEnd, Mic, MicOff, Videocam, VideocamOff } from '@/components/icons'
+import { CallEnd, Devices, Mic, MicOff, Refresh, Videocam, VideocamOff } from '@/components/icons'
+import { SpaceChannelRail } from '@/components/spaces/SpaceChannelRail'
 import { Avatar } from '@/components/ui/Avatar'
 import { IconButton } from '@/components/ui/IconButton'
 import { Screen, TopBar } from '@/components/ui/Layout'
@@ -14,6 +15,14 @@ import './Call.css'
 const ICE_SERVERS: RTCIceServer[] = [
   { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
 ]
+const turnUrl = import.meta.env.VITE_TURN_URL as string | undefined
+if (turnUrl) {
+  ICE_SERVERS.push({
+    urls: turnUrl,
+    username: import.meta.env.VITE_TURN_USERNAME as string | undefined,
+    credential: import.meta.env.VITE_TURN_CREDENTIAL as string | undefined,
+  })
+}
 
 type PeerState = {
   connection: RTCPeerConnection
@@ -32,11 +41,14 @@ export default function CallScreen() {
   const mode: CallMode = params.get('video') === 'true' ? 'video' : 'voice'
   const localRef = useRef<HTMLVideoElement>(null)
   const localStream = useRef<MediaStream | null>(null)
+  const sharedTrack = useRef<MediaStreamTrack | null>(null)
   const socketRef = useRef<CallSocket | null>(null)
   const peers = useRef(new Map<string, PeerState>())
+  const participantsRef = useRef(new Map<string, CallParticipant>())
 
   const [muted, setMuted] = useState(false)
   const [camera, setCamera] = useState(mode === 'video')
+  const [sharing, setSharing] = useState(false)
   const [status, setStatus] = useState('connecting…')
   const [remote, setRemote] = useState<{ id: string; name: string; stream: MediaStream }[]>([])
   const [started] = useState(() => Date.now())
@@ -74,9 +86,7 @@ export default function CallScreen() {
       connection.onconnectionstatechange = () => {
         if (connection.connectionState === 'connected') setStatus('connected')
         if (connection.connectionState === 'failed') {
-          // No TURN yet, so a symmetric-NAT pair simply cannot connect; say so
-          // instead of spinning on "connecting" forever.
-          setStatus('could not reach the other side')
+          setStatus(turnUrl ? 'connection failed — retrying may help' : 'connection failed — TURN is not configured')
         }
       }
       return state
@@ -120,6 +130,7 @@ export default function CallScreen() {
         // Whoever is already in the room gets an offer from the newcomer, so
         // exactly one side of each pair creates the offer.
         for (const participant of event.participants) {
+          participantsRef.current.set(participant.userId, participant)
           if (participant.userId === me?.id) continue
           const peer = peerFor(participant, socket)
           const offer = await peer.connection.createOffer()
@@ -129,6 +140,7 @@ export default function CallScreen() {
         return
       }
       if (event.type === 'join') {
+        participantsRef.current.set(event.participant.userId, event.participant)
         setStatus('connecting…')
         return
       }
@@ -136,11 +148,12 @@ export default function CallScreen() {
         const peer = peers.current.get(event.participant.userId)
         peer?.connection.close()
         peers.current.delete(event.participant.userId)
+        participantsRef.current.delete(event.participant.userId)
         setRemote((list) => list.filter((entry) => entry.id !== event.participant.userId))
         return
       }
       if (event.type === 'offer' || event.type === 'answer' || event.type === 'ice') {
-        const participant: CallParticipant = {
+        const participant: CallParticipant = participantsRef.current.get(event.from) ?? {
           userId: event.from,
           username: event.from,
           mode: event.mode,
@@ -172,6 +185,11 @@ export default function CallScreen() {
       for (const peer of peers.current.values()) peer.connection.close()
       peers.current.clear()
       localStream.current?.getTracks().forEach((track) => track.stop())
+      if (sharedTrack.current) {
+        sharedTrack.current.onended = null
+        sharedTrack.current.stop()
+      }
+      sharedTrack.current = null
       localStream.current = null
     }
   }, [channelId, mode, me?.id, peerFor, started, token, toast])
@@ -184,6 +202,10 @@ export default function CallScreen() {
   }
 
   const toggleCamera = async () => {
+    if (sharing) {
+      toast.error('stop sharing before changing your camera')
+      return
+    }
     const stream = localStream.current
     if (!stream) return
     const existing = stream.getVideoTracks()[0]
@@ -202,7 +224,14 @@ export default function CallScreen() {
       const track = video.getVideoTracks()[0]
       if (!track) return
       stream.addTrack(track)
-      for (const peer of peers.current.values()) peer.connection.addTrack(track, stream)
+      for (const peer of peers.current.values()) {
+        const sender = peer.connection.getSenders().find((item) => item.track?.kind === 'video')
+        if (sender) await sender.replaceTrack(track)
+        else peer.connection.addTrack(track, stream)
+        const offer = await peer.connection.createOffer()
+        await peer.connection.setLocalDescription(offer)
+        socketRef.current?.send({ type: 'offer', target: peer.participant.userId, data: offer })
+      }
       if (localRef.current) localRef.current.srcObject = stream
       setCamera(true)
       socketRef.current?.send({ type: 'camera', data: { on: true } })
@@ -211,11 +240,70 @@ export default function CallScreen() {
     }
   }
 
+  const retryConnections = async () => {
+    setStatus('reconnecting…')
+    for (const peer of peers.current.values()) {
+      try {
+        const offer = await peer.connection.createOffer({ iceRestart: true })
+        await peer.connection.setLocalDescription(offer)
+        socketRef.current?.send({ type: 'offer', target: peer.participant.userId, data: offer })
+      } catch {
+        setStatus('reconnect failed')
+      }
+    }
+  }
+
+  const stopSharing = async () => {
+    const track = sharedTrack.current
+    sharedTrack.current = null
+    if (track) {
+      track.onended = null
+      track.stop()
+    }
+    const cameraTrack = localStream.current?.getVideoTracks()[0] ?? null
+    for (const peer of peers.current.values()) {
+      const sender = peer.connection.getSenders().find((item) => item.track?.kind === 'video')
+      if (sender) await sender.replaceTrack(cameraTrack)
+    }
+    setSharing(false)
+  }
+
+  const toggleShare = async () => {
+    if (!navigator.mediaDevices?.getDisplayMedia) {
+      toast.error('screen sharing is not supported in this browser')
+      return
+    }
+    if (sharing) {
+      await stopSharing()
+      return
+    }
+    try {
+      const display = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false })
+      const track = display.getVideoTracks()[0]
+      if (!track) return
+      sharedTrack.current = track
+      for (const peer of peers.current.values()) {
+        const sender = peer.connection.getSenders().find((item) => item.track?.kind === 'video')
+        if (sender) await sender.replaceTrack(track)
+        else if (localStream.current) peer.connection.addTrack(track, localStream.current)
+        const offer = await peer.connection.createOffer()
+        await peer.connection.setLocalDescription(offer)
+        socketRef.current?.send({ type: 'offer', target: peer.participant.userId, data: offer })
+      }
+      track.onended = () => void stopSharing()
+      setSharing(true)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'screen share was cancelled')
+    }
+  }
+
   const title = params.get('name') ?? 'call'
   const others = useMemo(() => remote, [remote])
 
   return (
-    <Screen className="call">
+    <Screen className="chat chat--workspace">
+      {params.get('spaceId') ? <SpaceChannelRail channelId={channelId} spaceId={params.get('spaceId')} /> : null}
+      <div className="call chat__conversation">
       <TopBar title={title} subtitle={`${status} · ${duration(elapsed)}`} onBack={() => navigate(-1)} />
       <div className="call__stage">
         {others.length === 0 ? (
@@ -239,9 +327,16 @@ export default function CallScreen() {
         <IconButton label="camera" filled={camera} onClick={() => void toggleCamera()}>
           {camera ? <Videocam /> : <VideocamOff />}
         </IconButton>
+        <IconButton label={sharing ? 'stop sharing' : 'share screen'} filled={sharing} onClick={() => void toggleShare()}>
+          <Devices />
+        </IconButton>
+        <IconButton label="retry connection" onClick={() => void retryConnections()}>
+          <Refresh />
+        </IconButton>
         <IconButton label="hang up" tone="danger" filled onClick={() => navigate(-1)}>
           <CallEnd />
         </IconButton>
+      </div>
       </div>
     </Screen>
   )
