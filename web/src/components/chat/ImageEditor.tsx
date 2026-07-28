@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { BlurOn, Close, Crop, Draw, Edit, RotateRight, Send, Undo } from '@/components/icons'
 import { Button } from '@/components/ui/Button'
 
@@ -63,6 +64,18 @@ export function ImageEditor({
   useEffect(() => {
     if (ready) render()
   }, [ready, render])
+
+  useEffect(() => {
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onCancel()
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('keydown', onKeyDown)
+      previous?.focus()
+    }
+  }, [onCancel])
 
   const point = (event: React.PointerEvent<HTMLCanvasElement>): Point => {
     const canvas = event.currentTarget
@@ -147,12 +160,14 @@ export function ImageEditor({
     )
   }
 
-  return (
+  return createPortal(
     <div className="image-editor" role="dialog" aria-modal="true" aria-label="edit image">
-      <header>
-        <button type="button" onClick={onCancel} aria-label="close image editor"><Close /></button>
-        <strong>edit image</strong>
-        <Button leading={<Send size={17} />} onClick={save}>send</Button>
+      <header className="image-editor__header">
+        <button className="image-editor__close" type="button" onClick={onCancel} aria-label="close image editor">
+          <Close />
+        </button>
+        <strong className="image-editor__title">edit image</strong>
+        <Button leading={<Send size={17} />} onClick={save} disabled={!ready}>send</Button>
       </header>
       <div className="image-editor__stage">
         <canvas
@@ -164,26 +179,39 @@ export function ImageEditor({
           onPointerCancel={endDraw}
         />
       </div>
-      <div className="image-editor__tools">
-        <button type="button" onClick={() => setRotation((value) => (value + 90) % 360)}>
+      <div className="image-editor__tools" role="toolbar" aria-label="image editing tools">
+        <button type="button" title="rotate image" onClick={() => setRotation((value) => (value + 90) % 360)}>
           <RotateRight /><span>rotate</span>
         </button>
-        <button type="button" className={square ? 'is-on' : ''} onClick={() => setSquare((value) => !value)}>
+        <button
+          type="button"
+          className={square ? 'is-on' : ''}
+          aria-pressed={square}
+          title="toggle square crop"
+          onClick={() => setSquare((value) => !value)}
+        >
           <Crop /><span>square</span>
         </button>
-        <button type="button" className={drawing ? 'is-on' : ''} onClick={() => setDrawing((value) => !value)}>
+        <button
+          type="button"
+          className={drawing ? 'is-on' : ''}
+          aria-pressed={drawing}
+          title="draw on image"
+          onClick={() => setDrawing((value) => !value)}
+        >
           <Draw /><span>draw</span>
         </button>
-        <button type="button" onClick={addText}>
+        <button type="button" title="add text" onClick={addText}>
           <Edit /><span>text</span>
         </button>
-        <button type="button" onClick={undo}>
+        <button type="button" title="undo last edit" onClick={undo}>
           <Undo /><span>undo</span>
         </button>
-        <label>
+        <label title="blur image">
           <BlurOn />
           <span>blur</span>
           <input
+            aria-label="blur amount"
             type="range"
             min="0"
             max="10"
@@ -192,7 +220,8 @@ export function ImageEditor({
           />
         </label>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 

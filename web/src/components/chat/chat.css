@@ -621,45 +621,64 @@
 .image-editor {
   position: fixed;
   inset: 0;
-  z-index: 105;
-  display: flex;
+  z-index: 1000;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  width: 100vw;
+  height: 100dvh;
   min-height: 0;
-  flex-direction: column;
+  overflow: hidden;
   background: var(--ink);
   color: var(--text-primary);
+  isolation: isolate;
 }
-.image-editor > header {
+.image-editor__header {
   display: flex;
-  flex: 0 0 auto;
   align-items: center;
   gap: var(--sp-m);
-  min-height: 64px;
-  padding: env(safe-area-inset-top) var(--sp-l) 0;
-  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  min-height: calc(64px + env(safe-area-inset-top));
+  padding: env(safe-area-inset-top) max(var(--sp-l), env(safe-area-inset-right)) 0 max(var(--sp-l), env(safe-area-inset-left));
+  border-bottom: 1px solid color-mix(in srgb, var(--outline) 72%, transparent);
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
+  box-shadow: 0 12px 32px color-mix(in srgb, var(--ink) 38%, transparent);
+  backdrop-filter: blur(20px);
 }
-.image-editor > header > strong { flex: 1 1 auto; font-size: 18px; }
-.image-editor > header > button:first-child {
+.image-editor__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.image-editor__header > .ui-button { flex: 0 0 auto; }
+.image-editor__close {
   display: grid;
+  flex: 0 0 auto;
   place-items: center;
   width: 42px;
   height: 42px;
   border-radius: 999px;
   color: var(--text-primary);
+  transition: background var(--dur-quick) ease, transform var(--dur-quick) ease;
 }
+.image-editor__close:hover { background: var(--surface-high); }
+.image-editor__close:active { transform: scale(.94); }
 .image-editor__stage {
   display: grid;
-  flex: 1 1 auto;
   min-height: 0;
   place-items: center;
   overflow: hidden;
-  padding: var(--sp-l);
+  padding: clamp(var(--sp-m), 3vw, var(--sp-huge));
   background:
+    radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--accent) 5%, transparent), transparent 56%),
     linear-gradient(45deg, var(--surface-high) 25%, transparent 25%, transparent 75%, var(--surface-high) 75%),
     linear-gradient(45deg, var(--surface-high) 25%, var(--surface) 25%, var(--surface) 75%, var(--surface-high) 75%);
   background-position: 0 0, 10px 10px;
   background-size: 20px 20px;
 }
 .image-editor__canvas {
+  display: block;
   max-width: 100%;
   max-height: 100%;
   border-radius: 4px;
@@ -669,19 +688,25 @@
 .image-editor__canvas--drawing { cursor: crosshair; }
 .image-editor__tools {
   display: flex;
-  flex: 0 0 auto;
-  align-items: stretch;
+  align-items: center;
+  justify-content: flex-start;
   gap: var(--sp-xs);
-  min-height: 82px;
-  padding: var(--sp-s) var(--sp-m) calc(var(--sp-s) + env(safe-area-inset-bottom));
+  min-width: 0;
+  min-height: calc(84px + env(safe-area-inset-bottom));
+  padding: var(--sp-s) max(var(--sp-m), env(safe-area-inset-right)) calc(var(--sp-s) + env(safe-area-inset-bottom)) max(var(--sp-m), env(safe-area-inset-left));
   overflow-x: auto;
-  background: var(--surface);
+  border-top: 1px solid color-mix(in srgb, var(--outline) 72%, transparent);
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
+  box-shadow: 0 -12px 32px color-mix(in srgb, var(--ink) 38%, transparent);
+  scrollbar-width: none;
 }
+.image-editor__tools::-webkit-scrollbar { display: none; }
 .image-editor__tools button,
 .image-editor__tools label {
   display: flex;
   flex: 0 0 auto;
-  min-width: 62px;
+  min-width: 64px;
+  min-height: 64px;
   flex-direction: column;
   align-items: center;
   justify-content: center;
@@ -690,10 +715,39 @@
   border-radius: 12px;
   color: var(--text-secondary);
   font-size: 11px;
+  transition: background var(--dur-quick) ease, color var(--dur-quick) ease, transform var(--dur-quick) ease;
 }
+.image-editor__tools button:hover { background: var(--surface-high); color: var(--text-primary); }
+.image-editor__tools button:active { transform: scale(.94); }
 .image-editor__tools button.is-on { background: color-mix(in srgb, var(--accent) 24%, transparent); color: var(--accent); }
-.image-editor__tools label { min-width: 146px; }
-.image-editor__tools input { width: 110px; accent-color: var(--accent); }
+.image-editor__tools label { min-width: 148px; }
+.image-editor__tools input { width: 112px; accent-color: var(--accent); }
+
+@media (min-width: 720px) {
+  .image-editor__header {
+    min-height: 76px;
+    padding-inline: var(--sp-xl);
+  }
+
+  .image-editor__title {
+    font-size: var(--fs-title-lg);
+  }
+
+  .image-editor__tools {
+    justify-content: center;
+    min-height: 96px;
+    padding-inline: var(--sp-xl);
+  }
+
+  .image-editor__tools button,
+  .image-editor__tools label {
+    border: 1px solid transparent;
+  }
+
+  .image-editor__tools button:hover {
+    border-color: color-mix(in srgb, var(--outline) 72%, transparent);
+  }
+}
 
 @media (min-width: 720px) {
   .chat__list {
