@@ -1,0 +1,78 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "PigeonSMS",
+  "version": "3.0.0",
+  "identifier": "best.aldi.pigeonsms",
+  "build": {
+    "beforeDevCommand": "npm --prefix ../web run dev -- --host 127.0.0.1 --port 5183 --strictPort",
+    "devUrl": "http://127.0.0.1:5183",
+    "beforeBuildCommand": "npm --prefix ../web run build",
+    "frontendDist": "../../web/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "PigeonSMS",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 960,
+        "minHeight": 640,
+        "center": true,
+        "resizable": true,
+        "maximizable": true,
+        "minimizable": true,
+        "closable": true,
+        "decorations": true,
+        "fullscreen": false,
+        "transparent": false,
+        "theme": "Dark",
+        "backgroundColor": "#16131A",
+        "useHttpsScheme": true
+      }
+    ],
+    "security": {
+      "capabilities": [
+        "main"
+      ],
+      "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost https://api.pigeonsms.aldi.best wss://api.pigeonsms.aldi.best; img-src 'self' https://api.pigeonsms.aldi.best blob: data:; media-src 'self' https://api.pigeonsms.aldi.best blob:; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-src 'none'; form-action 'none'",
+      "headers": {
+        "Permissions-Policy": "camera=(self), microphone=(self), display-capture=(self)",
+        "X-Content-Type-Options": "nosniff"
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis",
+      "msi"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico"
+    ],
+    "category": "SocialNetworking",
+    "shortDescription": "Private chats, nests and calls.",
+    "longDescription": "The native Windows client for PigeonSMS.",
+    "windows": {
+      "webviewInstallMode": {
+        "type": "embedBootstrapper"
+      },
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": [
+          "pigeonsms"
+        ]
+      }
+    }
+  }
+}

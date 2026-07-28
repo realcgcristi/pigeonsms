@@ -48,11 +48,14 @@ function Gate({ children }: { children: React.ReactNode }) {
 
 export default function App() {
   const restore = useSession((s) => s.restore);
+  const restored = useSession((s) => s.restored);
   const token = useSession((s) => s.token);
 
   useEffect(() => {
-    restore();
+    void restore();
   }, [restore]);
+
+  if (!restored) return <LoadingState label="opening pigeonsms" />;
 
   return (
     <ToastProvider>

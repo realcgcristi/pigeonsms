@@ -41,6 +41,8 @@ const ALLOWED_ORIGINS = [
   'https://pigeonsms.aldi.best',
   'https://api.pigeonsms.aldi.best',
   'https://pigeonsms-web.pages.dev',
+  'https://tauri.localhost',
+  'http://127.0.0.1:5183',
 ];
 
 function originAllowed(origin: string): boolean {

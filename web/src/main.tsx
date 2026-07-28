@@ -4,8 +4,11 @@ import { BrowserRouter } from 'react-router-dom';
 import { ThemeProvider } from '@/theme/ThemeProvider';
 import App from '@/App';
 import { registerServiceWorker } from '@/lib/push';
+import { initializeDesktopRuntime, isDesktopApp, prepareDesktopRuntime } from '@/desktop/runtime';
 import '@/styles/tokens.css';
 import '@/styles/base.css';
+
+prepareDesktopRuntime();
 
 const container = document.getElementById('root');
 
@@ -21,4 +24,5 @@ if (container) {
   );
 }
 
-void registerServiceWorker();
+if (isDesktopApp()) void initializeDesktopRuntime();
+else void registerServiceWorker();

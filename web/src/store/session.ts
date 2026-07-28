@@ -1,6 +1,12 @@
 import { create } from 'zustand';
 import { api, onUnauthorized, setTokenProvider } from '@/api/client';
 import { gateway } from '@/api/gateway';
+import {
+  clearDesktopSessionToken,
+  isDesktopApp,
+  loadDesktopSessionToken,
+  storeDesktopSessionToken,
+} from '@/desktop/runtime';
 import { shareTokenWithWorker } from '@/lib/push';
 import type { ApiUser } from '@/api/dto';
 
@@ -16,14 +22,23 @@ function runtimeToken(bearer: string): string {
   return window.location.hostname === 'pigeonsms.aldi.best' ? 'cookie' : bearer;
 }
 
-function read(): Persisted | null {
+async function read(): Promise<Persisted | null> {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as { token?: string; user?: ApiUser };
     if (!parsed?.user?.id) return null;
-    const sessionToken = sessionStorage.getItem(TOKEN_KEY);
+
+    let sessionToken = sessionStorage.getItem(TOKEN_KEY);
     const legacyToken = parsed.token;
+    if (isDesktopApp()) {
+      const secureToken = await loadDesktopSessionToken();
+      sessionToken = secureToken || sessionToken || legacyToken || null;
+      if (!sessionToken) return null;
+      sessionStorage.setItem(TOKEN_KEY, sessionToken);
+      if (!secureToken) await storeDesktopSessionToken(sessionToken);
+    }
+
     const token = sessionToken || legacyToken || 'cookie';
     if (legacyToken) {
       sessionStorage.setItem(TOKEN_KEY, legacyToken);
@@ -35,13 +50,18 @@ function read(): Persisted | null {
   }
 }
 
-function write(value: Persisted | null) {
+async function write(value: Persisted | null): Promise<void> {
   const bearer = value?.token && value.token !== 'cookie' ? value.token : null;
-  const isFirstParty = window.location.hostname === 'pigeonsms.aldi.best';
-  // First-party production uses the secure HttpOnly session cookie. Preview
-  // deployments retain a session-only bearer fallback because their pages.dev
-  // origin cannot receive the aldi.best cookie.
-  void shareTokenWithWorker(isFirstParty ? null : bearer);
+  const desktop = isDesktopApp();
+  const isFirstParty = !desktop && window.location.hostname === 'pigeonsms.aldi.best';
+
+  if (desktop) {
+    if (bearer) await storeDesktopSessionToken(bearer);
+    else await clearDesktopSessionToken();
+  } else {
+    void shareTokenWithWorker(isFirstParty ? null : bearer);
+  }
+
   try {
     if (value) {
       localStorage.setItem(KEY, JSON.stringify({ user: value.user }));
@@ -62,7 +82,8 @@ export interface SessionState {
   loading: boolean;
   error: string | null;
   totpRequired: boolean;
-  restore: () => void;
+  restored: boolean;
+  restore: () => Promise<void>;
   login: (login: string, password: string, totp?: string) => Promise<boolean>;
   signup: (invite: string, username: string, email: string, password: string) => Promise<boolean>;
   logout: () => Promise<void>;
@@ -78,8 +99,9 @@ export const useSession = create<SessionState>((set, get) => ({
   loading: false,
   error: null,
   totpRequired: false,
+  restored: false,
 
-  restore: () => {
+  restore: async () => {
     if (!bound) {
       bound = true;
       setTokenProvider(() => useSession.getState().token);
@@ -94,16 +116,24 @@ export const useSession = create<SessionState>((set, get) => ({
         return cursors;
       });
       onUnauthorized(() => {
-        write(null);
+        void write(null);
         gateway.stop();
-        set({ token: null, user: null });
+        set({ token: null, user: null, restored: true });
       });
     }
-    const stored = read();
-    if (!stored) return;
-    set({ token: stored.token, user: stored.user });
-    gateway.start();
-    void get().refresh();
+
+    try {
+      const stored = await read();
+      if (!stored) {
+        set({ restored: true });
+        return;
+      }
+      set({ token: stored.token, user: stored.user, restored: true });
+      gateway.start();
+      void get().refresh();
+    } catch {
+      set({ token: null, user: null, restored: true });
+    }
   },
 
   login: async (login, password, totp) => {
@@ -111,7 +141,7 @@ export const useSession = create<SessionState>((set, get) => ({
     try {
       const auth = await api.login(login, password, totp);
       const token = runtimeToken(auth.token);
-      write({ token, user: auth.user });
+      await write({ token, user: auth.user });
       set({ token, user: auth.user, loading: false, totpRequired: false });
       gateway.start();
       return true;
@@ -128,7 +158,7 @@ export const useSession = create<SessionState>((set, get) => ({
     try {
       const auth = await api.signup(invite, username, email, password);
       const token = runtimeToken(auth.token);
-      write({ token, user: auth.user });
+      await write({ token, user: auth.user });
       set({ token, user: auth.user, loading: false });
       gateway.start();
       return true;
@@ -144,7 +174,7 @@ export const useSession = create<SessionState>((set, get) => ({
     } catch {
       set({ error: null });
     }
-    write(null);
+    await write(null);
     gateway.stop();
     set({ token: null, user: null, error: null, totpRequired: false });
   },
@@ -154,7 +184,7 @@ export const useSession = create<SessionState>((set, get) => ({
     if (!token) return;
     try {
       const user = await api.me();
-      write({ token, user });
+      void write({ token, user });
       set({ user });
     } catch {
       set({ error: null });
@@ -165,7 +195,7 @@ export const useSession = create<SessionState>((set, get) => ({
     const { token, user } = get();
     if (!user) return;
     const next = { ...user, ...fields };
-    if (token) write({ token, user: next });
+    if (token) void write({ token, user: next });
     set({ user: next });
   },
 }));
