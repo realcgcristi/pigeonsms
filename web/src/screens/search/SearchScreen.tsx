@@ -7,17 +7,21 @@ import { Avatar } from '@/components/ui/Avatar'
 import { SearchField } from '@/components/ui/SearchField'
 import { EmptyState, ListRow, Screen, ScreenBody, Tabs, TopBar } from '@/components/ui/Layout'
 import { relativeTime } from '@/lib/format'
+import { chatHref } from '@/lib/routes'
 
 type Tab = 'messages' | 'people'
 
 export default function SearchScreen() {
   const navigate = useNavigate()
   const [params] = useSearchParams()
+  const channelId = params.get('channel')
+  const spaceId = params.get('space')
   const [tab, setTab] = useState<Tab>('messages')
   const [query, setQuery] = useState(params.get('q') ?? '')
   const [messages, setMessages] = useState<SearchResultDto[]>([])
   const [people, setPeople] = useState<ApiUser[]>([])
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     const term = query.trim()
@@ -28,26 +32,53 @@ export default function SearchScreen() {
     }
     const handle = window.setTimeout(async () => {
       setBusy(true)
+      setError(null)
       try {
         if (tab === 'messages') {
-          const res = await api.searchEverywhere(term)
-          setMessages(res.results ?? [])
+          if (channelId) {
+            const results = await api.searchChannel(channelId, term)
+            setMessages(results.map((message) => ({ ...message, space_id: spaceId })))
+          } else {
+            const res = spaceId ? await api.searchSpace(spaceId, term) : await api.searchEverywhere(term)
+            setMessages(res.results ?? [])
+          }
         } else {
           setPeople(await api.searchUsers(term))
         }
-      } catch {
+      } catch (err) {
         setMessages([])
+        setPeople([])
+        setError(err instanceof Error ? err.message : 'search failed')
       }
       setBusy(false)
     }, 260)
     return () => window.clearTimeout(handle)
-  }, [query, tab])
+  }, [channelId, query, spaceId, tab])
+
+  const openResult = (result: SearchResultDto) => {
+    navigate(
+      chatHref(result.channel_id, {
+        space: !!(result.space_id || spaceId),
+        name: result.channel_name,
+        messageId: result.id,
+      }),
+    )
+  }
 
   return (
     <Screen>
-      <TopBar title="search" onBack={() => navigate(-1)} />
+      <TopBar
+        title={channelId ? 'search this conversation' : spaceId ? 'search this nest' : 'search'}
+        subtitle={channelId || spaceId ? 'results stay in context' : undefined}
+        onBack={() => navigate(-1)}
+      />
       <div className="friends__search">
-        <SearchField value={query} onChange={setQuery} placeholder="search everything" autoFocus />
+        <SearchField
+          value={query}
+          onChange={setQuery}
+          placeholder={channelId ? 'search messages' : spaceId ? 'search this nest' : 'search everything'}
+          autoFocus
+        />
       </div>
       <Tabs
         tabs={[
@@ -59,7 +90,9 @@ export default function SearchScreen() {
       />
       <ScreenBody>
         {tab === 'messages' ? (
-          messages.length === 0 ? (
+          error ? (
+            <EmptyState icon={<Search size={28} />} title="search failed" subtitle={error} />
+          ) : messages.length === 0 ? (
             <EmptyState
               icon={<Search size={28} />}
               title={busy ? 'searching…' : 'nothing yet'}
@@ -69,7 +102,7 @@ export default function SearchScreen() {
             messages.map((result) => (
               <ListRow
                 key={result.id}
-                onClick={() => navigate(`/chat/${result.channel_id}`)}
+                onClick={() => openResult(result)}
                 leading={
                   <Avatar
                     name={result.author?.display_name || result.author?.username || 'someone'}
@@ -78,7 +111,11 @@ export default function SearchScreen() {
                   />
                 }
                 title={result.author?.display_name || result.author?.username || 'someone'}
-                subtitle={result.snippet || result.content}
+                subtitle={
+                  result.channel_name
+                    ? `#${result.channel_name} · ${result.snippet || result.content}`
+                    : result.snippet || result.content
+                }
                 trailing={<span className="home__time">{relativeTime(result.created_at ?? 0)}</span>}
               />
             ))

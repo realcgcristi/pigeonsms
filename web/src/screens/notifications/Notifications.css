@@ -1,0 +1,4 @@
+.notifications__row--unread {
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  box-shadow: inset 3px 0 0 var(--accent);
+}

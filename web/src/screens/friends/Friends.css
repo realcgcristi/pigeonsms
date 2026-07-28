@@ -7,3 +7,48 @@
 }
 .friends__hint { padding: 0 var(--sp-l) var(--sp-m); color: var(--text-tertiary); font-size: 14px; }
 .friends__add { display: flex; flex-direction: column; gap: var(--sp-m); padding: var(--sp-l); }
+
+@media (min-width: 720px) {
+  .friends__search {
+    padding: var(--sp-m) 0;
+  }
+
+  .friends-screen .ui-tabs {
+    width: calc(100% - var(--sp-xxl));
+    max-width: 620px;
+    margin-inline: auto;
+  }
+
+  .friends-screen .ui-row {
+    min-height: 72px;
+  }
+
+  .friends__section,
+  .friends__hint {
+    width: calc(100% - var(--sp-xxl));
+    max-width: var(--content-max);
+    margin-inline: auto;
+  }
+}
+
+@media (min-width: 1380px) {
+  .friends__body--grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(340px, 1fr));
+    align-content: start;
+    gap: var(--sp-s);
+    width: calc(100% - var(--sp-xxl));
+    max-width: var(--content-max);
+    margin-inline: auto;
+    padding: var(--sp-m) 0 var(--sp-xxl);
+  }
+
+  .friends-screen .friends__body--grid > .ui-row {
+    width: 100%;
+    margin-block: 0;
+  }
+
+  .friends-screen .friends__body--grid > .ui-empty {
+    grid-column: 1 / -1;
+  }
+}

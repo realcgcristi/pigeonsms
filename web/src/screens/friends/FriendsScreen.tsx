@@ -60,7 +60,7 @@ export default function FriendsScreen() {
   }
 
   return (
-    <Screen>
+    <Screen className="friends-screen">
       <TopBar
         title="friends"
         actions={
@@ -86,7 +86,10 @@ export default function FriendsScreen() {
         </div>
       ) : null}
 
-      <ScreenBody tabbed>
+      <ScreenBody
+        tabbed
+        className={tab === 'friends' ? 'friends__body friends__body--grid' : 'friends__body'}
+      >
         {tab === 'friends' ? (
           visible.length === 0 ? (
             <EmptyState

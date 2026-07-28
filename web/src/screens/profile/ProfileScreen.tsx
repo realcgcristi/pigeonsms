@@ -7,11 +7,13 @@ import { Avatar } from '@/components/ui/Avatar'
 import { Button } from '@/components/ui/Button'
 import { TextField } from '@/components/ui/TextField'
 import { Sheet } from '@/components/ui/Overlay'
+import { Switch } from '@/components/ui/Switch'
 import { ListRow, Screen, ScreenBody, TopBar } from '@/components/ui/Layout'
 import { useToast } from '@/components/ui/Toast'
 import { fullDate, lastSeen } from '@/lib/format'
 import { useSession } from '@/store/session'
 import { usePrefs } from '@/store/prefs'
+import { useSocial } from '@/store/social'
 import './Profile.css'
 
 export default function ProfileScreen() {
@@ -21,6 +23,8 @@ export default function ProfileScreen() {
   const me = useSession((s) => s.user)
   const nicknames = usePrefs((s) => s.nicknames)
   const setNickname = usePrefs((s) => s.setNickname)
+  const friends = useSocial((s) => s.friends)
+  const loadFriends = useSocial((s) => s.loadFriends)
   const [profile, setProfile] = useState<ProfileDto | null>(null)
   const [mutual, setMutual] = useState<MutualSpaceDto[]>([])
   const [editingNick, setEditingNick] = useState(false)
@@ -38,11 +42,12 @@ export default function ProfileScreen() {
 
   const mine = me?.id === id
   const name = nicknames[id] || profile?.display_name || profile?.username || 'someone'
+  const friend = friends.find((item) => item.id === id)
 
   return (
-    <Screen>
+    <Screen className="profile-screen">
       <TopBar title="profile" onBack={() => navigate(-1)} />
-      <ScreenBody>
+      <ScreenBody className="profile__body">
         <div
           className="profile__banner"
           style={
@@ -52,7 +57,12 @@ export default function ProfileScreen() {
           }
         />
         <div className="profile__head">
-          <Avatar name={name} avatarKey={profile?.avatar_key} size="hero" className="profile__avatar" />
+          <Avatar
+            name={name}
+            avatarKey={profile?.avatar_square_key || profile?.avatar_key}
+            size="hero"
+            className="profile__avatar"
+          />
           <div className="profile__name">
             {name}
             {(profile?.badges ?? []).includes('verified') ? <Verified size={20} /> : null}
@@ -124,6 +134,7 @@ export default function ProfileScreen() {
         </div>
 
         {!mine ? (
+          <>
           <ListRow
             title="nickname"
             subtitle={nicknames[id] ? `only you see “${nicknames[id]}”` : 'set a private nickname'}
@@ -132,6 +143,27 @@ export default function ProfileScreen() {
               setEditingNick(true)
             }}
           />
+          {friend ? (
+            <div className="profile__friend-setting">
+              <span>
+                <strong>close friend</strong>
+                <small>prioritize this person in your social list</small>
+              </span>
+              <Switch
+                checked={!!friend.close_friend}
+                onChange={async (enabled) => {
+                  try {
+                    await api.updateFriend(id, { close_friend: enabled })
+                    await loadFriends(true)
+                    toast.show(enabled ? 'added to close friends' : 'removed from close friends')
+                  } catch (err) {
+                    toast.error(err instanceof Error ? err.message : 'could not update friend')
+                  }
+                }}
+              />
+            </div>
+          ) : null}
+          </>
         ) : null}
 
         {mutual.length > 0 ? (

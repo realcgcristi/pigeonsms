@@ -47,7 +47,7 @@ export default function MessagesScreen() {
   }
 
   return (
-    <Screen>
+    <Screen className="home-screen">
       <TopBar
         title="chats"
         actions={

@@ -3,6 +3,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api, nonce } from '@/api/client'
 import type { ForumPostDto, ForumTagDto, MessageDto } from '@/api/dto'
 import { Add, Favorite, FavoriteBorder, Forum, Reply, Send } from '@/components/icons'
+import { SpaceChannelRail } from '@/components/spaces/SpaceChannelRail'
 import { Avatar } from '@/components/ui/Avatar'
 import { Button } from '@/components/ui/Button'
 import { IconButton } from '@/components/ui/IconButton'
@@ -43,6 +44,9 @@ export default function ForumScreen() {
   const [open, setOpen] = useState<ForumPostDto | null>(null)
   const [replies, setReplies] = useState<MessageDto[]>([])
   const [reply, setReply] = useState('')
+  const [tagOpen, setTagOpen] = useState(false)
+  const [tagName, setTagName] = useState('')
+  const [markLabel, setMarkLabel] = useState('')
 
   const load = useCallback(async () => {
     const [list, tagList] = await Promise.all([
@@ -105,9 +109,29 @@ export default function ForumScreen() {
     )
   }
 
+  const createTag = async () => {
+    if (!tagName.trim()) return
+    try {
+      await api.createForumTag(channelId, tagName.trim(), markLabel.trim() || undefined)
+      setTagName('')
+      setMarkLabel('')
+      setTagOpen(false)
+      await load()
+      toast.show('forum tag created')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'could not create tag')
+    }
+  }
+
   return (
-    <Screen>
-      <TopBar title={params.get('name') ?? 'forum'} onBack={() => navigate(-1)} />
+    <Screen className="chat chat--workspace">
+      <SpaceChannelRail channelId={channelId} spaceId={params.get('spaceId')} />
+      <div className="chat__conversation">
+      <TopBar
+        title={params.get('name') ?? 'forum'}
+        onBack={() => navigate(-1)}
+        actions={<IconButton label="new forum tag" onClick={() => setTagOpen(true)}><Add /></IconButton>}
+      />
       <ChipRow>
         <Chip label="active" active={sort === 'active'} onClick={() => setSort('active')} />
         <Chip label="newest" active={sort === 'recent'} onClick={() => setSort('recent')} />
@@ -175,6 +199,7 @@ export default function ForumScreen() {
         <Add />
         new post
       </button>
+      </div>
 
       <Sheet open={composing} title="new post" onClose={() => setComposing(false)}>
         <div className="nest__form">
@@ -222,6 +247,14 @@ export default function ForumScreen() {
             </div>
           </div>
         ) : null}
+      </Sheet>
+
+      <Sheet open={tagOpen} title="new forum tag" onClose={() => setTagOpen(false)}>
+        <div className="nest__form">
+          <TextField label="tag name" value={tagName} onChange={setTagName} />
+          <TextField label="optional marked label" value={markLabel} onChange={setMarkLabel} />
+          <Button size="cta" fullWidth onClick={() => void createTag()}>create tag</Button>
+        </div>
       </Sheet>
     </Screen>
   )

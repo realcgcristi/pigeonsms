@@ -24,3 +24,89 @@
   white-space: pre-wrap;
 }
 .profile__meta { display: flex; justify-content: space-between; padding: var(--sp-m) var(--sp-l); color: var(--text-tertiary); font-size: 13px; }
+.profile__friend-setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-m);
+  min-height: var(--row-h);
+  padding: var(--sp-s) var(--sp-l);
+}
+.profile__friend-setting > span { display: flex; flex-direction: column; }
+.profile__friend-setting small { color: var(--text-tertiary); }
+
+@media (min-width: 900px) {
+  .profile__body {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-content: start;
+  }
+
+  .profile__banner {
+    grid-column: 1 / -1;
+    height: 220px;
+  }
+
+  .profile__head {
+    grid-column: 1;
+    grid-row: 2;
+    align-items: flex-start;
+    width: 100%;
+    max-width: var(--content-max);
+    margin: -64px auto 0;
+    padding: 0 var(--sp-xxl);
+  }
+
+  .profile__avatar {
+    box-shadow: 0 8px 28px color-mix(in srgb, var(--ink) 72%, transparent);
+  }
+
+  .profile__name {
+    margin-top: var(--sp-m);
+    font-size: var(--fs-display-sm);
+    line-height: var(--lh-display-sm);
+    letter-spacing: -0.5px;
+  }
+
+  .profile__status {
+    text-align: left;
+  }
+
+  .profile__badges {
+    grid-column: 1;
+    grid-row: 3;
+    justify-content: flex-start;
+    width: 100%;
+    max-width: var(--content-max);
+    margin-inline: auto;
+    padding: var(--sp-m) var(--sp-xxl) 0;
+  }
+
+  .profile__actions {
+    grid-column: 2;
+    grid-row: 2 / 4;
+    align-self: end;
+    justify-content: flex-end;
+    padding: var(--sp-xl) var(--sp-xxl);
+  }
+
+  .profile__about,
+  .profile__meta,
+  .profile__body > .ui-row,
+  .profile__friend-setting,
+  .profile__body > .nest__section {
+    grid-column: 1 / -1;
+    width: calc(100% - (var(--sp-xxl) * 2));
+    max-width: var(--content-max);
+    margin-inline: auto;
+  }
+
+  .profile__about {
+    margin-top: var(--sp-xl);
+    padding: var(--sp-l) var(--sp-xl);
+  }
+
+  .profile__meta {
+    padding-inline: 0;
+  }
+}
