@@ -1,6 +1,7 @@
 import { assertChannelAccess } from '../lib/channels';
 import { sha256Hex } from '../lib/crypto';
 import { ApiError } from '../middleware/errors';
+import { sessionTokenFromCookie } from '../middleware/auth';
 import type { Env } from '../types';
 
 export const MAX_SIGNAL_BYTES = 64 * 1024;
@@ -209,7 +210,9 @@ export class CallRoom {
     url: URL,
   ): Promise<{ userId: string; username: string } | null> {
     const header = req.headers.get('authorization') ?? '';
-    const token = header.startsWith('Bearer ') ? header.slice(7) : (url.searchParams.get('token') ?? '');
+    const token = header.startsWith('Bearer ')
+      ? header.slice(7)
+      : (url.searchParams.get('token') ?? sessionTokenFromCookie(req.headers.get('cookie')));
     if (!token) return null;
 
     const row = await this.env.DB.prepare(

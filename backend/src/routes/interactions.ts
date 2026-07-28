@@ -156,7 +156,15 @@ async function channelCommands(
     )
       .bind(channel.space_id, channel.space_id)
       .all<CommandRow>();
-    return results;
+    const unique = new Map<string, CommandRow>();
+    for (const row of results) {
+      const key = `${row.bot_id}:${row.name}`;
+      const existing = unique.get(key);
+      if (!existing || (row.space_id !== null && existing.space_id === null)) unique.set(key, row);
+    }
+    return [...unique.values()].sort(
+      (a, b) => a.name.localeCompare(b.name) || a.bot_id.localeCompare(b.bot_id),
+    );
   }
   const { results } = await env.DB.prepare(
     `SELECT ${COMMAND_SELECT}

@@ -764,6 +764,23 @@ spaces.post('/:id/bans', async (c) => {
 });
 
 /** DELETE /spaces/:id/bans/:userId — lift a ban (2.9.7). */
+/** GET /spaces/:id/bans — moderation list for admins with kick/ban permission. */
+spaces.get('/:id/bans', async (c) => {
+  const user = c.get('user') as AuthedUser;
+  const spaceId = c.req.param('id');
+  await requirePermission(c.env, user.id, spaceId, Permission.KICK_MEMBERS);
+  const { results } = await c.env.DB.prepare(
+    `SELECT b.space_id, b.user_id, b.banned_by, b.reason, b.created_at,
+            u.username, u.display_name, u.avatar_key
+     FROM space_bans b JOIN users u ON u.id = b.user_id
+     WHERE b.space_id = ?
+     ORDER BY b.created_at DESC`,
+  )
+    .bind(spaceId)
+    .all();
+  return c.json({ bans: results });
+});
+
 spaces.delete('/:id/bans/:userId', async (c) => {
   const user = c.get('user') as AuthedUser;
   const spaceId = c.req.param('id');

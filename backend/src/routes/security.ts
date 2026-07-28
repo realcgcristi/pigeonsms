@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { ApiError } from '../middleware/errors';
-import { requireAuth, invalidateSessionCache } from '../middleware/auth';
+import { requireAuth, invalidateSessionCache, sessionTokenFromCookie } from '../middleware/auth';
 import { enforceRateLimit } from '../middleware/ratelimit';
 import { generateTotpSecret, verifyTotp, otpauthUri } from '../lib/totp';
 import { verifyPassword, sha256Hex } from '../lib/crypto';
@@ -8,6 +8,7 @@ import { snowflake, randomDigits, randomFromAlphabet } from '../lib/ids';
 import type { AppEnv, AuthedUser } from '../types';
 import { readJsonBody } from '../lib/validate';
 import { purgeUserData } from '../lib/purge';
+import { setSessionCookie } from './auth';
 
 const security = new Hono<AppEnv>();
 security.use(requireAuth);
@@ -151,7 +152,11 @@ security.delete('/me', async (c) => {
   // rest. Content they authored is deliberately kept — see lib/purge.ts.
   await purgeUserData(c.env, user.id);
   const header = c.req.header('authorization') ?? '';
-  invalidateSessionCache(await sha256Hex(header.slice(7)));
+  const token = header.toLowerCase().startsWith('bearer ')
+    ? header.slice(7).trim()
+    : sessionTokenFromCookie(c.req.header('cookie') ?? null);
+  if (token) invalidateSessionCache(await sha256Hex(token));
+  setSessionCookie(c, null);
   return c.json({ ok: true });
 });
 

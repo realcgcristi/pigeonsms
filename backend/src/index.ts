@@ -52,6 +52,7 @@ app.use(
     origin: (origin) => (origin && originAllowed(origin) ? origin : null),
     allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key'],
+    credentials: true,
     maxAge: 86400,
   }),
 );

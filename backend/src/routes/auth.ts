@@ -5,6 +5,7 @@ import { enforceRateLimit, clientIp } from '../middleware/ratelimit';
 import {
   requireAuth,
   invalidateSessionCache,
+  sessionTokenFromCookie,
   SESSION_LIFETIME_MS,
   type AuthedUser,
 } from '../middleware/auth';
@@ -22,6 +23,15 @@ import type { AppEnv } from '../types';
 
 const auth = new Hono<AppEnv>();
 
+export function setSessionCookie(c: Context<AppEnv>, token: string | null): void {
+  const maxAge = token ? Math.floor(SESSION_LIFETIME_MS / 1000) : 0;
+  const value = token ? encodeURIComponent(token) : '';
+  c.header(
+    'Set-Cookie',
+    `pigeon_session=${value}; Path=/; Domain=.pigeonsms.aldi.best; Max-Age=${maxAge}; HttpOnly; Secure; SameSite=Lax`,
+  );
+}
+
 /**
  * Burned on a wrong-username login so it costs the same as a wrong password.
  * Lazy: Workers forbid crypto in module scope.
@@ -38,14 +48,24 @@ function publicUser(u: {
   email: string;
   display_name?: string | null;
   displayName?: string | null;
+  avatar_key?: string | null;
+  avatar_original_key?: string | null;
+  avatar_square_key?: string | null;
+  accent?: string | null;
+  totp_enabled?: number | boolean;
 }) {
   return {
     id: u.id,
     username: u.username,
     email: u.email,
     display_name: u.display_name ?? u.displayName ?? null,
+    avatar_key: u.avatar_key ?? null,
+    avatar_original_key: u.avatar_original_key ?? null,
+    avatar_square_key: u.avatar_square_key ?? null,
+    accent: u.accent ?? null,
     // mirrors middleware/auth.ts isAdmin so clients don't cache a stale false
     is_admin: u.username === 'admin',
+    totp_enabled: !!u.totp_enabled,
   };
 }
 
@@ -163,6 +183,7 @@ auth.post('/signup', async (c) => {
   }
 
   const { token } = await createSession(c, userId, deviceName);
+  setSessionCookie(c, token);
   recordLogin(c, userId, deviceName, true);
   c.executionCtx.waitUntil(
     c.env.DB.prepare(
@@ -194,13 +215,16 @@ auth.post('/login', async (c) => {
   await enforceRateLimit(c.env.RL_AUTH, `login-acct:${login}`);
 
   const user = await c.env.DB.prepare(
-    `SELECT id, username, email, display_name, password_hash, totp_secret, totp_enabled FROM users
+    `SELECT id, username, email, display_name, avatar_key, avatar_original_key, avatar_square_key,
+            accent, password_hash, totp_secret, totp_enabled FROM users
      WHERE (username = ? OR email = ?) AND deleted_at IS NULL`,
   )
     .bind(login, login)
     .first<{
       id: string; username: string; email: string;
       display_name: string | null; password_hash: string;
+      avatar_key: string | null; avatar_original_key: string | null;
+      avatar_square_key: string | null; accent: string | null;
       totp_secret: string | null; totp_enabled: number;
     }>();
 
@@ -263,6 +287,7 @@ auth.post('/login', async (c) => {
   }
 
   const { token } = await createSession(c, user.id, deviceName);
+  setSessionCookie(c, token);
   recordLogin(c, user.id, deviceName, true);
   return c.json({ token, user: publicUser(user) });
 });
@@ -273,15 +298,34 @@ auth.use(requireAuth);
 /** GET /auth/me */
 auth.get('/me', (c) => {
   const user = c.get('user') as AuthedUser;
-  return c.json({
-    user: {
-      id: user.id,
-      username: user.username,
-      email: user.email,
-      display_name: user.displayName,
-      is_admin: user.isAdmin,
-    },
-  });
+  return c.env.DB.prepare(
+    `SELECT totp_enabled, avatar_key, avatar_original_key, avatar_square_key, accent
+     FROM users WHERE id = ?`,
+  )
+    .bind(user.id)
+    .first<{
+      totp_enabled: number;
+      avatar_key: string | null;
+      avatar_original_key: string | null;
+      avatar_square_key: string | null;
+      accent: string | null;
+    }>()
+    .then((profile) =>
+      c.json({
+        user: {
+          id: user.id,
+          username: user.username,
+          email: user.email,
+          display_name: user.displayName,
+          avatar_key: profile?.avatar_key ?? null,
+          avatar_original_key: profile?.avatar_original_key ?? null,
+          avatar_square_key: profile?.avatar_square_key ?? null,
+          accent: profile?.accent ?? null,
+          is_admin: user.isAdmin,
+          totp_enabled: profile?.totp_enabled === 1,
+        },
+      }),
+    );
 });
 
 /** POST /auth/logout — revoke current session. */
@@ -291,7 +335,11 @@ auth.post('/logout', async (c) => {
     .bind(Date.now(), session.id)
     .run();
   const header = c.req.header('authorization') ?? '';
-  invalidateSessionCache(await sha256Hex(header.slice(7)));
+  const token = header.toLowerCase().startsWith('bearer ')
+    ? header.slice(7).trim()
+    : sessionTokenFromCookie(c.req.header('cookie') ?? null);
+  if (token) invalidateSessionCache(await sha256Hex(token));
+  setSessionCookie(c, null);
   return c.json({ ok: true });
 });
 

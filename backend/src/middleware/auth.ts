@@ -35,6 +35,21 @@ export function invalidateBotCache(tokenHash: string): void {
   botCache.delete(tokenHash);
 }
 
+export function sessionTokenFromCookie(cookieHeader: string | null): string {
+  if (!cookieHeader) return '';
+  for (const part of cookieHeader.split(';')) {
+    const [rawName, ...rawValue] = part.trim().split('=');
+    if (rawName === 'pigeon_session') {
+      try {
+        return decodeURIComponent(rawValue.join('='));
+      } catch {
+        return '';
+      }
+    }
+  }
+  return '';
+}
+
 /**
  * Bot tokens look like `PGB.<botId>.<secret>` and are hashed whole — the botId
  * segment is a routing convenience for the client, never trusted here.
@@ -97,7 +112,8 @@ export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
   // (browsers can't set Authorization on a WS handshake). All other requests
   // must use the Authorization header.
   const isWebSocket = c.req.header('upgrade')?.toLowerCase() === 'websocket';
-  const raw = header || (isWebSocket ? (c.req.query('token') ?? '') : '');
+  const cookieToken = sessionTokenFromCookie(c.req.header('cookie') ?? null);
+  const raw = header || (isWebSocket ? (c.req.query('token') ?? '') : '') || cookieToken;
 
   // Bot tokens short-circuit the whole session path: they carry their own
   // identity and there is nothing to touch, slide or revoke per-request.
@@ -114,8 +130,8 @@ export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
   const token = header.startsWith('Bearer ')
     ? header.slice(7)
     : isWebSocket
-      ? (c.req.query('token') ?? '')
-      : '';
+      ? (c.req.query('token') ?? cookieToken)
+      : cookieToken;
   if (!token) throw new ApiError(401, 'unauthorized', 'missing token');
 
   const tokenHash = await sha256Hex(token);

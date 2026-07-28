@@ -8,7 +8,6 @@ export default {
     upstream.headers.set('host', 'pigeonsms-web.pages.dev');
     const response = await fetch(upstream);
     const headers = new Headers(response.headers);
-    headers.delete('content-security-policy');
     return new Response(response.body, {
       status: response.status,
       statusText: response.statusText,
