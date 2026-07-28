@@ -1,11 +1,3 @@
-/**
- * The single error type this SDK throws.
- *
- * `status` is the HTTP status when the server answered and **0** when we never
- * got that far (no reply yet, aborted request, missing WebSocket, a double
- * reply). Branching on `status === 0` is how a caller tells "the API said no"
- * apart from "the SDK stopped you".
- */
 export class PigeonError extends Error {
   constructor(message, { status = 0, code = 'client_error', requestId = null, body = null, cause } = {}) {
     super(message, cause === undefined ? undefined : { cause });
@@ -16,7 +8,6 @@ export class PigeonError extends Error {
     this.body = body;
   }
 
-  /** True for the two classes worth retrying: rate limits and our-fault 5xx. */
   get retryable() {
     return this.status === 429 || (this.status >= 500 && this.status < 600);
   }
@@ -27,11 +18,6 @@ export class PigeonError extends Error {
   }
 }
 
-/**
- * Build a PigeonError from the API's error envelope:
- * `{ error: { code, message, request_id } }`. Bodies that aren't that shape
- * (an HTML 502 from the edge, an empty 500) still produce a usable error.
- */
 export function errorFromResponse(status, body, fallback) {
   const envelope = body && typeof body === 'object' ? body.error : null;
   return new PigeonError(envelope?.message || fallback || `request failed with ${status}`, {

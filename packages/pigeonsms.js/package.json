@@ -1,7 +1,7 @@
 {
   "name": "pigeonsms.js",
-  "version": "0.1.0",
-  "description": "PigeonSMS bot SDK — slash commands, interactions, long-poll or webhook delivery, gateway events. Zero dependencies.",
+  "version": "0.1.1",
+  "description": "PigeonSMS bot SDK \u2014 slash commands, interactions, long-poll or webhook delivery, gateway events. Zero dependencies.",
   "type": "module",
   "main": "./src/index.js",
   "module": "./src/index.js",

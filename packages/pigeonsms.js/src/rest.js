@@ -3,7 +3,6 @@ import { RateLimiter, bucketFor } from './ratelimit.js';
 
 export const DEFAULT_API = 'https://api.pigeonsms.aldi.best';
 
-/** Statuses worth a second (and third) go. Everything else is a real answer. */
 const RETRY_STATUSES = new Set([429, 500, 502, 503, 504]);
 const DEFAULT_RETRIES = 2;
 const BASE_BACKOFF_MS = 500;
@@ -11,18 +10,6 @@ const MAX_BACKOFF_MS = 5_000;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/**
- * Thin typed wrapper over `fetch` with the bot token attached.
- *
- * Every method here maps to an endpoint that already exists in BOTS.md — this
- * layer adds retries, timeouts and error shaping, never new surface.
- */
-/**
- * True when the failure looks like "this deployment has no /bots/me/* route",
- * not "this token may not do that". A 403 used to be treated as missing too,
- * which turned a genuinely wrong-bot token into two failed calls and a muddier
- * error; the old deployments that answered 403 with id "me" are gone.
- */
 function isLegacyRoute(error) {
   if (!(error instanceof PigeonError)) return false;
   if (error.status === 405) return true;
@@ -46,7 +33,7 @@ export class REST {
     this.timeout = timeout;
     this.retries = retries;
     this.debug = typeof debug === 'function' ? debug : null;
-    /** Filled in by Client.login() so the id-shaped fallbacks have an id. */
+
     this.botId = botIdFromToken(this.#token);
     this.limiter = new RateLimiter(rates);
   }
@@ -69,19 +56,6 @@ export class REST {
     return url.toString();
   }
 
-  /**
-   * One request, with retries.
-   *
-   * 429 and 5xx are retried twice with exponential backoff (honouring
-   * `retry-after` when the server sends one); so are transport failures, which
-   * are the same class of problem seen from the other side. Anything else is
-   * the server's final word and is thrown as a PigeonError.
-   */
-  /**
-   * Paced through the local bucket for this route unless the caller opts out
-   * (`pace: false`), which the long poll does — it is one blocking request that
-   * must never queue behind anything.
-   */
   async request(path, options = {}) {
     if (options.pace === false) return this.#send(path, options);
     return this.limiter.run(options.bucket ?? bucketFor(options.method ?? 'GET', path), () =>
@@ -119,7 +93,7 @@ export class REST {
         lastError = error;
       }
     }
-    /* c8 ignore next */
+
     throw lastError;
   }
 
@@ -147,8 +121,7 @@ export class REST {
         signal: controller.signal,
       });
     } catch (error) {
-      // An abort we asked for (destroy(), caller's signal) must not look like a
-      // network blip, or the retry loop would fight the shutdown.
+
       if (signal?.aborted) throw new PigeonError('request aborted', { code: 'aborted', cause: error });
       throw new PigeonError(`request to ${method} ${url} failed: ${error?.message ?? error}`, {
         code: 'network_error',
@@ -198,21 +171,10 @@ export class REST {
     return this.request(path, { ...options, method: 'DELETE' });
   }
 
-  // --- bot identity & commands -------------------------------------------
-
-  /** GET /bots/me — also the startup health check: 401 here means a dead token. */
   me() {
     return this.get('/bots/me');
   }
 
-  /**
-   * GET /bots/me/commands, falling back to GET /bots/:id/commands.
-   *
-   * The `/me` spelling is newer than the id one; a deployment that predates it
-   * routes `/bots/me/commands` into the `:id` handler and answers 403/404 with
-   * id "me". Both spellings return the same body, so try the nice one and fall
-   * back rather than making the caller care which API they're pointed at.
-   */
   async getCommands(botId = this.botId) {
     try {
       return await this.get('/bots/me/commands');
@@ -224,7 +186,6 @@ export class REST {
     }
   }
 
-  /** PUT the whole command set — the write is a full replacement. */
   async putCommands(botId = this.botId, commands = []) {
     try {
       return await this.put('/bots/me/commands', { commands });
@@ -235,22 +196,17 @@ export class REST {
     }
   }
 
-  // --- interactions -------------------------------------------------------
-
-  /** GET /bots/me/updates — the long poll. `wait` is clamped to 0-25 server-side. */
   getUpdates({ after = '', wait = 25, timeoutMs, signal } = {}) {
     return this.get('/bots/me/updates', {
       pace: false,
       query: { after: after || undefined, wait },
-      // The socket needs a margin over the server's own hold, or every idle
-      // poll would look like a timeout.
+
       timeoutMs: timeoutMs ?? (Number(wait) + 10) * 1000,
       retries: 0,
       signal,
     });
   }
 
-  /** POST /interactions/:id/callback — answer an interaction we were handed. */
   respond(interactionId, callbackToken, payload) {
     if (!callbackToken) {
       throw new PigeonError('this interaction has no callback token to answer with', {
@@ -261,8 +217,6 @@ export class REST {
       headers: { 'x-interaction-token': callbackToken },
     });
   }
-
-  // --- messages -----------------------------------------------------------
 
   sendMessage(channelId, content) {
     return this.post(`/channels/${encodeURIComponent(channelId)}/messages`, messageBody(content));
@@ -276,7 +230,6 @@ export class REST {
     return this.delete(`/messages/${encodeURIComponent(messageId)}`);
   }
 
-  /** PUT (or DELETE with `{ remove: true }`) /messages/:id/reactions/:emoji. */
   react(messageId, emoji, { remove = false } = {}) {
     const path = `/messages/${encodeURIComponent(messageId)}/reactions/${encodeURIComponent(emoji)}`;
     return remove ? this.delete(path) : this.put(path, undefined);
@@ -286,9 +239,6 @@ export class REST {
     return this.post(`/channels/${encodeURIComponent(channelId)}/typing`, {});
   }
 
-  // --- everything else a bot needs ---------------------------------------
-
-  /** POST /dms/open — takes the peer's **user id**, not a bot id. */
   async openDm(userId) {
     const res = await this.post('/dms/open', { user_id: String(userId) });
     return res.channel_id;
@@ -308,13 +258,6 @@ export class REST {
     return res.members ?? [];
   }
 
-  /**
-   * POST /media/upload — single-shot attachment upload (≤ 50 MB).
-   *
-   * Accepts a path, bytes, or a Blob and returns the attachment descriptor you
-   * hand straight to `sendMessage` / `ctx.reply`. The body is materialised (not
-   * streamed) because the endpoint needs a content-length.
-   */
   async upload(file, { name, type } = {}) {
     const { bytes, filename, contentType } = await readFile(file, name, type);
     const res = await this.request('/media/upload', {
@@ -328,7 +271,6 @@ export class REST {
   }
 }
 
-/** `{ content }` from a string, passthrough for an options object. */
 export function messageBody(content) {
   if (typeof content === 'string') return { content };
   if (content && typeof content === 'object') return { ...content };
@@ -347,12 +289,6 @@ function shouldRetry(error, signal) {
   return error.code === 'network_error' || RETRY_STATUSES.has(error.status);
 }
 
-/**
- * The middle segment of `PGB.<bot_id>.<secret>`.
- *
- * A convenience only — the server never trusts it either. We use it so the
- * id-shaped endpoints work before `GET /bots/me` has answered.
- */
 function botIdFromToken(token) {
   const parts = String(token).split('.');
   return parts.length >= 3 && /^[0-9]+$/.test(parts[1]) ? parts[1] : null;

@@ -1,14 +1,3 @@
-/**
- * Entity caches.
- *
- * Every payload the bot already receives — interaction invokers, message
- * authors, member lists — carries a full user or channel object, so the common
- * lookups should never hit the network at all. Each manager is an LRU with a
- * TTL: `get` is synchronous and free, `fetch` falls back to the API and caches
- * the result, and `fetch(id, { force: true })` bypasses the cache when the bot
- * needs certainty.
- */
-
 const DEFAULT_TTL_MS = 5 * 60_000;
 const DEFAULT_MAX = 1_000;
 
@@ -33,8 +22,7 @@ class Store {
       this.misses += 1;
       return null;
     }
-    // Touch for LRU ordering: Map keeps insertion order, so re-inserting moves
-    // this entry to the end and keeps hot ids away from the eviction edge.
+
     this.#entries.delete(id);
     this.#entries.set(id, entry);
     this.hits += 1;
@@ -86,7 +74,6 @@ class Manager {
     return entity;
   }
 
-  /** Cached read, or one shared request when several handlers miss at once. */
   async fetch(id, { force = false } = {}) {
     const key = String(id);
     if (!force) {
@@ -136,7 +123,6 @@ export class Caches {
     });
   }
 
-  /** Harvest every entity an inbound payload happens to carry. */
   absorb(payload) {
     if (!payload) return;
     if (payload.user?.id) this.users.add(payload.user);

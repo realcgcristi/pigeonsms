@@ -9,20 +9,13 @@ import { Caches } from './cache.js';
 
 const MIN_BACKOFF_MS = 1_000;
 const MAX_BACKOFF_MS = 30_000;
-/** The server aborts a webhook at 3 s; leave room to write the response. */
+
 const DEFAULT_DEFER_AFTER_MS = 2_500;
 const SIGNATURE_SKEW_MS = 5 * 60_000;
 const MAX_WEBHOOK_BODY = 1 << 20;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/**
- * A PigeonSMS bot.
- *
- *   const client = new Client({ token: process.env.BOT_TOKEN });
- *   client.command('ping', 'check the bot is alive', (ctx) => ctx.reply('pong'));
- *   await client.login();
- */
 export class Client {
   #listeners = new Map();
   #commands = new Map();
@@ -76,8 +69,6 @@ export class Client {
     }
   }
 
-  // --- events -------------------------------------------------------------
-
   on(event, listener) {
     const list = this.#listeners.get(event) ?? [];
     list.push(listener);
@@ -101,11 +92,6 @@ export class Client {
     return this;
   }
 
-  /**
-   * Fire an event. Unlike EventEmitter, an unhandled 'error' logs instead of
-   * throwing: a bot that forgot the listener should survive a rate limit, not
-   * take down the process from inside the poll loop.
-   */
   emit(event, ...args) {
     const list = this.#listeners.get(event);
     if (!list?.length) {
@@ -130,17 +116,6 @@ export class Client {
     else this.emit('error', error);
   }
 
-  // --- commands -----------------------------------------------------------
-
-  /**
-   * Declare a command and its handler.
-   *
-   *   client.command('echo', 'say it back',
-   *     (o) => o.string('text', 'what to say', { required: true }),
-   *     (ctx) => ctx.reply(ctx.options.text));
-   *
-   *   client.command({ name, description, options, spaceId, dmEnabled }, handler);
-   */
   command(...args) {
     let definition;
     let handler;
@@ -165,19 +140,10 @@ export class Client {
     return this;
   }
 
-  /** Everything declared so far, in wire shape. */
   get commands() {
     return [...this.#commands.values()].map((entry) => ({ ...entry.definition }));
   }
 
-  /**
-   * Push the declared set if it differs from what the server holds.
-   *
-   * The PUT is a full replacement, so a process that declares nothing would
-   * wipe a set someone else registered — we skip that case unless `force` says
-   * otherwise. `force: true` also re-PUTs an identical set, which is the escape
-   * hatch when the stored rows are suspected wrong.
-   */
   async syncCommands({ force = false } = {}) {
     const local = this.commands;
     const botId = this.bot?.id ?? this.rest.botId;
@@ -209,14 +175,6 @@ export class Client {
     return { synced: true, commands: res.commands ?? [], ...diff };
   }
 
-  // --- lifecycle ----------------------------------------------------------
-
-  /**
-   * Identify, sync commands, start receiving.
-   *
-   * Resolves once the bot is ready; the poll loop keeps running in the
-   * background, so `await client.login()` is the whole startup.
-   */
   async login() {
     if (this.#destroyed) throw new PigeonError('this client was destroyed', { code: 'destroyed' });
 
@@ -254,7 +212,6 @@ export class Client {
     return this;
   }
 
-  /** Stop everything and let the process exit. Safe to call twice. */
   async destroy() {
     if (this.#destroyed) return;
     this.#destroyed = true;
@@ -273,8 +230,6 @@ export class Client {
     this.emit('debug', 'client destroyed');
   }
 
-  // --- poll mode ----------------------------------------------------------
-
   async #pollLoop() {
     let backoff = MIN_BACKOFF_MS;
 
@@ -287,9 +242,6 @@ export class Client {
         });
         backoff = MIN_BACKOFF_MS;
 
-        // Sequential on purpose: two handlers for the same channel racing each
-        // other reorder the bot's own messages, and there is no ordering to put
-        // them back in.
         const queued = [];
         for (const update of res.updates ?? []) {
           if (this.#destroyed) break;
@@ -297,9 +249,7 @@ export class Client {
           this.#remember(update.interaction_id);
           queued.push(this.#enqueue(update));
         }
-        // Wait for this batch before asking for the next one so a stuck handler
-        // cannot pile up unbounded work, but channels inside the batch still run
-        // side by side.
+
         await Promise.allSettled(queued);
         if (res.cursor) this.cursor = String(res.cursor);
       } catch (error) {
@@ -325,12 +275,6 @@ export class Client {
     this.emit('debug', 'poll loop stopped');
   }
 
-  /** Build the context, hand it to the right handler, contain the fallout. */
-  /**
-   * Deliver an interaction that arrived over the gateway. Dedupes against the
-   * poll loop (both paths can see the same row) and returns immediately: the
-   * handler runs on the per-channel queue like every other interaction.
-   */
   handlePush(payload) {
     if (!payload?.interaction_id) return;
     if (this.#seen.has(payload.interaction_id)) return;
@@ -342,19 +286,12 @@ export class Client {
   #remember(id) {
     this.#seen.add(id);
     if (this.#seen.size > 512) {
-      // Bounded so a long-lived bot cannot grow this without limit; 512 is far
-      // more than the overlap window between a push and the next poll.
+
       const oldest = this.#seen.values().next().value;
       this.#seen.delete(oldest);
     }
   }
 
-  /**
-   * Serialize per channel, run channels in parallel. Two commands in the same
-   * channel still answer in order (the bot's own replies would otherwise
-   * interleave), but a slow handler in one channel no longer stalls every other
-   * channel the way a single global queue did.
-   */
   #enqueue(payload) {
     const key = payload.channel_id ?? '';
     const previous = this.#queues.get(key) ?? Promise.resolve();
@@ -367,8 +304,7 @@ export class Client {
   }
 
   async #dispatch(payload, inline = null) {
-    // Every payload carries the invoker and the channel, so the caches fill
-    // themselves from traffic the bot was already receiving.
+
     this.caches.absorb(payload);
     const ctx = new Interaction(this, payload, { inline });
     this.emit('interaction', ctx);
@@ -386,8 +322,7 @@ export class Client {
       await entry.handler(ctx);
     } catch (error) {
       this.emit('error', error);
-      // The person who typed the command did nothing wrong: close the
-      // interaction rather than leave it hanging until the 15-minute TTL.
+
       if (!ctx.replied) {
         await ctx
           .reply({ content: 'something went wrong handling that command' })
@@ -397,16 +332,6 @@ export class Client {
     return ctx;
   }
 
-  // --- webhook mode -------------------------------------------------------
-
-  /**
-   * A `node:http` request handler for `interactions_url`.
-   *
-   * It verifies `X-Pigeon-Signature` over the **raw** bytes, then answers
-   * inline. If the handler is still working when the 3-second budget is nearly
-   * up, the response auto-defers and the handler's eventual `reply()` goes out
-   * over the callback instead — so a slow command degrades rather than fails.
-   */
   webhookHandler({ path = this.webhookPath, secret = this.signingSecret } = {}) {
     if (!secret) {
       throw new PigeonError(
@@ -422,7 +347,6 @@ export class Client {
     };
   }
 
-  /** Start an HTTP server on `port` with `webhookHandler()` mounted. */
   async listen(port = Number(process.env.PORT ?? 8787), host) {
     const handler = this.webhookHandler();
     const { createServer } = await import('node:http');
@@ -491,12 +415,9 @@ export class Client {
     });
 
     clearTimeout(timer);
-    // A handler that finished without answering has nothing to say; close the
-    // interaction instead of letting it time out on the server.
+
     if (open) respond(ctx.deferred ? { type: 'defer' } : { type: 'noop' });
   }
-
-  // --- REST conveniences --------------------------------------------------
 
   sendMessage(channelId, content) {
     return this.rest.sendMessage(channelId, content);
@@ -539,13 +460,6 @@ export class Client {
   }
 }
 
-/**
- * `sha256=` + HMAC-SHA256 of `"<timestamp>.<raw body>"`.
- *
- * Hashed over the raw bytes, before any parse: a JSON round trip changes the
- * byte string and the comparison would never match. The timestamp is inside the
- * signed string, so a captured payload cannot be replayed under a fresh one.
- */
 export function verifySignature(rawBody, timestamp, signature, secret) {
   if (!timestamp || !signature || !secret) return false;
   const age = Math.abs(Date.now() - Number(timestamp));

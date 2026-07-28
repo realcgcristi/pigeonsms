@@ -2,17 +2,9 @@ import { PigeonError } from './errors.js';
 
 export const OPTION_TYPES = ['string', 'integer', 'number', 'boolean', 'user', 'channel'];
 const NAME_RE = /^[a-z0-9_-]{1,32}$/;
-/** Only these three have an ordering, so only these take choices / min / max. */
+
 const BOUNDED_TYPES = new Set(['string', 'integer', 'number']);
 
-/**
- * Chainable option declarator.
- *
- * Every method returns `this`, so a command's options read as one expression:
- *
- *   (o) => o.string('text', 'what to say', { required: true })
- *           .integer('times', 'how many', { min: 1, max: 10 })
- */
 export class OptionBuilder {
   constructor(options = []) {
     this.options = [...options];
@@ -52,13 +44,6 @@ export class OptionBuilder {
   }
 }
 
-/**
- * One option, validated against the same rules the server applies.
- *
- * Failing here rather than at PUT time means a typo in a command declaration
- * surfaces at import, with the option name in the message, instead of as a
- * 400 `invalid_option` after the process is already up.
- */
 export function normalizeOption(source) {
   if (!source || typeof source !== 'object') {
     throw new PigeonError('each option must be an object', { code: 'invalid_option' });
@@ -100,7 +85,6 @@ export function normalizeOption(source) {
   return option;
 }
 
-/** Accepts `['plain','loud']`, `[1,2]` or `[{ name, value }]`. */
 function normalizeChoices(choices, type, optionName) {
   if (choices === undefined || choices === null) return [];
   if (!Array.isArray(choices)) {
@@ -126,13 +110,6 @@ function normalizeChoices(choices, type, optionName) {
   });
 }
 
-/**
- * A declared command in wire shape.
- *
- * `dm_enabled` is forced to false for nest-scoped commands exactly like the
- * server does — if we sent `true` there, the stored row would come back false
- * and the sync diff would rewrite the same set on every boot.
- */
 export function normalizeCommand(definition) {
   const name = String(definition?.name ?? '').trim().toLowerCase();
   if (!NAME_RE.test(name)) {
@@ -156,7 +133,6 @@ export function normalizeCommand(definition) {
   };
 }
 
-/** An OptionBuilder, an array of option objects, or `(o) => o.string(...)`. */
 export function resolveOptions(source) {
   if (source === undefined || source === null) return [];
   if (source instanceof OptionBuilder) return source.toJSON();
@@ -171,17 +147,10 @@ export function resolveOptions(source) {
   });
 }
 
-/** `${space_id}:${name}` — the server's uniqueness key, and ours. */
 export function commandKey(command) {
   return `${command.space_id ?? command.spaceId ?? ''}:${String(command.name).toLowerCase()}`;
 }
 
-/**
- * Compare a declared set against what the server holds.
- *
- * Only the fields we can actually write are compared — `id`, `bot_id` and
- * `created_at` come back from the server and would make every set look changed.
- */
 export function diffCommands(local, remote) {
   const mine = new Map(local.map((command) => [commandKey(command), command]));
   const theirs = new Map((remote ?? []).map((command) => [commandKey(command), command]));
@@ -220,11 +189,6 @@ function canonical(command) {
   });
 }
 
-/**
- * Coerce the raw options object of an interaction into something a handler can
- * use without re-checking types. The server has already validated and coerced
- * everything; this only guarantees the object exists and drops prototype keys.
- */
 export function readOptions(raw) {
   const options = Object.create(null);
   if (raw && typeof raw === 'object') {

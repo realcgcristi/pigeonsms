@@ -1,13 +1,6 @@
 import { PigeonError } from './errors.js';
 import { readOptions } from './commands.js';
 
-/**
- * Flatten the two wire shapes into one.
- *
- * A poll row is the stored record (`id`, `user_id` + `user`), a webhook body is
- * flat (`interaction_id`, `user`). Handlers should never have to know which
- * mode delivered them.
- */
 export function normalizeInteraction(payload) {
   const user = payload.user ?? (payload.user_id ? { id: payload.user_id } : null);
   return {
@@ -24,7 +17,6 @@ export function normalizeInteraction(payload) {
   };
 }
 
-/** `reply('hi')` and `reply({ content, attachment, ephemeral })` both work. */
 function replyBody(content) {
   const source = typeof content === 'string' ? { content } : content ?? {};
   if (typeof source !== 'object') {
@@ -42,14 +34,6 @@ function replyBody(content) {
   return body;
 }
 
-/**
- * The object a command handler is given.
- *
- * It answers one of two ways and hides which: a webhook interaction still has
- * its HTTP response open, so `reply()` finishes the request inline; a polled
- * one (or a webhook one that already deferred) goes out over
- * `POST /interactions/:id/callback`. Same call either way.
- */
 export class Interaction {
   #client;
   #inline;
@@ -61,12 +45,10 @@ export class Interaction {
     this.raw = payload;
     this._replied = false;
     this._deferred = false;
-    // Lets the webhook transport hold on to the context it just created, so an
-    // auto-defer on the 3 s deadline can mark it deferred.
+
     inline?.attach?.(this);
   }
 
-  /** Internal: the transport deferred on our behalf. */
   _markDeferred() {
     this._deferred = true;
   }
@@ -79,16 +61,10 @@ export class Interaction {
     return this._deferred;
   }
 
-  /** True while the webhook's HTTP response is still ours to write. */
   get inlineOpen() {
     return Boolean(this.#inline?.isOpen());
   }
 
-  /**
-   * Answer the interaction. Returns the posted message when the answer went
-   * through the callback, `null` when it rode the inline HTTP response (the
-   * server posts it after we hang up) or when it was ephemeral.
-   */
   async reply(content) {
     this.#assertUnanswered('reply');
     const body = replyBody(content);
@@ -102,11 +78,6 @@ export class Interaction {
     return res.message ?? null;
   }
 
-  /**
-   * Buy time. A webhook bot has 3 seconds before the server gives up, so defer
-   * first and finish through the callback; a polling bot is already deferred by
-   * construction, and this is a no-op it can call safely.
-   */
   async defer() {
     this.#assertUnanswered('defer');
     if (this._deferred) return;
@@ -115,8 +86,7 @@ export class Interaction {
       this._deferred = true;
       return;
     }
-    // A polled interaction is already `delivered`; telling the server so again
-    // costs a round trip and changes nothing, so skip it.
+
     if (this.#client.mode === 'poll') {
       this._deferred = true;
       return;
@@ -125,7 +95,6 @@ export class Interaction {
     this._deferred = true;
   }
 
-  /** Close the interaction with nothing posted — "handled, nothing to say". */
   async noop() {
     this.#assertUnanswered('noop');
     if (this.inlineOpen) {
@@ -138,10 +107,6 @@ export class Interaction {
     return null;
   }
 
-  /**
-   * A follow-up is a plain message in the same channel — an interaction can be
-   * answered exactly once, so anything after the answer is ordinary traffic.
-   */
   async followUp(content) {
     if (!this._replied && !this._deferred) {
       throw new PigeonError('followUp() is for after reply() or defer() — use reply() first', {
@@ -151,7 +116,6 @@ export class Interaction {
     return this.send(content);
   }
 
-  /** Post to the interaction's channel without touching the interaction. */
   send(content) {
     return this.#client.rest.sendMessage(this.channelId, content);
   }
