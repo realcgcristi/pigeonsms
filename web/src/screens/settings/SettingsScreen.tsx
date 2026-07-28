@@ -27,11 +27,11 @@ export default function SettingsScreen() {
   const name = user?.display_name || user?.username || 'you'
 
   return (
-    <Screen>
+    <Screen className="settings-screen">
       <TopBar title="you" />
       <ScreenBody tabbed>
         <button type="button" className="settings__card" onClick={() => navigate(`/profile/${user?.id ?? ''}`)}>
-          <Avatar name={name} avatarKey={user?.avatar_key} size="lg" />
+          <Avatar name={name} avatarKey={user?.avatar_square_key || user?.avatar_key} size="lg" />
           <span className="settings__card-text">
             <span className="settings__card-name">{name}</span>
             <span className="settings__card-handle">@{user?.username}</span>
@@ -48,6 +48,7 @@ export default function SettingsScreen() {
 
         <SettingsGroup label="preferences">
           <SettingsRow icon={<Palette size={18} />} title="appearance" onClick={() => navigate('/settings/appearance')} />
+          <SettingsRow icon={<Notifications size={18} />} title="activity inbox" value="mentions, replies and updates" onClick={() => navigate('/notifications')} />
           <SettingsRow icon={<Notifications size={18} />} title="notifications" onClick={() => navigate('/settings/notifications')} />
           <SettingsRow icon={<Block size={18} />} title="privacy & safety" onClick={() => navigate('/settings/privacy')} />
           <SettingsRow icon={<Groups size={18} />} title="bird nests" value="manage your nests and channels" onClick={() => navigate('/settings/nests')} />
@@ -55,7 +56,7 @@ export default function SettingsScreen() {
 
         <SettingsGroup label="app">
           <SettingsRow icon={<Bolt size={18} />} title="bots" value="build bots and slash commands" onClick={() => navigate('/settings/bots')} />
-          <SettingsRow icon={<DarkMode size={18} />} title="app icon" value="change the launcher icon" onClick={() => navigate('/settings/appicon')} />
+          <SettingsRow icon={<DarkMode size={18} />} title="app style" value="choose the complete interface skin" onClick={() => navigate('/settings/appicon')} />
           <SettingsRow icon={<Info size={18} />} title="about" onClick={() => navigate('/settings/about')} />
           {user?.is_admin ? (
             <SettingsRow icon={<AdminPanelSettings size={18} />} title="admin" value="create signup invite codes" onClick={() => navigate('/settings/security')} />

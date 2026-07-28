@@ -4,7 +4,7 @@ import { Chip, ChipRow, Screen, ScreenBody, TopBar } from '@/components/ui/Layou
 import { useThemeStore } from '@/store/theme'
 import './Settings.css'
 
-const ICONS = ['classic', 'nova', 'galaxy', 'mono'] as const
+const STYLES = ['classic', 'nova', 'galaxy'] as const
 
 export default function AppIconScreen() {
   const navigate = useNavigate()
@@ -13,21 +13,21 @@ export default function AppIconScreen() {
 
   return (
     <Screen>
-      <TopBar title="app icon" subtitle="change the launcher icon" onBack={() => navigate(-1)} />
+      <TopBar title="app style" subtitle="choose how PigeonSMS feels" onBack={() => navigate(-1)} />
       <ScreenBody>
         <div className="settings__about">
           <Logo size={96} />
-          <div className="settings__about-version">installed web app icon</div>
+          <div className="settings__about-version">
+            Browsers keep the installed launcher icon. These choices change the complete in-app skin.
+          </div>
         </div>
         <ChipRow>
-          {ICONS.map((icon) => (
+          {STYLES.map((icon) => (
             <Chip
               key={icon}
               label={icon}
               active={uiSkin === icon}
-              onClick={() => {
-                if (icon !== 'mono') setUiSkin(icon)
-              }}
+              onClick={() => setUiSkin(icon)}
             />
           ))}
         </ChipRow>

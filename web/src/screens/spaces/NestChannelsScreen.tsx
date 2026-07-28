@@ -11,6 +11,7 @@ import { ConfirmDialog, Sheet } from '@/components/ui/Overlay'
 import { Badge, Chip, ChipRow, EmptyState, ListRow, Screen, ScreenBody, TopBar } from '@/components/ui/Layout'
 import { useToast } from '@/components/ui/Toast'
 import { useSocial } from '@/store/social'
+import { chatHref } from '@/lib/routes'
 import './Spaces.css'
 
 const KINDS = [
@@ -44,9 +45,9 @@ export default function NestChannelsScreen() {
 
   const open = (channel: ChannelDto) => {
     const title = encodeURIComponent(channel.name ?? 'channel')
-    if (channel.kind === 'forum') navigate(`/forum/${channel.id}?name=${title}`)
-    else if (channel.kind === 'voice') navigate(`/call/${channel.id}?name=${title}`)
-    else navigate(`/chat/${channel.id}?space=true&name=${title}`)
+    if (channel.kind === 'forum') navigate(`/forum/${channel.id}?name=${title}&spaceId=${spaceId}`)
+    else if (channel.kind === 'voice') navigate(`/call/${channel.id}?name=${title}&spaceId=${spaceId}`)
+    else navigate(chatHref(channel.id, { space: true, name: channel.name || 'channel' }))
   }
 
   const create = async () => {
@@ -88,7 +89,7 @@ export default function NestChannelsScreen() {
             <IconButton label="members" onClick={() => navigate(`/nest/${spaceId}/members`)}>
               <Groups />
             </IconButton>
-            <IconButton label="nest settings" onClick={() => navigate('/settings/nests')}>
+            <IconButton label="nest settings" onClick={() => navigate(`/settings/nests/${spaceId}`)}>
               <Settings />
             </IconButton>
           </>

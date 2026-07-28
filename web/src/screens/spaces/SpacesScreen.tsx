@@ -51,7 +51,7 @@ export default function SpacesScreen() {
   }
 
   return (
-    <Screen>
+    <Screen className="spaces-screen">
       <TopBar
         title="nests"
         actions={

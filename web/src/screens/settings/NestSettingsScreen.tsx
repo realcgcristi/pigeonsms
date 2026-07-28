@@ -25,7 +25,7 @@ export default function NestSettingsScreen() {
           spaces.map((space) => (
             <ListRow
               key={space.id}
-              onClick={() => navigate(`/nest/${space.id}`)}
+              onClick={() => navigate(`/settings/nests/${space.id}`)}
               leading={
                 <Avatar
                   name={space.name}
