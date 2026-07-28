@@ -127,8 +127,6 @@ export default function CallScreen() {
 
     const handle = async (event: CallEvent, socket: CallSocket) => {
       if (event.type === 'ready') {
-        // Whoever is already in the room gets an offer from the newcomer, so
-        // exactly one side of each pair creates the offer.
         for (const participant of event.participants) {
           participantsRef.current.set(participant.userId, participant)
           if (participant.userId === me?.id) continue
