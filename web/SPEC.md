@@ -27,13 +27,13 @@ API base: `https://api.pigeonsms.aldi.best`. Gateway: `wss://api.pigeonsms.aldi.
 
 ## Layout model
 
-The app is mobile-faithful. Root renders an app column:
+The app is mobile-faithful and adaptively expands instead of stretching a phone canvas:
 
-```
-.app-frame { width: 100%; max-width: 460px; margin-inline: auto; height: 100dvh; position: relative; overflow: hidden; }
-```
+- below 720px: full-bleed mobile layout, Android-faithful bottom navigation, edge-to-edge screens and bottom sheets
+- 720px to 1099px: compact 80px navigation rail and a rounded workspace
+- 1100px and wider: full 232px navigation sidebar, wide workspace, centered chat transcript/composer, desktop side sheets, and responsive list/settings grids
 
-On viewports ≥ 900px the page paints an ambient blurred backdrop behind the column and gives it a 1px `--outline` border + `--r-card` corners; below that it is full-bleed. Bottom nav pill, top bars, bottom sheets, and full-screen sub-screens all live inside `.app-frame`. Sub-screens slide in from the right (`transform: translateX(100%) → 0`, 220ms `cubic-bezier(.2,.8,.2,1)`), matching the Compose nav transition.
+`.app-frame` always fills `100dvh`. Authenticated desktop routes keep the navigation visible on both top-level and detail screens. Mobile detail screens hide the bottom navigation exactly like Android. Sub-screens keep the Compose motion language while desktop overlays use spatially appropriate side panels.
 
 ## Routes (mirror of `ui/AppShell.kt`)
 

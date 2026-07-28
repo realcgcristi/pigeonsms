@@ -3,7 +3,8 @@
 Live: https://pigeonsms.aldi.best (Cloudflare Pages `pigeonsms-web` + `pigeonsms-web-proxy` worker for the exact host route) and https://pigeonsms-web.pages.dev
 
 ## Built
-- Vite 7 + React 19 + TS strict + react-router 7 + zustand 5, mobile-faithful 460px app frame
+- Vite 7 + React 19 + TS strict + react-router 7 + zustand 5, Android-faithful mobile shell plus responsive tablet rail and full desktop workspace
+- adaptive desktop UX includes two-column conversation/friend/nest grids, persistent navigation, split-view chat, wide profile heroes, side-panel overlays, and responsive settings cards
 - design tokens ported from Palette/Accents/Dimens/Type/Motion/NovaMaterial/Wallpapers, dark/oled/light + 8 accents + wallpapers
 - src/api: http.ts, dto.ts, gateway.ts (ws + call/channel sockets), client.ts (full endpoint surface)
 - src/store: session, social, chat (optimistic send, retry/discard, live gateway patching), prefs (nicknames, forum seen, drafts), theme
@@ -14,7 +15,8 @@ Live: https://pigeonsms.aldi.best (Cloudflare Pages `pigeonsms-web` + `pigeonsms
 ## Backend change
 `backend/src/index.ts` CORS now allows pigeonsms.aldi.best, pigeonsms-web.pages.dev and its preview subdomains. Worker redeployed (version 55678664).
 
-## Known gaps
-- `GET /spaces/:id/members` still does not return `role_ids`, so the role-assign sheet cannot pre-check a member's existing roles (client already reads the field).
-- calls are local-media only; WebRTC signalling via `connectCall` is not wired into CallScreen yet.
-- e2ee, scheduled messages, super-pins, channel overrides and notifications inbox exist in the client API but have no dedicated screen yet.
+## Current notes
+- `GET /spaces/:id/members` still does not return `role_ids`, so the role-assign sheet cannot pre-check a member's existing roles (the client safely treats the field as optional).
+- calls now use the Worker `CallRoom` signalling path, with screen sharing, camera renegotiation, ICE restart, and optional TURN configuration through `VITE_TURN_*`.
+- end-to-end encryption remains intentionally hidden until the Android experimental protocol is promoted to a stable cross-client contract; the web client does not present a misleading security switch.
+- production host: `https://pigeonsms.aldi.best`; API health: `https://api.pigeonsms.aldi.best/health`.
