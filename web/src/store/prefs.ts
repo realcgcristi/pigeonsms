@@ -5,10 +5,16 @@ export interface PrefsState {
   nicknames: Record<string, string>;
   forumSeen: Record<string, number>;
   drafts: Record<string, string>;
+  readReceipts: boolean;
+  invisible: boolean;
+  shareLastSeen: boolean;
   setNickname: (userId: string, nickname: string) => void;
   clearNickname: (userId: string) => void;
   markForumSeen: (postId: string, replyCount: number) => void;
   setDraft: (channelId: string, text: string) => void;
+  setReadReceipts: (enabled: boolean) => void;
+  setInvisible: (enabled: boolean) => void;
+  setShareLastSeen: (enabled: boolean) => void;
 }
 
 export const usePrefs = create<PrefsState>()(
@@ -17,6 +23,9 @@ export const usePrefs = create<PrefsState>()(
       nicknames: {},
       forumSeen: {},
       drafts: {},
+      readReceipts: true,
+      invisible: false,
+      shareLastSeen: true,
       setNickname: (userId, nickname) =>
         set((s) => ({ nicknames: { ...s.nicknames, [userId]: nickname } })),
       clearNickname: (userId) =>
@@ -34,8 +43,11 @@ export const usePrefs = create<PrefsState>()(
           else delete next[channelId];
           return { drafts: next };
         }),
+      setReadReceipts: (readReceipts) => set({ readReceipts }),
+      setInvisible: (invisible) => set({ invisible }),
+      setShareLastSeen: (shareLastSeen) => set({ shareLastSeen }),
     }),
-    { name: 'pigeon.prefs', version: 1 },
+    { name: 'pigeon.prefs', version: 2 },
   ),
 );
 

@@ -26,6 +26,7 @@ export interface ApiUser {
   accent?: string | null;
   is_admin?: boolean;
   is_bot?: boolean;
+  totp_enabled?: boolean;
 }
 
 export interface AuthResponse {
@@ -578,6 +579,13 @@ export interface SpaceBanDto {
   banned_by?: string;
   reason?: string | null;
   created_at?: number;
+  username?: string;
+  display_name?: string | null;
+  avatar_key?: string | null;
+}
+
+export interface SpaceBansResponse {
+  bans: SpaceBanDto[];
 }
 
 export interface AuditEntryDto {

@@ -341,7 +341,9 @@ export class Gateway {
         resumeSuffix = '';
       }
       const reached = await this.session(
-        `${this.url}?token=${encodeURIComponent(token)}${resumeSuffix}`,
+        token === 'cookie'
+          ? `${this.url}?${resumeSuffix.replace(/^&/, '')}`
+          : `${this.url}?token=${encodeURIComponent(token)}${resumeSuffix}`,
       );
       if (reached) {
         backoff = BASE_BACKOFF_MS;
@@ -442,7 +444,9 @@ export function connectCall(
     onClose?: () => void;
   },
 ): CallSocket {
-  const url = `${PIGEON_WS_BASE}/calls/${encodeURIComponent(channelId)}/ws?mode=${mode}&token=${encodeURIComponent(token)}`;
+  const url = `${PIGEON_WS_BASE}/calls/${encodeURIComponent(channelId)}/ws?mode=${mode}${
+    token === 'cookie' ? '' : `&token=${encodeURIComponent(token)}`
+  }`;
   const socket = new WebSocket(url);
   socket.onopen = () => handlers.onOpen?.();
   socket.onclose = () => handlers.onClose?.();

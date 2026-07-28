@@ -131,6 +131,7 @@ export const useSocial = create<SocialState>((set, get) => ({
     });
     const offChannelNew = gateway.on('channel.new', () => {
       void get().loadDms(true);
+      void get().loadSpaces(true);
     });
     const offChannelUpdate = gateway.on('channel.update', (d) =>
       set((s) => ({

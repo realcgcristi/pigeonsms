@@ -38,13 +38,8 @@ export function Avatar({
     fontSize: Math.round(px * 0.42),
     ['--on-avatar' as string]: ON_AVATAR,
   }
-  return (
-    <span
-      className={['ui-avatar', className].filter(Boolean).join(' ')}
-      style={vars}
-      onClick={onClick}
-      role={onClick ? 'button' : undefined}
-    >
+  const content = (
+    <>
       {avatarKey ? (
         <img className="ui-avatar__img" src={api.mediaUrl(avatarKey)} alt={name} loading="lazy" />
       ) : (
@@ -54,6 +49,27 @@ export function Avatar({
       )}
       {showPresence ? <span className={online ? 'ui-avatar__dot' : 'ui-avatar__dot ui-avatar__dot--off'} /> : null}
       {badge}
+    </>
+  )
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        className={['ui-avatar', className].filter(Boolean).join(' ')}
+        style={vars}
+        onClick={onClick}
+        aria-label={`open ${name}'s profile`}
+      >
+        {content}
+      </button>
+    )
+  }
+  return (
+    <span
+      className={['ui-avatar', className].filter(Boolean).join(' ')}
+      style={vars}
+    >
+      {content}
     </span>
   )
 }

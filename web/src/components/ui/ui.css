@@ -43,7 +43,7 @@
   align-items: center;
   gap: var(--sp-s);
   min-height: var(--topbar-h);
-  padding: 0 var(--sp-s) 0 var(--sp-xs);
+  padding: 0 var(--sp-s) 0 var(--sp-m);
   background: color-mix(in srgb, var(--ink) 82%, transparent);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
@@ -114,6 +114,7 @@
 .ui-row:active { background: var(--surface-high); }
 .ui-row__text { flex: 1 1 auto; min-width: 0; }
 .ui-row__title {
+  display: block;
   font-size: 16px;
   line-height: 22px;
   font-weight: 600;
@@ -122,6 +123,8 @@
   text-overflow: ellipsis;
 }
 .ui-row__subtitle {
+  display: block;
+  margin-top: 1px;
   font-size: 14px;
   line-height: 20px;
   color: var(--text-secondary);
@@ -171,8 +174,8 @@
   flex: 0 0 auto;
 }
 .ui-setting__text { flex: 1 1 auto; min-width: 0; }
-.ui-setting__title { font-size: 16px; line-height: 22px; }
-.ui-setting__value { font-size: 14px; color: var(--text-secondary); }
+.ui-setting__title { display: block; font-size: 16px; line-height: 22px; }
+.ui-setting__value { display: block; margin-top: 2px; font-size: 14px; color: var(--text-secondary); }
 .ui-setting--danger { color: var(--danger); }
 .ui-setting--danger .ui-setting__badge { background: color-mix(in srgb, var(--danger) 20%, transparent); color: var(--danger); }
 

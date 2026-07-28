@@ -187,6 +187,10 @@
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --frame-max: 460px;
   --frame-breakpoint: 900px;
+  --rail-compact: 80px;
+  --rail-wide: 232px;
+  --content-max: 1180px;
+  --chat-max: 1040px;
 }
 
 :root,

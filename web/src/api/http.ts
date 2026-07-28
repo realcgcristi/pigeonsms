@@ -123,6 +123,7 @@ export async function send(path: string, options: RequestOptions = {}): Promise<
       headers,
       body,
       signal: options.signal,
+      credentials: 'include',
     });
   } catch {
     throw new ApiError(0, 'network', 'connection failed');

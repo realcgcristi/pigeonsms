@@ -71,6 +71,7 @@ import type {
   SpaceEmojiResponse,
   SpaceEmojisResponse,
   SpaceInviteResponse,
+  SpaceBansResponse,
   SpaceIconResponse,
   SpaceResponse,
   SpaceRoleResponse,
@@ -152,8 +153,11 @@ class PigeonApi {
     return request<HistoryResponse>('/auth/history').then((r) => r.history);
   }
 
-  totpSetup() {
-    return request<TotpSetupResponse>('/auth/totp/setup', { method: 'POST' });
+  totpSetup(password?: string, code?: string) {
+    return request<TotpSetupResponse>('/auth/totp/setup', {
+      method: 'POST',
+      json: password || code ? { password, code } : {},
+    });
   }
 
   totpEnable(code: string) {
@@ -542,6 +546,10 @@ class PigeonApi {
       method: 'POST',
       json: reason ? { user_id: userId, reason } : { user_id: userId },
     });
+  }
+
+  spaceBans(spaceId: string) {
+    return request<SpaceBansResponse>(`/spaces/${seg(spaceId)}/bans`).then((r) => r.bans);
   }
 
   unbanMember(spaceId: string, userId: string) {

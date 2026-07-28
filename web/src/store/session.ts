@@ -5,31 +5,52 @@ import { shareTokenWithWorker } from '@/lib/push';
 import type { ApiUser } from '@/api/dto';
 
 const KEY = 'pigeon.session';
+const TOKEN_KEY = 'pigeon.session.token';
 
 interface Persisted {
   token: string;
   user: ApiUser;
 }
 
+function runtimeToken(bearer: string): string {
+  return window.location.hostname === 'pigeonsms.aldi.best' ? 'cookie' : bearer;
+}
+
 function read(): Persisted | null {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as Persisted;
-    if (!parsed?.token || !parsed?.user?.id) return null;
-    return parsed;
+    const parsed = JSON.parse(raw) as { token?: string; user?: ApiUser };
+    if (!parsed?.user?.id) return null;
+    const sessionToken = sessionStorage.getItem(TOKEN_KEY);
+    const legacyToken = parsed.token;
+    const token = sessionToken || legacyToken || 'cookie';
+    if (legacyToken) {
+      sessionStorage.setItem(TOKEN_KEY, legacyToken);
+      localStorage.setItem(KEY, JSON.stringify({ user: parsed.user }));
+    }
+    return { token, user: parsed.user };
   } catch {
     return null;
   }
 }
 
 function write(value: Persisted | null) {
-  // The service worker cannot read localStorage, and it needs a token to pull a
-  // notification's contents after a push wakes it.
-  void shareTokenWithWorker(value?.token ?? null);
+  const bearer = value?.token && value.token !== 'cookie' ? value.token : null;
+  const isFirstParty = window.location.hostname === 'pigeonsms.aldi.best';
+  // First-party production uses the secure HttpOnly session cookie. Preview
+  // deployments retain a session-only bearer fallback because their pages.dev
+  // origin cannot receive the aldi.best cookie.
+  void shareTokenWithWorker(isFirstParty ? null : bearer);
   try {
-    if (value) localStorage.setItem(KEY, JSON.stringify(value));
-    else localStorage.removeItem(KEY);
+    if (value) {
+      localStorage.setItem(KEY, JSON.stringify({ user: value.user }));
+      if (bearer) sessionStorage.setItem(TOKEN_KEY, bearer);
+      else sessionStorage.removeItem(TOKEN_KEY);
+    } else {
+      localStorage.removeItem(KEY);
+      sessionStorage.removeItem(TOKEN_KEY);
+    }
   } catch {
     return;
   }
@@ -63,6 +84,15 @@ export const useSession = create<SessionState>((set, get) => ({
       bound = true;
       setTokenProvider(() => useSession.getState().token);
       gateway.setTokenProvider(() => useSession.getState().token);
+      gateway.setCursorProvider(async () => {
+        const { useChat } = await import('@/store/chat');
+        const cursors: Record<string, number> = {};
+        for (const [channelId, channel] of Object.entries(useChat.getState().channels)) {
+          const latest = channel.messages.reduce((max, message) => Math.max(max, message.seq ?? 0), 0);
+          if (latest > 0 && latest < Number.MAX_SAFE_INTEGER) cursors[channelId] = latest;
+        }
+        return cursors;
+      });
       onUnauthorized(() => {
         write(null);
         gateway.stop();
@@ -80,8 +110,9 @@ export const useSession = create<SessionState>((set, get) => ({
     set({ loading: true, error: null });
     try {
       const auth = await api.login(login, password, totp);
-      write({ token: auth.token, user: auth.user });
-      set({ token: auth.token, user: auth.user, loading: false, totpRequired: false });
+      const token = runtimeToken(auth.token);
+      write({ token, user: auth.user });
+      set({ token, user: auth.user, loading: false, totpRequired: false });
       gateway.start();
       return true;
     } catch (err) {
@@ -96,8 +127,9 @@ export const useSession = create<SessionState>((set, get) => ({
     set({ loading: true, error: null });
     try {
       const auth = await api.signup(invite, username, email, password);
-      write({ token: auth.token, user: auth.user });
-      set({ token: auth.token, user: auth.user, loading: false });
+      const token = runtimeToken(auth.token);
+      write({ token, user: auth.user });
+      set({ token, user: auth.user, loading: false });
       gateway.start();
       return true;
     } catch (err) {

@@ -1,7 +1,8 @@
 import { create } from 'zustand';
 import { api, nonce } from '@/api/client';
 import { gateway } from '@/api/gateway';
-import type { AttachmentDto, MessageDto, SpaceEmojiDto } from '@/api/dto';
+import type { AttachmentDto, MessageDto, SpaceEmojiDto, SuperPinDto } from '@/api/dto';
+import { usePrefs } from '@/store/prefs';
 import { useSocial } from '@/store/social';
 
 export type SendState = 'sent' | 'pending' | 'failed';
@@ -15,8 +16,11 @@ interface ChannelState {
   loading: boolean;
   loadingMore: boolean;
   hasMore: boolean;
+  error: string | null;
   read: Record<string, number>;
   typing: Record<string, number>;
+  pins: MessageDto[];
+  superPin: SuperPinDto | null;
 }
 
 const EMPTY: ChannelState = {
@@ -24,8 +28,11 @@ const EMPTY: ChannelState = {
   loading: false,
   loadingMore: false,
   hasMore: true,
+  error: null,
   read: {},
   typing: {},
+  pins: [],
+  superPin: null,
 };
 
 export interface ChatState {
@@ -35,6 +42,7 @@ export interface ChatState {
   channel: (id: string) => ChannelState;
   load: (channelId: string, force?: boolean) => Promise<void>;
   loadMore: (channelId: string) => Promise<void>;
+  loadDetails: (channelId: string) => Promise<void>;
   send: (
     channelId: string,
     content: string,
@@ -46,6 +54,9 @@ export interface ChatState {
   edit: (channelId: string, id: string, content: string) => Promise<void>;
   remove: (channelId: string, id: string) => Promise<void>;
   react: (channelId: string, id: string, emoji: string, active: boolean) => Promise<void>;
+  togglePin: (channelId: string, id: string, pinned: boolean) => Promise<void>;
+  setSuperPin: (channelId: string, id: string) => Promise<void>;
+  removeSuperPin: (channelId: string) => Promise<void>;
   markRead: (channelId: string) => void;
   loadEmoji: (force?: boolean) => Promise<void>;
   subscribe: () => () => void;
@@ -88,20 +99,27 @@ export const useChat = create<ChatState>((set, get) => ({
     const current = get().channels[channelId];
     if (current?.loading) return;
     if (!force && current && current.messages.length > 0) return;
-    set((s) => patchChannel(s, channelId, (c) => ({ ...c, loading: true })));
+    set((s) => patchChannel(s, channelId, (c) => ({ ...c, loading: true, error: null })));
     try {
       const page = await api.messagesPage(channelId);
       set((s) =>
         patchChannel(s, channelId, (c) => ({
           ...c,
           loading: false,
+          error: null,
           messages: page.messages.map((m) => ({ ...m, state: 'sent' as SendState })),
           read: page.read ?? c.read,
           hasMore: page.messages.length >= 40,
         })),
       );
-    } catch {
-      set((s) => patchChannel(s, channelId, (c) => ({ ...c, loading: false })));
+    } catch (err) {
+      set((s) =>
+        patchChannel(s, channelId, (c) => ({
+          ...c,
+          loading: false,
+          error: err instanceof Error ? err.message : 'could not load this conversation',
+        })),
+      );
     }
   },
 
@@ -123,8 +141,28 @@ export const useChat = create<ChatState>((set, get) => ({
             .sort((a, b) => a.created_at - b.created_at || (a.seq ?? 0) - (b.seq ?? 0)),
         })),
       );
-    } catch {
-      set((s) => patchChannel(s, channelId, (c) => ({ ...c, loadingMore: false })));
+    } catch (err) {
+      set((s) =>
+        patchChannel(s, channelId, (c) => ({
+          ...c,
+          loadingMore: false,
+          error: err instanceof Error ? err.message : 'could not load older messages',
+        })),
+      );
+    }
+  },
+
+  loadDetails: async (channelId) => {
+    try {
+      const [pins, superPin] = await Promise.all([api.pins(channelId), api.superPin(channelId)]);
+      set((s) => patchChannel(s, channelId, (c) => ({ ...c, pins, superPin, error: null })));
+    } catch (err) {
+      set((s) =>
+        patchChannel(s, channelId, (c) => ({
+          ...c,
+          error: err instanceof Error ? err.message : 'could not load conversation details',
+        })),
+      );
     }
   },
 
@@ -257,7 +295,27 @@ export const useChat = create<ChatState>((set, get) => ({
     );
   },
 
+  togglePin: async (channelId, id, pinned) => {
+    if (pinned) await api.unpin(id);
+    else await api.pin(id);
+    await get().loadDetails(channelId);
+  },
+
+  setSuperPin: async (channelId, id) => {
+    const superPin = await api.setSuperPin(id);
+    set((s) => patchChannel(s, channelId, (c) => ({ ...c, superPin })));
+  },
+
+  removeSuperPin: async (channelId) => {
+    await api.removeSuperPin(channelId);
+    set((s) => patchChannel(s, channelId, (c) => ({ ...c, superPin: null })));
+  },
+
   markRead: (channelId) => {
+    if (!usePrefs.getState().readReceipts || usePrefs.getState().invisible) {
+      useSocial.getState().clearUnread(channelId);
+      return;
+    }
     const messages = get().channel(channelId).messages;
     const last = messages[messages.length - 1];
     if (!last) return;
@@ -339,6 +397,65 @@ export const useChat = create<ChatState>((set, get) => ({
         patchChannel(s, d.channel_id, (c) => ({ ...c, read: { ...c.read, [d.user_id]: d.seq } })),
       );
     });
+    const offPoll = gateway.on('poll.update', (d) => {
+      set((s) =>
+        patchChannel(s, d.channel_id, (c) => ({
+          ...c,
+          messages: c.messages.map((m) => {
+            if (m.id !== d.message_id || !m.poll) return m;
+            const counts = new Map((d.options ?? []).map((option) => [option.id, option.votes]));
+            const options = (m.poll.options ?? []).map((option) => ({
+              ...option,
+              votes: counts.get(option.id) ?? option.votes ?? 0,
+            }));
+            return {
+              ...m,
+              poll: {
+                ...m.poll,
+                options,
+                total_votes: options.reduce((sum, option) => sum + (option.votes ?? 0), 0),
+              },
+            };
+          }),
+        })),
+      );
+    });
+    const offPinAdd = gateway.on('pin.add', (d) => {
+      const message = get().channel(d.channel_id).messages.find((item) => item.id === d.message_id);
+      set((s) =>
+        patchChannel(s, d.channel_id, (c) => ({
+          ...c,
+          messages: c.messages.map((item) => (item.id === d.message_id ? { ...item, pinned: true } : item)),
+          pins: message && !c.pins.some((item) => item.id === message.id) ? [message, ...c.pins] : c.pins,
+        })),
+      );
+    });
+    const offPinRemove = gateway.on('pin.remove', (d) => {
+      set((s) =>
+        patchChannel(s, d.channel_id, (c) => ({
+          ...c,
+          messages: c.messages.map((item) => (item.id === d.message_id ? { ...item, pinned: false } : item)),
+          pins: c.pins.filter((item) => item.id !== d.message_id),
+        })),
+      );
+    });
+    const offSuperPinSet = gateway.on('super_pin.set', (d) => {
+      set((s) =>
+        patchChannel(s, d.channel_id, (c) => ({
+          ...c,
+          superPin: { message: d.message, pinned_by: '', created_at: Date.now() },
+        })),
+      );
+    });
+    const offSuperPinRemove = gateway.on('super_pin.remove', (d) => {
+      set((s) => patchChannel(s, d.channel_id, (c) => ({ ...c, superPin: null })));
+    });
+    const offResume = gateway.on('gateway.resume', (d) => {
+      for (const channelId of d.backfill ?? []) void get().load(channelId, true);
+      if (d.incomplete) {
+        for (const channelId of Object.keys(get().channels)) void get().load(channelId, true);
+      }
+    });
     return () => {
       offNew();
       offEdit();
@@ -347,6 +464,12 @@ export const useChat = create<ChatState>((set, get) => ({
       offReactionRemove();
       offTyping();
       offRead();
+      offPoll();
+      offPinAdd();
+      offPinRemove();
+      offSuperPinSet();
+      offSuperPinRemove();
+      offResume();
     };
   },
 }));
