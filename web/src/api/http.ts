@@ -113,7 +113,7 @@ export async function send(path: string, options: RequestOptions = {}): Promise<
 
   if (options.auth !== false) {
     const token = await currentToken();
-    if (token) headers.set('authorization', `Bearer ${token}`);
+    if (token && token !== 'cookie') headers.set('authorization', `Bearer ${token}`);
   }
 
   let response: Response;
