@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openpigeon.org/schema/pack.json",
+  "type": "object",
+  "required": ["format", "version", "name", "categories", "channels", "roles", "overrides", "bots"],
+  "properties": {
+    "format": { "const": "pigeon-pack" },
+    "version": { "const": "1.0" },
+    "name": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "description": { "type": ["string", "null"], "maxLength": 500 },
+    "categories": { "type": "array", "maxItems": 50, "items": { "type": "object" } },
+    "channels": { "type": "array", "maxItems": 100, "items": { "type": "object" } },
+    "roles": { "type": "array", "maxItems": 50, "items": { "type": "object" } },
+    "overrides": { "type": "array", "maxItems": 250, "items": { "type": "object" } },
+    "bots": { "type": "array", "maxItems": 10, "items": { "type": "object" } },
+    "theme": { "type": ["object", "null"] }
+  }
+}

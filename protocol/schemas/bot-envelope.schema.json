@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openpigeon.org/schema/bot-envelope.json",
+  "type": "object",
+  "required": ["algorithm", "ephemeral_public_key", "salt", "iv", "ciphertext"],
+  "properties": {
+    "algorithm": { "const": "OP-BOT-X25519-HKDF-A256GCM-1" },
+    "ephemeral_public_key": { "type": "string", "minLength": 40, "maxLength": 48 },
+    "salt": { "type": "string", "minLength": 40, "maxLength": 48 },
+    "iv": { "type": "string", "minLength": 16, "maxLength": 16 },
+    "ciphertext": { "type": "string", "minLength": 24 }
+  }
+}

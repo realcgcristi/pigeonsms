@@ -1,0 +1,8 @@
+{
+  "$schema": "../../schemas/bot-envelope.schema.json",
+  "algorithm": "OP-BOT-X25519-HKDF-A256GCM-1",
+  "ephemeral_public_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  "salt": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+  "iv": "CCCCCCCCCCCCCCCC",
+  "ciphertext": "DDDDDDDDDDDDDDDDDDDDDDDD"
+}

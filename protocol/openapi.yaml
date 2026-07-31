@@ -17,6 +17,9 @@ tags:
   - name: Chat
   - name: Nests
   - name: Bots
+  - name: Bridges
+  - name: Portability
+  - name: Templates
 paths:
   /.well-known/pigeon:
     get:
@@ -534,6 +537,141 @@ paths:
             schema: { type: object }
       responses:
         '200': { description: Callback accepted }
+  /channels/{channelId}/threads:
+    parameters:
+      - $ref: '#/components/parameters/ChannelId'
+    get:
+      tags: [Chat]
+      operationId: listBranches
+      responses:
+        '200': { description: Threads and active message branches }
+    post:
+      tags: [Chat]
+      operationId: createBranch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message_id]
+              properties:
+                message_id: { $ref: '#/components/schemas/Id' }
+                title: { type: string, maxLength: 120 }
+                kind: { enum: [thread, branch] }
+                expires_in: { type: integer, minimum: 3600, maximum: 2592000 }
+      responses:
+        '201':
+          description: Created branch
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  thread: { $ref: ./schemas/branch.schema.json }
+  /spaces/{spaceId}/bridges:
+    parameters:
+      - $ref: '#/components/parameters/SpaceId'
+    get:
+      tags: [Bridges]
+      operationId: listBridges
+      responses:
+        '200': { description: Scoped bridges }
+    post:
+      tags: [Bridges]
+      operationId: createBridge
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [channel_id, kind, name]
+              properties:
+                channel_id: { $ref: '#/components/schemas/Id' }
+                kind: { enum: [matrix, discord, irc, slack, email] }
+                name: { type: string, maxLength: 64 }
+                direction: { enum: [inbound, outbound, both] }
+      responses:
+        '201': { description: Bridge and one-time connector token }
+  /bridges/me/messages:
+    get:
+      tags: [Bridges]
+      operationId: pullBridgeMessages
+      responses:
+        '200': { description: Outbound bridge delivery page }
+    post:
+      tags: [Bridges]
+      operationId: pushBridgeMessage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [external_id, content]
+              properties:
+                external_id: { type: string, maxLength: 256 }
+                author: { type: string, maxLength: 80 }
+                content: { type: string, maxLength: 4000 }
+      responses:
+        '201': { description: Inbound message accepted }
+  /spaces/{spaceId}/migration:
+    get:
+      tags: [Portability]
+      operationId: exportSpaceMigration
+      parameters:
+        - $ref: '#/components/parameters/SpaceId'
+      responses:
+        '200': { description: Portable pigeon-migration bundle }
+  /spaces/migrate:
+    post:
+      tags: [Portability]
+      operationId: importSpaceMigration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bundle]
+              properties:
+                bundle: { type: object }
+                name: { type: string, maxLength: 48 }
+      responses:
+        '201': { description: Imported nest and media-copy status }
+  /spaces/{spaceId}/pack:
+    get:
+      tags: [Templates]
+      operationId: exportPigeonPack
+      parameters:
+        - $ref: '#/components/parameters/SpaceId'
+      responses:
+        '200':
+          description: Pigeon Pack manifest
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pack: { $ref: ./schemas/pack.schema.json }
+  /spaces/{spaceId}/packs/install:
+    post:
+      tags: [Templates]
+      operationId: installPigeonPack
+      parameters:
+        - $ref: '#/components/parameters/SpaceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                pack_id: { $ref: '#/components/schemas/Id' }
+                pack: { $ref: ./schemas/pack.schema.json }
+      responses:
+        '201': { description: Installed resources and one-time bot credentials }
 components:
   securitySchemes:
     bearerAuth:

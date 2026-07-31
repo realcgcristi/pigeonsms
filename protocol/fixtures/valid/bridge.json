@@ -1,0 +1,11 @@
+{
+  "$schema": "../../schemas/bridge.schema.json",
+  "id": "74001",
+  "space_id": "71001",
+  "channel_id": "72001",
+  "kind": "matrix",
+  "name": "matrix main room",
+  "direction": "both",
+  "status": "active",
+  "cursor_seq": 88
+}

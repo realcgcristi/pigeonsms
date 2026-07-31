@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openpigeon.org/schema/branch.json",
+  "type": "object",
+  "required": ["id", "channel_id", "root_message_id", "kind", "created_at", "expires_at"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^[0-9]+$" },
+    "channel_id": { "type": "string", "pattern": "^[0-9]+$" },
+    "root_message_id": { "type": "string", "pattern": "^[0-9]+$" },
+    "kind": { "const": "branch" },
+    "title": { "type": ["string", "null"], "maxLength": 120 },
+    "reply_count": { "type": "integer", "minimum": 0 },
+    "created_at": { "type": "integer", "minimum": 0 },
+    "expires_at": { "type": "integer", "minimum": 0 },
+    "archived": { "type": "boolean" }
+  }
+}

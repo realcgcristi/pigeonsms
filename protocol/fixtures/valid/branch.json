@@ -1,0 +1,12 @@
+{
+  "$schema": "../../schemas/branch.schema.json",
+  "id": "73001",
+  "channel_id": "72001",
+  "root_message_id": "73000",
+  "kind": "branch",
+  "title": "release checklist",
+  "reply_count": 4,
+  "created_at": 1785456000000,
+  "expires_at": 1786060800000,
+  "archived": false
+}

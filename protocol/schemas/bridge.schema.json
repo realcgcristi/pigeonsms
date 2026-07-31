@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openpigeon.org/schema/bridge.json",
+  "type": "object",
+  "required": ["id", "space_id", "channel_id", "kind", "direction", "status"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^[0-9]+$" },
+    "space_id": { "type": "string", "pattern": "^[0-9]+$" },
+    "channel_id": { "type": "string", "pattern": "^[0-9]+$" },
+    "kind": { "enum": ["matrix", "discord", "irc", "slack", "email"] },
+    "name": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "direction": { "enum": ["inbound", "outbound", "both"] },
+    "status": { "enum": ["active", "paused"] },
+    "cursor_seq": { "type": "integer", "minimum": 0 }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "servers": [
+    {
+      "id": "pigeonsms-production",
+      "name": "PigeonSMS Production",
+      "origin": "https://api.pigeonsms.aldi.best",
+      "source": "https://github.com/realcgcristi/pigeonsms"
+    }
+  ]
+}

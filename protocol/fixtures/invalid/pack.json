@@ -1,0 +1,6 @@
+{
+  "$schema": "../../schemas/pack.schema.json",
+  "format": "discord-template",
+  "version": "2",
+  "name": ""
+}

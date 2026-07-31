@@ -1,0 +1,13 @@
+{
+  "$schema": "../../schemas/pack.schema.json",
+  "format": "pigeon-pack",
+  "version": "1.0",
+  "name": "Open source project",
+  "description": "Channels and roles for an OSS community",
+  "categories": [],
+  "channels": [],
+  "roles": [],
+  "overrides": [],
+  "bots": [],
+  "theme": null
+}

@@ -1,0 +1,31 @@
+name: open-pigeon-compatibility-lab
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * *"
+  push:
+    branches: [main]
+    paths:
+      - "protocol/**"
+      - ".github/workflows/compatibility-lab.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  lab:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: test registered implementations
+        run: node protocol/conformance/src/lab.mjs protocol/lab/servers.json protocol/lab/site
+        continue-on-error: true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: open-pigeon-compatibility-lab
+          path: protocol/lab/site
+          retention-days: 30

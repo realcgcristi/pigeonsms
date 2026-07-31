@@ -7,6 +7,7 @@
   "scripts": {
     "test": "node --test",
     "check:server": "node src/cli.mjs"
+    ,"lab": "node src/lab.mjs ../lab/servers.json ../lab/site"
   },
   "engines": { "node": ">=20" },
   "license": "MIT"

@@ -52,6 +52,22 @@ Conformance profiles are additive:
 - `bots`: commands, interactions and callbacks
 - `calls`: participant discovery and signaling
 
+## V3 extensions
+
+- [Local-first sync](extensions/local-first.md)
+- [Universal bridges](extensions/bridges.md)
+- [End-to-end encrypted bots](extensions/encrypted-bots.md)
+- [Server migration](extensions/migration.md)
+- [Compatibility lab](extensions/compatibility-lab.md)
+- [Message branches](extensions/message-branches.md)
+- [Pigeon Packs](extensions/pigeon-packs.md)
+
+Generate live compatibility reports and embeddable badges with:
+
+```sh
+npm run lab --prefix protocol/conformance
+```
+
 The fixtures are normative. Prose and generated documentation are explanatory.
 
 ## Versioning
