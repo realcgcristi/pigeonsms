@@ -9,6 +9,9 @@ version = "1.0.0-beta.1"
 
 kotlin {
     jvmToolchain(17)
+}
+
+java {
     withSourcesJar()
 }
 
