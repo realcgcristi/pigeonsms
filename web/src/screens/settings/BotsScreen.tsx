@@ -373,6 +373,8 @@ function BotDetail({
   const [description, setDescription] = useState(bot.description ?? '')
   const [url, setUrl] = useState(bot.interactions_url ?? '')
   const [dmEnabled, setDmEnabled] = useState(bot.dm_enabled !== false)
+  const [encryptionMode, setEncryptionMode] = useState<'none' | 'local' | 'enclave'>(bot.encryption_mode ?? 'none')
+  const [encryptionKey, setEncryptionKey] = useState(bot.encryption_public_key ?? '')
   const [saving, setSaving] = useState(false)
   const [commands, setCommands] = useState<BotCommandDto[]>([])
   const [botSpaces, setBotSpaces] = useState<BotSpaceDto[]>([])
@@ -437,6 +439,8 @@ function BotDetail({
         description: description.trim() || null,
         interactions_url: trimmed || null,
         dm_enabled: dmEnabled,
+        encryption_mode: encryptionMode,
+        encryption_public_key: encryptionMode === 'none' ? null : encryptionKey.trim(),
       })
       toast.show('bot saved')
       await onChanged()
@@ -532,6 +536,25 @@ function BotDetail({
             </span>
             <Switch checked={dmEnabled} onChange={setDmEnabled} label="direct messages" />
           </div>
+          <label className="settings__scope-row">
+            <span>
+              <strong>end-to-end encrypted runtime</strong>
+              <small>plaintext only exists on your bot machine or enclave</small>
+            </span>
+            <select value={encryptionMode} onChange={(event) => setEncryptionMode(event.target.value as typeof encryptionMode)}>
+              <option value="none">off</option>
+              <option value="local">local runtime</option>
+              <option value="enclave">trusted enclave</option>
+            </select>
+          </label>
+          {encryptionMode !== 'none' ? (
+            <TextField
+              label="X25519 public key"
+              value={encryptionKey}
+              onChange={setEncryptionKey}
+              helper="generate this with EncryptedBotRuntime from @pigeonsms/sdk"
+            />
+          ) : null}
           <Button size="cta" fullWidth loading={saving} onClick={() => void save()}>
             save changes
           </Button>
@@ -745,6 +768,8 @@ export default function BotsScreen() {
   const [creating, setCreating] = useState(false)
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
+  const [encryptionMode, setEncryptionMode] = useState<'none' | 'local' | 'enclave'>('none')
+  const [encryptionKey, setEncryptionKey] = useState('')
   const [saving, setSaving] = useState(false)
   const [token, setToken] = useState<string | null>(null)
 
@@ -770,12 +795,21 @@ export default function BotsScreen() {
     setSaving(true)
     try {
       const trimmed = description.trim()
-      const created = await api.createBot(
-        trimmed ? { name: name.trim(), description: trimmed } : { name: name.trim() },
-      )
+      if (encryptionMode !== 'none' && !encryptionKey.trim()) {
+        toast.error('paste the encrypted runtime public key')
+        return
+      }
+      const created = await api.createBot({
+        name: name.trim(),
+        ...(trimmed ? { description: trimmed } : {}),
+        encryption_mode: encryptionMode,
+        ...(encryptionMode !== 'none' ? { encryption_public_key: encryptionKey.trim() } : {}),
+      })
       setCreating(false)
       setName('')
       setDescription('')
+      setEncryptionMode('none')
+      setEncryptionKey('')
       setToken(created.token)
       await load()
     } catch (err) {
@@ -857,6 +891,17 @@ export default function BotsScreen() {
             maxLength={32}
             helper="the username is derived from this"
           />
+          <label className="settings__scope-row">
+            <span><strong>encryption</strong><small>optional local or enclave runtime</small></span>
+            <select value={encryptionMode} onChange={(event) => setEncryptionMode(event.target.value as typeof encryptionMode)}>
+              <option value="none">off</option>
+              <option value="local">local runtime</option>
+              <option value="enclave">trusted enclave</option>
+            </select>
+          </label>
+          {encryptionMode !== 'none' ? (
+            <TextField label="X25519 public key" value={encryptionKey} onChange={setEncryptionKey} />
+          ) : null}
           <TextField
             label="description"
             value={description}

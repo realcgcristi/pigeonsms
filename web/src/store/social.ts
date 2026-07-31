@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { api } from '@/api/client';
 import { gateway } from '@/api/gateway';
 import type { BlockedUserDto, DmDto, FriendDto, SpaceDto } from '@/api/dto';
+import { cacheSocial, cachedSocial } from '@/lib/localFirst';
 
 export interface SocialState {
   dms: DmDto[];
@@ -26,6 +27,31 @@ export interface SocialState {
   reset: () => void;
 }
 
+async function ownerId() {
+  return (await import('@/store/session')).useSession.getState().user?.id ?? null;
+}
+
+async function persistSocial(state: SocialState) {
+  const owner = await ownerId();
+  if (!owner) return;
+  await cacheSocial(owner, {
+    dms: state.dms,
+    friends: state.friends,
+    incoming: state.incoming,
+    outgoing: state.outgoing,
+    blocks: state.blocks,
+    spaces: state.spaces,
+  });
+}
+
+async function hydrateSocial(set: (partial: Partial<SocialState>) => void, get: () => SocialState) {
+  if (get().loaded) return;
+  const owner = await ownerId();
+  if (!owner) return;
+  const cached = await cachedSocial(owner);
+  if (cached) set({ ...cached, loaded: true });
+}
+
 export const useSocial = create<SocialState>((set, get) => ({
   dms: [],
   friends: [],
@@ -40,12 +66,14 @@ export const useSocial = create<SocialState>((set, get) => ({
   loaded: false,
 
   loadDms: async (force) => {
+    await hydrateSocial(set, get);
     if (get().loadingDms) return;
     if (!force && get().dms.length > 0) return;
     set({ loadingDms: true });
     try {
       const dms = await api.dms();
       set({ dms });
+      void persistSocial({ ...get(), dms });
     } catch {
       set({ loadingDms: false });
     }
@@ -53,12 +81,14 @@ export const useSocial = create<SocialState>((set, get) => ({
   },
 
   loadFriends: async (force) => {
+    await hydrateSocial(set, get);
     if (get().loadingFriends) return;
     if (!force && get().friends.length > 0) return;
     set({ loadingFriends: true });
     try {
       const r = await api.friends();
       set({ friends: r.friends, incoming: r.incoming, outgoing: r.outgoing });
+      void persistSocial({ ...get(), friends: r.friends, incoming: r.incoming, outgoing: r.outgoing });
     } catch {
       set({ loadingFriends: false });
     }
@@ -66,12 +96,14 @@ export const useSocial = create<SocialState>((set, get) => ({
   },
 
   loadSpaces: async (force) => {
+    await hydrateSocial(set, get);
     if (get().loadingSpaces) return;
     if (!force && get().spaces.length > 0) return;
     set({ loadingSpaces: true });
     try {
       const spaces = await api.spaces();
       set({ spaces });
+      void persistSocial({ ...get(), spaces });
     } catch {
       set({ loadingSpaces: false });
     }
@@ -79,8 +111,11 @@ export const useSocial = create<SocialState>((set, get) => ({
   },
 
   loadBlocks: async () => {
+    await hydrateSocial(set, get);
     try {
-      set({ blocks: await api.blocks() });
+      const blocks = await api.blocks();
+      set({ blocks });
+      void persistSocial({ ...get(), blocks });
     } catch {
       set({ blocks: get().blocks });
     }

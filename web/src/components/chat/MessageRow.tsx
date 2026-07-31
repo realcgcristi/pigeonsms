@@ -69,12 +69,12 @@ function MessageRowBase({
       onSelect: () => void navigator.clipboard.writeText(message.content ?? ''),
     },
   ]
-  if (mine && message.state !== 'failed') items.push({ key: 'edit', label: 'edit', onSelect: onEdit })
-  if (message.state === 'failed') items.push({ key: 'retry', label: 'try again', onSelect: onRetry })
+  if (mine && message.state === 'sent') items.push({ key: 'edit', label: 'edit', onSelect: onEdit })
+  if (message.state === 'failed' || message.state === 'queued') items.push({ key: 'retry', label: 'send now', onSelect: onRetry })
   if (message.state === 'sent') {
     items.push({ key: 'pin', label: message.pinned ? 'unpin' : 'pin message', onSelect: onPin })
     items.push({ key: 'super-pin', label: 'make super pin', onSelect: onSuperPin })
-    items.push({ key: 'thread', label: message.thread_id ? 'open thread' : 'start thread', onSelect: onThread })
+    items.push({ key: 'thread', label: message.thread_id ? 'open branch' : 'branch from here', onSelect: onThread })
   }
   if (mine) items.push({ key: 'delete', label: 'delete', danger: true, onSelect: onDelete })
 
@@ -246,10 +246,11 @@ function MessageRowBase({
         ) : null}
 
         <div className="msg__meta">
-          {message.state === 'pending' ? <Schedule size={12} /> : null}
+          {message.state === 'pending' || message.state === 'queued' ? <Schedule size={12} /> : null}
           {message.state === 'failed' ? <ErrorOutline size={12} /> : null}
           {message.state === 'sent' && mine ? <DoneAll size={12} /> : null}
           {timeOfDay(message.created_at ?? 0)}
+          {message.state === 'queued' ? ' · queued offline' : ''}
           {message.edited_at ? ' · edited' : ''}
           {mine && seenCount ? ` · seen by ${seenCount}` : ''}
         </div>

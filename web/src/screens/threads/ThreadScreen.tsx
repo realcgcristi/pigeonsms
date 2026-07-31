@@ -43,8 +43,8 @@ export default function ThreadScreen() {
   return (
     <Screen className="chat">
       <TopBar
-        title={thread?.title || 'thread'}
-        subtitle={`${thread?.reply_count ?? 0} replies`}
+        title={thread?.title || 'branch'}
+        subtitle={`${thread?.reply_count ?? 0} replies${thread?.expires_at ? ` · expires ${relativeTime(thread.expires_at)}` : ''}`}
         onBack={() => navigate(-1)}
         actions={
           <IconButton
@@ -94,7 +94,7 @@ export default function ThreadScreen() {
         <textarea
           className="composer__input"
           rows={1}
-          placeholder="reply in thread"
+          placeholder="reply in branch"
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {

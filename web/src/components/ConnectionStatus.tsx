@@ -1,10 +1,14 @@
 import { useEffect, useState } from 'react'
 import { gateway, type GatewayStatus } from '@/api/gateway'
 import { Refresh } from '@/components/icons'
+import { queuedMessageCount } from '@/lib/localFirst'
+import { useSession } from '@/store/session'
 
 export function ConnectionStatus({ active }: { active: boolean }) {
   const [gatewayStatus, setGatewayStatus] = useState<GatewayStatus>(gateway.status)
   const [online, setOnline] = useState(navigator.onLine)
+  const [queued, setQueued] = useState(0)
+  const userId = useSession((state) => state.user?.id)
 
   useEffect(() => {
     const off = gateway.onStatus(setGatewayStatus)
@@ -18,12 +22,21 @@ export function ConnectionStatus({ active }: { active: boolean }) {
     }
   }, [])
 
-  if (!active || (online && gatewayStatus === 'connected')) return null
+  useEffect(() => {
+    const update = () => void (userId ? queuedMessageCount(userId).then(setQueued) : setQueued(0))
+    window.addEventListener('pigeon:outbox', update)
+    update()
+    return () => window.removeEventListener('pigeon:outbox', update)
+  }, [userId])
+
+  if (!active || (online && gatewayStatus === 'connected' && queued === 0)) return null
   const label = !online
-    ? 'you are offline — recent screens remain available'
-    : gatewayStatus === 'connecting'
-      ? 'reconnecting live updates…'
-      : 'live updates disconnected'
+    ? `offline · encrypted cache active${queued ? ` · ${queued} queued` : ''}`
+    : queued
+      ? `syncing ${queued} queued message${queued === 1 ? '' : 's'}…`
+      : gatewayStatus === 'connecting'
+        ? 'reconnecting live updates…'
+        : 'live updates disconnected'
 
   return (
     <div className="connection-status" role="status" aria-live="polite">

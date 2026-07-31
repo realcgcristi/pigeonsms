@@ -22,6 +22,8 @@ import type {
   BotsResponse,
   BotTokenResponse,
   BotWithTokenDto,
+  BridgeDto,
+  BridgeKind,
   ChannelCommandsResponse,
   ChannelOverridesResponse,
   CreateChannelResponse,
@@ -467,6 +469,48 @@ class PigeonApi {
     return request<SpaceResponse>(`/spaces/${seg(spaceId)}`).then((r) => r.space);
   }
 
+  bridges(spaceId: string) {
+    return request<{ bridges: BridgeDto[] }>(`/spaces/${seg(spaceId)}/bridges`).then((response) => response.bridges);
+  }
+
+  createBridge(spaceId: string, body: { channel_id: string; kind: BridgeKind; name: string; direction: 'inbound' | 'outbound' | 'both' }) {
+    return request<{ bridge: BridgeDto; token: string }>(`/spaces/${seg(spaceId)}/bridges`, { method: 'POST', json: body });
+  }
+
+  updateBridge(id: string, fields: { name?: string; direction?: 'inbound' | 'outbound' | 'both'; status?: 'active' | 'paused' }) {
+    return request<{ bridge: BridgeDto }>(`/bridges/${seg(id)}`, { method: 'PATCH', json: fields }).then((response) => response.bridge);
+  }
+
+  rotateBridgeToken(id: string) {
+    return request<{ token: string }>(`/bridges/${seg(id)}/token`, { method: 'POST' }).then((response) => response.token);
+  }
+
+  deleteBridge(id: string) {
+    return requestVoid(`/bridges/${seg(id)}`, { method: 'DELETE' });
+  }
+
+  exportSpaceMigration(spaceId: string) {
+    return request<{ bundle: Record<string, unknown>; digest: string }>(`/spaces/${seg(spaceId)}/migration`);
+  }
+
+  importSpaceMigration(bundle: Record<string, unknown>, name?: string) {
+    return request<{ ok: boolean; space_id: string; imported?: Record<string, number> }>('/spaces/migrate', {
+      method: 'POST',
+      json: { bundle, ...(name ? { name } : {}) },
+    });
+  }
+
+  exportSpacePack(spaceId: string, theme?: { accent?: string; ui_skin?: string }) {
+    return request<{ pack: Record<string, unknown>; digest: string }>(`/spaces/${seg(spaceId)}/pack`, { query: theme });
+  }
+
+  installSpacePack(spaceId: string, pack: Record<string, unknown>) {
+    return request<{ ok: boolean; created: Record<string, number>; bot_credentials: { id: string; name: string; token: string }[]; theme?: Record<string, unknown> | null }>(`/spaces/${seg(spaceId)}/packs/install`, {
+      method: 'POST',
+      json: { pack },
+    });
+  }
+
   createSpace(name: string, n: string) {
     return request<CreateSpaceResponse>('/spaces', { method: 'POST', json: { name, nonce: n } }).then(
       (r) => r.space,
@@ -731,10 +775,10 @@ class PigeonApi {
     }).then((r) => r.threads);
   }
 
-  createThread(channelId: string, messageId: string, title?: string) {
+  createThread(channelId: string, messageId: string, title?: string, kind: 'thread' | 'branch' = 'thread', expiresIn?: number) {
     return request<ThreadResponse>(`/channels/${seg(channelId)}/threads`, {
       method: 'POST',
-      json: title ? { message_id: messageId, title } : { message_id: messageId },
+      json: { message_id: messageId, ...(title ? { title } : {}), kind, ...(expiresIn ? { expires_in: expiresIn } : {}) },
     }).then((r) => r.thread);
   }
 
@@ -959,10 +1003,12 @@ class PigeonApi {
     return request<BotResponse>(`/bots/${seg(id)}`).then((r) => r.bot);
   }
 
-  createBot(body: { name: string; description?: string; dm_enabled?: boolean }) {
+  createBot(body: { name: string; description?: string; dm_enabled?: boolean; encryption_mode?: 'none' | 'local' | 'enclave'; encryption_public_key?: string }) {
     const json: Record<string, unknown> = { name: body.name };
     if (body.description) json.description = body.description;
     if (body.dm_enabled !== undefined) json.dm_enabled = body.dm_enabled;
+    if (body.encryption_mode) json.encryption_mode = body.encryption_mode;
+    if (body.encryption_public_key) json.encryption_public_key = body.encryption_public_key;
     return request<BotWithTokenDto>('/bots', { method: 'POST', json });
   }
 
@@ -974,6 +1020,8 @@ class PigeonApi {
       interactions_url?: string | null;
       public?: boolean;
       dm_enabled?: boolean;
+      encryption_mode?: 'none' | 'local' | 'enclave';
+      encryption_public_key?: string | null;
     },
   ) {
     return request<BotResponse>(`/bots/${seg(id)}`, { method: 'PATCH', json: fields }).then(

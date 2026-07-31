@@ -1,11 +1,12 @@
 import { create } from 'zustand';
-import { api, nonce } from '@/api/client';
+import { ApiError, api, nonce } from '@/api/client';
 import { gateway } from '@/api/gateway';
 import type { AttachmentDto, MessageDto, SpaceEmojiDto, SuperPinDto } from '@/api/dto';
 import { usePrefs } from '@/store/prefs';
 import { useSocial } from '@/store/social';
+import { cacheMessages, cachedMessages, queueMessage, queuedMessages, removeQueuedMessage, type QueuedMessage } from '@/lib/localFirst';
 
-export type SendState = 'sent' | 'pending' | 'failed';
+export type SendState = 'sent' | 'pending' | 'queued' | 'failed';
 
 export interface ChatMessage extends MessageDto {
   state: SendState;
@@ -60,6 +61,7 @@ export interface ChatState {
   markRead: (channelId: string) => void;
   loadEmoji: (force?: boolean) => Promise<void>;
   subscribe: () => () => void;
+  syncOutbox: () => Promise<void>;
 }
 
 function patchChannel(
@@ -88,6 +90,15 @@ function insert(messages: ChatMessage[], message: MessageDto): ChatMessage[] {
   return next;
 }
 
+async function ownerId() {
+  return (await import('@/store/session')).useSession.getState().user?.id ?? null;
+}
+
+async function persist(channelId: string, messages: ChatMessage[]) {
+  const owner = await ownerId();
+  if (owner) await cacheMessages(owner, channelId, messages);
+}
+
 export const useChat = create<ChatState>((set, get) => ({
   channels: {},
   emoji: [],
@@ -100,6 +111,16 @@ export const useChat = create<ChatState>((set, get) => ({
     if (current?.loading) return;
     if (!force && current && current.messages.length > 0) return;
     set((s) => patchChannel(s, channelId, (c) => ({ ...c, loading: true, error: null })));
+    const owner = await ownerId();
+    if (owner && (!current || current.messages.length === 0)) {
+      const local = await cachedMessages(owner, channelId);
+      if (local.length) {
+        set((s) => patchChannel(s, channelId, (c) => ({
+          ...c,
+          messages: local.map((message) => ({ ...message, state: 'sent' as SendState })),
+        })));
+      }
+    }
     try {
       const page = afterSeq && afterSeq > 0
         ? await api.messagesAfter(channelId, afterSeq)
@@ -114,12 +135,14 @@ export const useChat = create<ChatState>((set, get) => ({
           hasMore: page.messages.length >= 40,
         })),
       );
+      void persist(channelId, get().channel(channelId).messages);
     } catch (err) {
+      const hasLocal = get().channel(channelId).messages.length > 0;
       set((s) =>
         patchChannel(s, channelId, (c) => ({
           ...c,
           loading: false,
-          error: err instanceof Error ? err.message : 'could not load this conversation',
+          error: hasLocal ? null : (err instanceof Error ? err.message : 'could not load this conversation'),
         })),
       );
     }
@@ -143,6 +166,7 @@ export const useChat = create<ChatState>((set, get) => ({
             .sort((a, b) => a.created_at - b.created_at || (a.seq ?? 0) - (b.seq ?? 0)),
         })),
       );
+      void persist(channelId, get().channel(channelId).messages);
     } catch (err) {
       set((s) =>
         patchChannel(s, channelId, (c) => ({
@@ -186,6 +210,25 @@ export const useChat = create<ChatState>((set, get) => ({
       state: 'pending',
     };
     set((s) => patchChannel(s, channelId, (c) => ({ ...c, messages: c.messages.concat(optimistic) })));
+    const queued: QueuedMessage = {
+      id: `outbox:${n}`,
+      owner: me.id,
+      channelId,
+      content,
+      nonce: n,
+      createdAt: optimistic.created_at,
+      attempts: 0,
+      options: opts ?? {},
+    };
+    if (!navigator.onLine) {
+      await queueMessage(queued);
+      set((s) => patchChannel(s, channelId, (c) => ({
+        ...c,
+        messages: c.messages.map((message) => message.nonce === n ? { ...message, state: 'queued' } : message),
+      })));
+      void persist(channelId, get().channel(channelId).messages);
+      return;
+    }
     try {
       const res = await api.sendMessage(channelId, {
         content,
@@ -204,6 +247,7 @@ export const useChat = create<ChatState>((set, get) => ({
           })),
         );
         useSocial.getState().bump(channelId, content, sent.created_at, true);
+        void persist(channelId, get().channel(channelId).messages);
       } else {
         set((s) =>
           patchChannel(s, channelId, (c) => ({
@@ -212,7 +256,16 @@ export const useChat = create<ChatState>((set, get) => ({
           })),
         );
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof ApiError && error.code === 'network') {
+        await queueMessage(queued);
+        set((s) => patchChannel(s, channelId, (c) => ({
+          ...c,
+          messages: c.messages.map((message) => message.nonce === n ? { ...message, state: 'queued' } : message),
+        })));
+        void persist(channelId, get().channel(channelId).messages);
+        return;
+      }
       set((s) =>
         patchChannel(s, channelId, (c) => ({
           ...c,
@@ -240,6 +293,7 @@ export const useChat = create<ChatState>((set, get) => ({
   retry: async (channelId, id) => {
     const message = get().channel(channelId).messages.find((m) => m.id === id);
     if (!message) return;
+    if (message.state === 'queued' && message.nonce) await removeQueuedMessage(`outbox:${message.nonce}`);
     set((s) =>
       patchChannel(s, channelId, (c) => ({ ...c, messages: c.messages.filter((m) => m.id !== id) })),
     );
@@ -267,7 +321,9 @@ export const useChat = create<ChatState>((set, get) => ({
   remove: async (channelId, id) => {
     const local = get().channel(channelId).messages.find((m) => m.id === id);
     if (local?.state === 'failed' || id.startsWith('local-')) {
+      if (local?.nonce) await removeQueuedMessage(`outbox:${local.nonce}`);
       get().discard(channelId, id);
+      void persist(channelId, get().channel(channelId).messages);
       return;
     }
     await api.deleteMessage(id);
@@ -335,11 +391,49 @@ export const useChat = create<ChatState>((set, get) => ({
     }
   },
 
+  syncOutbox: async () => {
+    if (!navigator.onLine) return;
+    const owner = await ownerId();
+    if (!owner) return;
+    const queued = await queuedMessages(owner);
+    for (const item of queued) {
+      try {
+        const response = await api.sendMessage(item.channelId, {
+          content: item.content,
+          nonce: item.nonce,
+          reply_to: item.options.replyTo ?? null,
+          attachment: item.options.attachment ?? null,
+          ttl: item.options.ttl ?? null,
+          send_at: item.options.sendAt ?? null,
+        });
+        if (response.message) {
+          set((state) => patchChannel(state, item.channelId, (channel) => ({
+            ...channel,
+            messages: insert(channel.messages, response.message!),
+          })));
+          useSocial.getState().bump(item.channelId, item.content, response.message.created_at, true);
+          void persist(item.channelId, get().channel(item.channelId).messages);
+        }
+        await removeQueuedMessage(item.id);
+      } catch (error) {
+        if (error instanceof ApiError && error.code === 'network') break;
+        set((state) => patchChannel(state, item.channelId, (channel) => ({
+          ...channel,
+          messages: channel.messages.map((message) => message.nonce === item.nonce
+            ? { ...message, state: 'failed' }
+            : message),
+        })));
+        await removeQueuedMessage(item.id);
+      }
+    }
+  },
+
   subscribe: () => {
     const offNew = gateway.on('message.new', (message) => {
       set((s) =>
         patchChannel(s, message.channel_id, (c) => ({ ...c, messages: insert(c.messages, message) })),
       );
+      void persist(message.channel_id, get().channel(message.channel_id).messages);
     });
     const offEdit = gateway.on('message.edit', (message) => {
       set((s) =>
@@ -348,6 +442,7 @@ export const useChat = create<ChatState>((set, get) => ({
           messages: c.messages.map((m) => (m.id === message.id ? { ...m, ...message } : m)),
         })),
       );
+      void persist(message.channel_id, get().channel(message.channel_id).messages);
     });
     const offDelete = gateway.on('message.delete', (d) => {
       set((s) =>
@@ -356,6 +451,7 @@ export const useChat = create<ChatState>((set, get) => ({
           messages: c.messages.map((m) => (m.id === d.id ? { ...m, deleted: true, content: '' } : m)),
         })),
       );
+      void persist(d.channel_id, get().channel(d.channel_id).messages);
     });
     const offReactionAdd = gateway.on('reaction.add', (d) => {
       set((s) =>

@@ -18,23 +18,21 @@ export default function ThreadsScreen() {
 
   return (
     <Screen>
-      <TopBar title="threads" onBack={() => navigate(-1)} />
+      <TopBar title="message branches" onBack={() => navigate(-1)} />
       <ChipRow>
         <Chip label="active" active={!archived} onClick={() => setArchived(false)} />
         <Chip label="archived" active={archived} onClick={() => setArchived(true)} />
       </ChipRow>
       <ScreenBody>
         {threads.length === 0 ? (
-          <EmptyState icon={<Forum size={28} />} title="no threads" subtitle="start one from any message" />
+          <EmptyState icon={<Forum size={28} />} title="no branches" subtitle="branch from any message without cluttering the channel" />
         ) : (
           threads.map((thread) => (
             <ListRow
               key={thread.id}
               onClick={() => navigate(`/thread/${thread.id}`)}
-              title={thread.title || 'thread'}
-              subtitle={`${thread.reply_count ?? 0} replies · ${relativeTime(
-                thread.last_reply_at || thread.created_at || 0,
-              )}`}
+              title={thread.title || 'branch'}
+              subtitle={`${thread.reply_count ?? 0} replies · ${thread.expires_at ? `expires ${relativeTime(thread.expires_at)} · ` : ''}${relativeTime(thread.last_reply_at || thread.created_at || 0)}`}
             />
           ))
         )}

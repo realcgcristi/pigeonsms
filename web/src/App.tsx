@@ -6,6 +6,7 @@ import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { LoadingState } from '@/components/ui/Spinner';
 import { ToastProvider } from '@/components/ui/Toast';
 import { useSession } from '@/store/session';
+import { useChat } from '@/store/chat';
 
 const OnboardingScreen = lazy(() => import('@/screens/onboarding/OnboardingScreen'));
 const MessagesScreen = lazy(() => import('@/screens/home/MessagesScreen'));
@@ -32,6 +33,7 @@ const NestSettingsScreen = lazy(() => import('@/screens/settings/NestSettingsScr
 const NestManageScreen = lazy(() => import('@/screens/settings/NestManageScreen'));
 const ChannelPermissionsScreen = lazy(() => import('@/screens/spaces/ChannelPermissionsScreen'));
 const BotsScreen = lazy(() => import('@/screens/settings/BotsScreen'));
+const BridgesScreen = lazy(() => import('@/screens/settings/BridgesScreen'));
 const AboutScreen = lazy(() => import('@/screens/settings/AboutScreen'));
 const ThreadsScreen = lazy(() => import('@/screens/threads/ThreadsScreen'));
 const ThreadScreen = lazy(() => import('@/screens/threads/ThreadScreen'));
@@ -50,10 +52,19 @@ export default function App() {
   const restore = useSession((s) => s.restore);
   const restored = useSession((s) => s.restored);
   const token = useSession((s) => s.token);
+  const syncOutbox = useChat((s) => s.syncOutbox);
 
   useEffect(() => {
     void restore();
   }, [restore]);
+
+  useEffect(() => {
+    if (!token) return;
+    const sync = () => void syncOutbox();
+    window.addEventListener('online', sync);
+    sync();
+    return () => window.removeEventListener('online', sync);
+  }, [syncOutbox, token]);
 
   if (!restored) return <LoadingState label="opening pigeonsms" />;
 
@@ -92,6 +103,7 @@ export default function App() {
               <Route path="/settings/nests/:spaceId" element={<Gate><NestManageScreen /></Gate>} />
               <Route path="/nest/:spaceId/channel/:channelId/permissions" element={<Gate><ChannelPermissionsScreen /></Gate>} />
               <Route path="/settings/bots" element={<Gate><BotsScreen /></Gate>} />
+              <Route path="/settings/nests/:spaceId/bridges" element={<Gate><BridgesScreen /></Gate>} />
               <Route path="/settings/about" element={<Gate><AboutScreen /></Gate>} />
               <Route path="/threads/:channelId" element={<Gate><ThreadsScreen /></Gate>} />
               <Route path="/thread/:threadId" element={<Gate><ThreadScreen /></Gate>} />

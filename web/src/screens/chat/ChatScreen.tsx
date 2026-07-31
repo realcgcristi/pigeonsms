@@ -818,10 +818,10 @@ export default function ChatScreen() {
       try {
         const thread = message.thread_id
           ? { id: message.thread_id }
-          : await api.createThread(channelId, message.id, message.content.slice(0, 60) || undefined)
+          : await api.createThread(channelId, message.id, message.content.slice(0, 60) || undefined, 'branch', 7 * 86400)
         navigate(`/thread/${thread.id}`)
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : 'could not open thread')
+        toast.error(err instanceof Error ? err.message : 'could not open branch')
       }
     },
     [channelId, navigate, toast],

@@ -5,6 +5,7 @@ import type { AuditEntryDto, ChannelDto, SpaceBanDto, SpaceDto, SpaceMemberDto }
 import {
   Campaign,
   DeleteOutline,
+  Download,
   Edit,
   ExitToApp,
   Forum,
@@ -13,6 +14,8 @@ import {
   Image,
   Settings,
   Tag,
+  Sync,
+  Upload,
 } from '@/components/icons'
 import { Avatar } from '@/components/ui/Avatar'
 import { Button } from '@/components/ui/Button'
@@ -24,6 +27,7 @@ import { useToast } from '@/components/ui/Toast'
 import { relativeTime } from '@/lib/format'
 import { useSession } from '@/store/session'
 import { useSocial } from '@/store/social'
+import { useThemeStore } from '@/store/theme'
 import './Settings.css'
 
 type Tab = 'overview' | 'channels' | 'moderation' | 'audit'
@@ -34,7 +38,13 @@ export default function NestManageScreen() {
   const toast = useToast()
   const me = useSession((state) => state.user)
   const refreshSpaces = useSocial((state) => state.loadSpaces)
+  const setAccent = useThemeStore((state) => state.setAccent)
+  const setUiSkin = useThemeStore((state) => state.setUiSkin)
+  const accent = useThemeStore((state) => state.accent)
+  const uiSkin = useThemeStore((state) => state.uiSkin)
   const iconRef = useRef<HTMLInputElement>(null)
+  const migrationRef = useRef<HTMLInputElement>(null)
+  const packRef = useRef<HTMLInputElement>(null)
   const [tab, setTab] = useState<Tab>('overview')
   const [space, setSpace] = useState<SpaceDto | null>(null)
   const [members, setMembers] = useState<SpaceMemberDto[]>([])
@@ -115,6 +125,78 @@ export default function NestManageScreen() {
     }
   }
 
+  const downloadJson = (filename: string, value: unknown) => {
+    const url = URL.createObjectURL(new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' }))
+    const link = document.createElement('a')
+    link.href = url
+    link.download = filename
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const exportMigration = async () => {
+    setBusy(true)
+    try {
+      const result = await api.exportSpaceMigration(spaceId)
+      downloadJson(`${(space?.name || 'nest').replace(/[^a-z0-9_-]/gi, '_')}.pigeon.json`, result)
+      toast.show('portable nest backup downloaded')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'could not export nest')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const importMigration = async (file: File) => {
+    setBusy(true)
+    try {
+      const parsed = JSON.parse(await file.text()) as { bundle?: Record<string, unknown> } & Record<string, unknown>
+      const result = await api.importSpaceMigration(parsed.bundle ?? parsed)
+      await refreshSpaces(true)
+      toast.show('nest migrated; media continues copying in the background')
+      navigate(`/settings/nests/${result.space_id}`)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'could not import nest')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const exportPack = async () => {
+    setBusy(true)
+    try {
+      const result = await api.exportSpacePack(spaceId, { accent, ui_skin: uiSkin })
+      downloadJson(`${(space?.name || 'nest').replace(/[^a-z0-9_-]/gi, '_')}.pigeonpack.json`, result)
+      toast.show('pigeon pack downloaded')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'could not export pack')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const installPack = async (file: File) => {
+    setBusy(true)
+    try {
+      const parsed = JSON.parse(await file.text()) as { pack?: Record<string, unknown> } & Record<string, unknown>
+      const result = await api.installSpacePack(spaceId, parsed.pack ?? parsed)
+      if (result.bot_credentials.length) {
+        downloadJson('pigeon-pack-bot-credentials.json', result.bot_credentials)
+      }
+      if (typeof result.theme?.accent === 'string') setAccent(result.theme.accent)
+      if (['classic', 'nova', 'galaxy'].includes(String(result.theme?.ui_skin))) {
+        setUiSkin(result.theme?.ui_skin as 'classic' | 'nova' | 'galaxy')
+      }
+      await load()
+      await refreshSpaces(true)
+      toast.show(`pack installed: ${result.created.channels ?? 0} channels, ${result.created.roles ?? 0} roles`)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'could not install pack')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <Screen className="settings-screen">
       <TopBar title={space?.name ?? 'manage nest'} subtitle="complete nest administration" onBack={() => navigate(-1)} />
@@ -162,6 +244,21 @@ export default function NestManageScreen() {
               <SettingsRow icon={<Settings size={18} />} title="roles" value="permissions and role assignments" onClick={() => navigate(`/nest/${spaceId}/roles`)} />
               <SettingsRow icon={<Tag size={18} />} title="emoji and stickers" onClick={() => navigate(`/nest/${spaceId}/emoji`)} />
             </SettingsGroup>
+
+            {canManage ? (
+              <SettingsGroup label="connections">
+                <SettingsRow icon={<Sync size={18} />} title="universal bridges" value="Matrix, Discord, IRC, Slack and email" onClick={() => navigate(`/settings/nests/${spaceId}/bridges`)} />
+              </SettingsGroup>
+            ) : null}
+
+            {owner ? (
+              <SettingsGroup label="portability and pigeon packs">
+                <SettingsRow icon={<Download size={18} />} title="server migration backup" value="community, history, roles and media manifest" onClick={() => void exportMigration()} />
+                <SettingsRow icon={<Upload size={18} />} title="migrate from another server" value="import a .pigeon.json bundle as a new nest" onClick={() => migrationRef.current?.click()} />
+                <SettingsRow icon={<Download size={18} />} title="export pigeon pack" value="channels, roles, permissions, bots and theme" onClick={() => void exportPack()} />
+                <SettingsRow icon={<Upload size={18} />} title="install pigeon pack" value="apply a community template to this nest" onClick={() => packRef.current?.click()} />
+              </SettingsGroup>
+            ) : null}
 
             {owner ? (
               <SettingsGroup label="ownership">
@@ -323,6 +420,28 @@ export default function NestManageScreen() {
         onChange={(event) => {
           const file = event.target.files?.[0]
           if (file) void uploadIcon(file)
+          event.target.value = ''
+        }}
+      />
+      <input
+        ref={migrationRef}
+        hidden
+        type="file"
+        accept="application/json,.json"
+        onChange={(event) => {
+          const file = event.target.files?.[0]
+          if (file) void importMigration(file)
+          event.target.value = ''
+        }}
+      />
+      <input
+        ref={packRef}
+        hidden
+        type="file"
+        accept="application/json,.json"
+        onChange={(event) => {
+          const file = event.target.files?.[0]
+          if (file) void installPack(file)
           event.target.value = ''
         }}
       />

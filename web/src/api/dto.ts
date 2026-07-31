@@ -528,6 +528,21 @@ export interface SpaceResponse {
   space: SpaceDto;
 }
 
+export type BridgeKind = 'matrix' | 'discord' | 'irc' | 'slack' | 'email';
+
+export interface BridgeDto {
+  id: string;
+  space_id: string;
+  channel_id: string;
+  kind: BridgeKind;
+  name: string;
+  direction: 'inbound' | 'outbound' | 'both';
+  status: 'active' | 'paused';
+  cursor_seq: number;
+  created_at: number;
+  updated_at: number;
+}
+
 export interface CreateSpaceResponse {
   space: SpaceDto;
 }
@@ -814,6 +829,8 @@ export interface ThreadDto {
   created_at?: number;
   archived?: boolean;
   archived_at?: number | null;
+  kind?: 'thread' | 'branch';
+  expires_at?: number | null;
 }
 
 export interface ThreadsResponse {
@@ -1063,6 +1080,8 @@ export interface BotDto {
   interactions_url?: string | null;
   public?: boolean;
   dm_enabled?: boolean;
+  encryption_mode?: 'none' | 'local' | 'enclave';
+  encryption_public_key?: string | null;
   created_at?: number;
   updated_at?: number;
   username?: string | null;
