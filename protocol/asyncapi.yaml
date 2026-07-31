@@ -1,0 +1,72 @@
+asyncapi: 3.0.0
+info:
+  title: Open Pigeon Protocol Realtime API
+  version: 1.0.0
+  description: Gateway and call signaling contracts for compatible Pigeon servers.
+servers:
+  production:
+    host: api.pigeonsms.aldi.best
+    protocol: wss
+    pathname: /gateway
+channels:
+  gateway:
+    address: /gateway
+    messages:
+      event:
+        $ref: '#/components/messages/GatewayEvent'
+      ping:
+        $ref: '#/components/messages/Ping'
+      pong:
+        $ref: '#/components/messages/Pong'
+  calls:
+    address: /calls/{channelId}/ws
+    parameters:
+      channelId:
+        description: Opaque decimal channel ID
+    messages:
+      signal:
+        $ref: '#/components/messages/CallSignal'
+operations:
+  receiveGatewayEvent:
+    action: receive
+    channel: { $ref: '#/channels/gateway' }
+    messages:
+      - { $ref: '#/channels/gateway/messages/event' }
+      - { $ref: '#/channels/gateway/messages/pong' }
+  sendGatewayHeartbeat:
+    action: send
+    channel: { $ref: '#/channels/gateway' }
+    messages:
+      - { $ref: '#/channels/gateway/messages/ping' }
+  exchangeCallSignal:
+    action: send
+    channel: { $ref: '#/channels/calls' }
+    messages:
+      - { $ref: '#/channels/calls/messages/signal' }
+components:
+  messages:
+    GatewayEvent:
+      payload:
+        $ref: ./schemas/gateway-event.schema.json
+    Ping:
+      payload:
+        type: string
+        const: ping
+    Pong:
+      payload:
+        type: string
+        const: pong
+    CallSignal:
+      payload:
+        type: object
+        required: [type]
+        properties:
+          type: { enum: [offer, answer, ice, mute, camera] }
+          target: { type: string }
+          data: {}
+          mode: { enum: [voice, video] }
+  securitySchemes:
+    bearerQuery:
+      type: httpApiKey
+      in: query
+      name: token

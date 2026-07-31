@@ -1,0 +1,13 @@
+{
+  "$schema": "../../schemas/gateway-event.schema.json",
+  "t": "message.new",
+  "d": {
+    "id": "72351096507367425",
+    "channel_id": "72351096507367420",
+    "author_id": "72351096507367421",
+    "content": "live",
+    "kind": "text",
+    "seq": 43,
+    "created_at": 1785492000001
+  }
+}

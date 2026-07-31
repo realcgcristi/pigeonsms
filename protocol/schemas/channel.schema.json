@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pigeonsms.com/protocol/v1/channel.schema.json",
+  "title": "Pigeon channel",
+  "type": "object",
+  "required": ["id", "kind"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^[0-9]+$" },
+    "space_id": { "type": ["string", "null"], "pattern": "^[0-9]+$" },
+    "name": { "type": ["string", "null"], "maxLength": 100 },
+    "kind": { "enum": ["dm", "text", "forum", "announcement", "voice"] },
+    "topic": { "type": ["string", "null"], "maxLength": 1024 },
+    "position": { "type": "integer", "minimum": 0 },
+    "category_id": { "type": ["string", "null"] },
+    "last_seq": { "type": "integer", "minimum": 0 },
+    "unread": { "type": "integer", "minimum": 0 }
+  },
+  "additionalProperties": true
+}

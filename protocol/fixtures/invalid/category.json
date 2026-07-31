@@ -1,0 +1,8 @@
+{
+  "$schema": "../../schemas/category.schema.json",
+  "id": "not-an-id",
+  "space_id": "1",
+  "name": "",
+  "position": -1,
+  "collapsed": 4
+}

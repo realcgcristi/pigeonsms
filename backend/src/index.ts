@@ -34,6 +34,10 @@ import { sweepLingeringRows } from './lib/purge';
 const app = new Hono<AppEnv>();
 
 app.use(requestId);
+app.use('*', async (c, next) => {
+  await next();
+  c.header('Pigeon-Protocol-Version', '1.0');
+});
 // Native app requests carry no Origin header at all, so this allowlist only
 // governs browser-based callers (debug tooling, any future web client).
 // Extend with additional known web origins as they come online.
@@ -45,21 +49,52 @@ const ALLOWED_ORIGINS = [
   'http://127.0.0.1:5183',
 ];
 
-function originAllowed(origin: string): boolean {
+function originAllowed(origin: string, env: Env): boolean {
   if (ALLOWED_ORIGINS.includes(origin)) return true;
+  if (env.WEB_ORIGIN === origin) return true;
+  if ((env.ADDITIONAL_ORIGINS ?? '').split(',').map((value) => value.trim()).includes(origin)) return true;
   return /^https:\/\/[a-z0-9-]+\.pigeonsms-web\.pages\.dev$/.test(origin);
 }
 app.use(
   cors({
-    origin: (origin) => (origin && originAllowed(origin) ? origin : null),
+    origin: (origin, c) => (origin && originAllowed(origin, c.env) ? origin : null),
     allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key'],
+    allowHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key', 'Pigeon-Protocol-Version'],
+    exposeHeaders: ['Pigeon-Protocol-Version', 'X-Request-Id'],
     credentials: true,
     maxAge: 86400,
   }),
 );
 
 app.get('/', (c) => c.json({ name: 'pigeonsms', status: 'ok' }));
+
+app.get('/.well-known/pigeon', (c) => {
+  const requestOrigin = new URL(c.req.url).origin;
+  const api = (c.env.PUBLIC_BASE_URL ?? requestOrigin).replace(/\/$/, '');
+  const websocket = api.replace(/^http/, 'ws');
+  c.header('Cache-Control', 'public, max-age=300');
+  return c.json({
+    protocol: { name: 'open-pigeon', versions: ['1.0'], preferred: '1.0' },
+    server: {
+      name: c.env.SERVER_NAME ?? 'pigeonsms',
+      version: c.env.SERVER_VERSION ?? '3.0.0-beta',
+      source: 'https://github.com/realcgcristi/pigeonsms',
+    },
+    endpoints: {
+      api,
+      gateway: `${websocket}/gateway`,
+      media: `${api}/media`,
+      calls: `${websocket}/calls`,
+    },
+    capabilities: [
+      'core', 'chat', 'nests', 'bots', 'calls', 'threads', 'forums', 'roles',
+      'search', 'scheduled-messages', 'disappearing-messages', 'uploads.resumable',
+      'e2ee.key-envelopes', 'push.web', 'gateway.resume',
+      'channel-categories', 'jump-to-unread',
+    ],
+    limits: { message_length: 8000, upload_bytes: 524_288_000 },
+  });
+});
 
 app.get('/health', async (c) => {
   const dbOk = await c.env.DB.prepare('SELECT 1')

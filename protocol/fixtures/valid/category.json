@@ -1,0 +1,8 @@
+{
+  "$schema": "../../schemas/category.schema.json",
+  "id": "72351096507367430",
+  "space_id": "72351096507367420",
+  "name": "community",
+  "position": 0,
+  "collapsed": 0
+}

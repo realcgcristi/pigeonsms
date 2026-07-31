@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pigeonsms.com/protocol/v1/error.schema.json",
+  "title": "Pigeon API error",
+  "type": "object",
+  "required": ["error"],
+  "properties": {
+    "error": {
+      "type": "object",
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "type": "string", "pattern": "^[a-z][a-z0-9_]+$" },
+        "message": { "type": "string", "minLength": 1 },
+        "details": {}
+      },
+      "additionalProperties": true
+    },
+    "request_id": { "type": "string" }
+  },
+  "additionalProperties": true
+}

@@ -17,6 +17,12 @@ export interface PushJob extends PushPayload {
 /** Bindings — must stay in sync with wrangler.toml. */
 export interface Env {
   DB: D1Database;
+  PUBLIC_BASE_URL?: string;
+  WEB_ORIGIN?: string;
+  ADDITIONAL_ORIGINS?: string;
+  SESSION_COOKIE_DOMAIN?: string;
+  SERVER_NAME?: string;
+  SERVER_VERSION?: string;
   /** VAPID keypair for browser push; absent = web push simply off. */
   VAPID_PUBLIC_KEY?: string;
   VAPID_PRIVATE_JWK?: string;
@@ -27,8 +33,8 @@ export interface Env {
   SPACE: DurableObjectNamespace;
   DM_CHANNEL: DurableObjectNamespace;
   CALL_ROOM: DurableObjectNamespace;
-  RL_AUTH: RateLimiter;
-  RL_GENERAL: RateLimiter;
+  RL_AUTH?: RateLimiter;
+  RL_GENERAL?: RateLimiter;
   /** Secret (`wrangler secret put ADMIN_TOKEN`) — gates /admin/* until admin user auth exists. */
   ADMIN_TOKEN: string;
   /** Secret (`wrangler secret put PASSWORD_PEPPER`) — HMAC pepper for password hashing. */

@@ -1,0 +1,14 @@
+{
+  "$schema": "../../schemas/message.schema.json",
+  "id": "72351096507367425",
+  "channel_id": "72351096507367420",
+  "author_id": "72351096507367421",
+  "content": "hello from an OPP client",
+  "kind": "text",
+  "seq": 42,
+  "created_at": 1785492000000,
+  "edited_at": null,
+  "deleted_at": null,
+  "reply_to": null,
+  "attachments": []
+}

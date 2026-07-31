@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pigeonsms.com/protocol/v1/message.schema.json",
+  "title": "Pigeon message",
+  "type": "object",
+  "required": ["id", "channel_id", "author_id", "content", "kind", "seq", "created_at"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^[0-9]+$" },
+    "channel_id": { "type": "string", "pattern": "^[0-9]+$" },
+    "author_id": { "type": "string", "pattern": "^[0-9]+$" },
+    "content": { "type": "string", "maxLength": 8000 },
+    "kind": { "enum": ["text", "poll", "system", "sticker", "forum_post", "forum_reply", "interaction"] },
+    "seq": { "type": "integer", "minimum": 1 },
+    "created_at": { "type": "integer", "minimum": 0 },
+    "edited_at": { "type": ["integer", "null"], "minimum": 0 },
+    "deleted_at": { "type": ["integer", "null"], "minimum": 0 },
+    "reply_to": { "type": ["string", "null"], "pattern": "^[0-9]+$" },
+    "attachments": { "type": "array", "items": { "type": "object" } },
+    "metadata": { "type": ["object", "null"] },
+    "author": { "$ref": "user.schema.json" }
+  },
+  "additionalProperties": true
+}

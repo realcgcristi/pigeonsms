@@ -1,0 +1,5 @@
+{
+  "$schema": "../../schemas/error.schema.json",
+  "error": { "code": "not_found", "message": "no such channel" },
+  "request_id": "req_01"
+}

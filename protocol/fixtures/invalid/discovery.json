@@ -1,0 +1,8 @@
+{
+  "$schema": "../../schemas/discovery.schema.json",
+  "protocol": { "name": "other", "versions": [], "preferred": "latest" },
+  "server": { "name": "", "version": "" },
+  "endpoints": { "api": "not a url", "gateway": "https://wrong.example", "media": "x" },
+  "capabilities": ["Bad Capability"],
+  "limits": { "message_length": 0, "upload_bytes": -1 }
+}

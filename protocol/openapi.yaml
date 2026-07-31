@@ -1,0 +1,618 @@
+openapi: 3.1.0
+info:
+  title: Open Pigeon Protocol HTTP API
+  version: 1.0.0
+  license:
+    name: MIT
+    identifier: MIT
+  description: Public HTTP contract for compatible Pigeon chat servers.
+servers:
+  - url: https://api.pigeonsms.aldi.best
+security:
+  - bearerAuth: []
+  - cookieAuth: []
+tags:
+  - name: Discovery
+  - name: Auth
+  - name: Chat
+  - name: Nests
+  - name: Bots
+paths:
+  /.well-known/pigeon:
+    get:
+      tags: [Discovery]
+      security: []
+      operationId: discoverServer
+      responses:
+        '200':
+          description: Server capabilities and endpoints
+          content:
+            application/json:
+              schema:
+                $ref: ./schemas/discovery.schema.json
+  /health:
+    get:
+      tags: [Discovery]
+      security: []
+      operationId: health
+      responses:
+        '200':
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, ts]
+                properties:
+                  ok: { type: boolean }
+                  ts: { type: integer }
+        '503':
+          $ref: '#/components/responses/Unavailable'
+  /auth/login:
+    post:
+      tags: [Auth]
+      security: []
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [login, password]
+              properties:
+                login: { type: string }
+                password: { type: string, format: password }
+                device_name: { type: string }
+                totp: { type: string }
+      responses:
+        '200':
+          description: Authenticated session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthSession'
+        '401': { $ref: '#/components/responses/Error' }
+  /auth/signup:
+    post:
+      tags: [Auth]
+      security: []
+      operationId: signup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, email, password, invite]
+              properties:
+                username: { type: string }
+                email: { type: string, format: email }
+                password: { type: string, format: password }
+                invite: { type: string }
+                device_name: { type: string }
+      responses:
+        '201':
+          description: Created session
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthSession' }
+        '400': { $ref: '#/components/responses/Error' }
+  /auth/me:
+    get:
+      tags: [Auth]
+      operationId: getCurrentUser
+      responses:
+        '200':
+          description: Current user
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user]
+                properties:
+                  user: { $ref: ./schemas/user.schema.json }
+        '401': { $ref: '#/components/responses/Error' }
+  /auth/logout:
+    post:
+      tags: [Auth]
+      operationId: logout
+      responses:
+        '204': { description: Session ended }
+  /dms:
+    get:
+      tags: [Chat]
+      operationId: listDms
+      responses:
+        '200':
+          description: Direct-message channels
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [dms]
+                properties:
+                  dms:
+                    type: array
+                    items: { $ref: ./schemas/channel.schema.json }
+  /dms/open:
+    post:
+      tags: [Chat]
+      operationId: openDm
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id]
+              properties:
+                user_id: { $ref: '#/components/schemas/Id' }
+      responses:
+        '200':
+          description: Existing or newly opened DM
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [channel]
+                properties:
+                  channel: { $ref: ./schemas/channel.schema.json }
+  /channels/{channelId}/messages:
+    parameters:
+      - $ref: '#/components/parameters/ChannelId'
+    get:
+      tags: [Chat]
+      operationId: listMessages
+      parameters:
+        - name: before
+          in: query
+          schema: { $ref: '#/components/schemas/Id' }
+        - name: after
+          in: query
+          schema: { type: integer, minimum: 0 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        '200':
+          description: Ordered channel messages
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [messages]
+                properties:
+                  messages:
+                    type: array
+                    items: { $ref: ./schemas/message.schema.json }
+                  has_more: { type: boolean }
+                  has_more_after: { type: boolean }
+    post:
+      tags: [Chat]
+      operationId: sendMessage
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                content: { type: string, maxLength: 8000 }
+                kind: { type: string, default: text }
+                reply_to: { $ref: '#/components/schemas/NullableId' }
+                attachments:
+                  type: array
+                  items: { type: object }
+                metadata: { type: object }
+                scheduled_for: { type: integer }
+      responses:
+        '201':
+          description: Created message
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [message]
+                properties:
+                  message: { $ref: ./schemas/message.schema.json }
+        '429': { $ref: '#/components/responses/Error' }
+  /messages/{messageId}:
+    parameters:
+      - $ref: '#/components/parameters/MessageId'
+    get:
+      tags: [Chat]
+      operationId: getMessage
+      responses:
+        '200':
+          description: Message
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [message]
+                properties:
+                  message: { $ref: ./schemas/message.schema.json }
+    patch:
+      tags: [Chat]
+      operationId: editMessage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content: { type: string, maxLength: 8000 }
+      responses:
+        '200':
+          description: Updated message
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { $ref: ./schemas/message.schema.json }
+    delete:
+      tags: [Chat]
+      operationId: deleteMessage
+      responses:
+        '204': { description: Deleted }
+  /channels/{channelId}/read:
+    put:
+      tags: [Chat]
+      operationId: markRead
+      parameters:
+        - $ref: '#/components/parameters/ChannelId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [seq]
+              properties:
+                seq: { type: integer, minimum: 0 }
+      responses:
+        '204': { description: Cursor updated }
+  /channels/{channelId}/typing:
+    post:
+      tags: [Chat]
+      operationId: sendTyping
+      parameters:
+        - $ref: '#/components/parameters/ChannelId'
+      responses:
+        '204': { description: Typing event accepted }
+  /spaces:
+    get:
+      tags: [Nests]
+      operationId: listSpaces
+      responses:
+        '200':
+          description: Joined spaces and channels
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [spaces]
+                properties:
+                  spaces:
+                    type: array
+                    items: { $ref: '#/components/schemas/Space' }
+    post:
+      tags: [Nests]
+      operationId: createSpace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, maxLength: 100 }
+                description: { type: string, maxLength: 1024 }
+      responses:
+        '201':
+          description: Created space
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Space' }
+  /spaces/{spaceId}:
+    parameters:
+      - $ref: '#/components/parameters/SpaceId'
+    get:
+      tags: [Nests]
+      operationId: getSpace
+      responses:
+        '200':
+          description: Space
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Space' }
+    patch:
+      tags: [Nests]
+      operationId: updateSpace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                description: { type: string }
+      responses:
+        '200': { description: Updated }
+    delete:
+      tags: [Nests]
+      operationId: deleteSpace
+      responses:
+        '204': { description: Deleted }
+  /spaces/{spaceId}/channels:
+    post:
+      tags: [Nests]
+      operationId: createChannel
+      parameters:
+        - $ref: '#/components/parameters/SpaceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+                kind: { type: string, default: text }
+                topic: { type: string }
+                category_id: { $ref: '#/components/schemas/NullableId' }
+      responses:
+        '201':
+          description: Created channel
+          content:
+            application/json:
+              schema: { $ref: ./schemas/channel.schema.json }
+  /spaces/{spaceId}/members:
+    get:
+      tags: [Nests]
+      operationId: listMembers
+      parameters:
+        - $ref: '#/components/parameters/SpaceId'
+      responses:
+        '200':
+          description: Space members
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  members:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: ./schemas/user.schema.json
+                        - type: object
+                          properties:
+                            role_ids:
+                              type: array
+                              items: { $ref: '#/components/schemas/Id' }
+  /spaces/{spaceId}/categories:
+    parameters:
+      - $ref: '#/components/parameters/SpaceId'
+    get:
+      tags: [Nests]
+      operationId: listChannelCategories
+      responses:
+        '200':
+          description: Ordered channel categories
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [categories]
+                properties:
+                  categories: { type: array, items: { $ref: '#/components/schemas/Category' } }
+    post:
+      tags: [Nests]
+      operationId: createChannelCategory
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, maxLength: 64 }
+                position: { type: integer, minimum: 0 }
+      responses:
+        '201':
+          description: Created category
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  category: { $ref: '#/components/schemas/Category' }
+  /spaces/{spaceId}/categories/{categoryId}:
+    parameters:
+      - $ref: '#/components/parameters/SpaceId'
+      - name: categoryId
+        in: path
+        required: true
+        schema: { $ref: '#/components/schemas/Id' }
+    patch:
+      tags: [Nests]
+      operationId: updateChannelCategory
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, maxLength: 64 }
+                position: { type: integer, minimum: 0 }
+                collapsed: { type: boolean }
+      responses:
+        '200': { description: Updated category }
+    delete:
+      tags: [Nests]
+      operationId: deleteChannelCategory
+      responses:
+        '200': { description: Category deleted and channels uncategorized }
+  /bots/me:
+    get:
+      tags: [Bots]
+      operationId: getCurrentBot
+      responses:
+        '200':
+          description: Current bot application
+          content:
+            application/json:
+              schema: { type: object }
+  /bots/me/commands:
+    get:
+      tags: [Bots]
+      operationId: listBotCommands
+      responses:
+        '200':
+          description: Registered commands
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  commands: { type: array, items: { $ref: '#/components/schemas/BotCommand' } }
+    put:
+      tags: [Bots]
+      operationId: replaceBotCommands
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [commands]
+              properties:
+                commands: { type: array, items: { $ref: '#/components/schemas/BotCommand' } }
+      responses:
+        '200': { description: Replaced commands }
+  /bots/me/updates:
+    get:
+      tags: [Bots]
+      operationId: pollBotUpdates
+      parameters:
+        - name: timeout
+          in: query
+          schema: { type: integer, minimum: 0, maximum: 30 }
+      responses:
+        '200':
+          description: Pending interactions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  interactions: { type: array, items: { type: object } }
+  /interactions/{interactionId}/callback:
+    post:
+      tags: [Bots]
+      operationId: answerInteraction
+      parameters:
+        - name: interactionId
+          in: path
+          required: true
+          schema: { $ref: '#/components/schemas/Id' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        '200': { description: Callback accepted }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: pigeon_session
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      schema: { type: string, minLength: 8, maxLength: 128 }
+    ChannelId:
+      name: channelId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/Id' }
+    MessageId:
+      name: messageId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/Id' }
+    SpaceId:
+      name: spaceId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/Id' }
+  schemas:
+    Id:
+      type: string
+      pattern: '^[0-9]+$'
+    NullableId:
+      oneOf:
+        - $ref: '#/components/schemas/Id'
+        - type: 'null'
+    AuthSession:
+      type: object
+      required: [user]
+      properties:
+        token: { type: string }
+        user: { $ref: ./schemas/user.schema.json }
+    Space:
+      type: object
+      required: [id, name]
+      properties:
+        id: { $ref: '#/components/schemas/Id' }
+        name: { type: string }
+        description: { type: [string, 'null'] }
+        owner_id: { $ref: '#/components/schemas/Id' }
+        channels:
+          type: array
+          items: { $ref: ./schemas/channel.schema.json }
+    BotCommand:
+      type: object
+      required: [name, description]
+      properties:
+        name: { type: string, pattern: '^[a-z0-9_-]{1,32}$' }
+        description: { type: string, maxLength: 100 }
+        dm_enabled: { type: boolean }
+        options: { type: array, maxItems: 25, items: { type: object } }
+    Category:
+      type: object
+      required: [id, space_id, name, position, collapsed]
+      properties:
+        id: { $ref: '#/components/schemas/Id' }
+        space_id: { $ref: '#/components/schemas/Id' }
+        name: { type: string }
+        position: { type: integer, minimum: 0 }
+        collapsed: { type: integer, enum: [0, 1] }
+  responses:
+    Error:
+      description: Protocol error
+      content:
+        application/json:
+          schema: { $ref: ./schemas/error.schema.json }
+    Unavailable:
+      description: Service unavailable
+      content:
+        application/json:
+          schema: { $ref: ./schemas/error.schema.json }

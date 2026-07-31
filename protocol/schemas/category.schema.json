@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pigeonsms.com/protocol/v1/category.schema.json",
+  "title": "Pigeon channel category",
+  "type": "object",
+  "required": ["id", "space_id", "name", "position", "collapsed"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^[0-9]+$" },
+    "space_id": { "type": "string", "pattern": "^[0-9]+$" },
+    "name": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "position": { "type": "integer", "minimum": 0 },
+    "collapsed": { "type": "integer", "enum": [0, 1] }
+  },
+  "additionalProperties": true
+}

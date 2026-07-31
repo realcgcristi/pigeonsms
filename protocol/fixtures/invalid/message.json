@@ -1,0 +1,10 @@
+{
+  "$schema": "../../schemas/message.schema.json",
+  "id": 12,
+  "channel_id": "not-an-id",
+  "author_id": "5",
+  "content": "broken",
+  "kind": "unknown",
+  "seq": 0,
+  "created_at": -1
+}

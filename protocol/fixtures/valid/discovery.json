@@ -1,0 +1,13 @@
+{
+  "$schema": "../../schemas/discovery.schema.json",
+  "protocol": { "name": "open-pigeon", "versions": ["1.0"], "preferred": "1.0" },
+  "server": { "name": "pigeonsms", "version": "3.0.0", "source": "https://github.com/realcgcristi/pigeonsms" },
+  "endpoints": {
+    "api": "https://api.example.com",
+    "gateway": "wss://api.example.com/gateway",
+    "media": "https://api.example.com/media",
+    "calls": "wss://api.example.com/calls"
+  },
+  "capabilities": ["core", "chat", "nests", "bots", "calls", "uploads.resumable"],
+  "limits": { "message_length": 8000, "upload_bytes": 524288000 }
+}

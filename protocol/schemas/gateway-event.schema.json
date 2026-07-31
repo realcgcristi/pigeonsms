@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pigeonsms.com/protocol/v1/gateway-event.schema.json",
+  "title": "Pigeon gateway event",
+  "type": "object",
+  "required": ["t", "d"],
+  "properties": {
+    "t": {
+      "enum": [
+        "message.new", "message.edit", "message.delete", "mention.new",
+        "forum.post", "forum.reply", "forum.post.update", "forum.like",
+        "poll.update", "pin.add", "pin.remove", "super_pin.set",
+        "super_pin.remove", "reaction.add", "reaction.remove", "typing", "read",
+        "friend.request", "friend.accept", "channel.new", "channel.update",
+        "channel.delete", "space.update", "gateway.resume"
+      ]
+    },
+    "d": { "type": "object" }
+  },
+  "additionalProperties": true
+}

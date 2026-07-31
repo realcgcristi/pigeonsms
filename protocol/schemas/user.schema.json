@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pigeonsms.com/protocol/v1/user.schema.json",
+  "title": "Pigeon user",
+  "type": "object",
+  "required": ["id", "username"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^[0-9]+$" },
+    "username": { "type": "string", "minLength": 1, "maxLength": 32 },
+    "display_name": { "type": ["string", "null"], "maxLength": 64 },
+    "avatar_key": { "type": ["string", "null"] },
+    "flags": { "type": "integer", "minimum": 0 }
+  },
+  "additionalProperties": true
+}
