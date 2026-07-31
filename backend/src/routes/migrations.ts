@@ -8,7 +8,6 @@ import { readJsonBody } from '../lib/validate';
 import type { AppEnv, AuthedUser, Env } from '../types';
 
 const migrations = new Hono<AppEnv>();
-migrations.use(requireAuth);
 const MIGRATED_USER_FLAG = 2;
 
 interface MigrationBundle {
@@ -102,7 +101,7 @@ function cleanTime(value: unknown, fallback: number) {
   return Number.isFinite(number) && number > 0 ? Math.floor(number) : fallback;
 }
 
-migrations.get('/spaces/:spaceId/migration', async (c) => {
+migrations.get('/spaces/:spaceId/migration', requireAuth, async (c) => {
   const user = c.get('user') as AuthedUser;
   const spaceId = c.req.param('spaceId');
   await requirePermission(c.env, user.id, spaceId, Permission.MANAGE_NEST);
@@ -111,7 +110,7 @@ migrations.get('/spaces/:spaceId/migration', async (c) => {
   return c.json({ bundle, digest: await sha256Hex(JSON.stringify(bundle)) });
 });
 
-migrations.post('/spaces/migrate', async (c) => {
+migrations.post('/spaces/migrate', requireAuth, async (c) => {
   const user = c.get('user') as AuthedUser;
   if (user.isBot) throw new ApiError(403, 'forbidden', 'bots cannot import nests');
   const body = await readJsonBody(c);

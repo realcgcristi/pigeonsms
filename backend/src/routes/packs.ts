@@ -8,7 +8,6 @@ import { readJsonBody } from '../lib/validate';
 import type { AppEnv, AuthedUser } from '../types';
 
 const packs = new Hono<AppEnv>();
-packs.use(requireAuth);
 
 interface PackRow {
   id: string;
@@ -37,7 +36,7 @@ function summary(row: PackRow) {
   };
 }
 
-packs.get('/packs', async (c) => {
+packs.get('/packs', requireAuth, async (c) => {
   const user = c.get('user') as AuthedUser;
   const { results } = await c.env.DB.prepare(
     'SELECT * FROM pigeon_packs WHERE public = 1 OR owner_id = ? ORDER BY updated_at DESC LIMIT 100',
@@ -45,7 +44,7 @@ packs.get('/packs', async (c) => {
   return c.json({ packs: results.map(summary) });
 });
 
-packs.post('/packs', async (c) => {
+packs.post('/packs', requireAuth, async (c) => {
   const user = c.get('user') as AuthedUser;
   if (user.isBot) throw new ApiError(403, 'forbidden', 'bots cannot publish packs');
   const body = await readJsonBody(c);
@@ -73,14 +72,14 @@ packs.post('/packs', async (c) => {
   return c.json({ pack: { id, owner_id: user.id, name: pack.name, description: pack.description, version: pack.version, digest, public: !!body['public'], created_at: now, updated_at: now }, manifest: pack }, 201);
 });
 
-packs.get('/packs/:id', async (c) => {
+packs.get('/packs/:id', requireAuth, async (c) => {
   const user = c.get('user') as AuthedUser;
   const row = await c.env.DB.prepare('SELECT * FROM pigeon_packs WHERE id = ?').bind(c.req.param('id')).first<PackRow>();
   if (!row || (row.public !== 1 && row.owner_id !== user.id)) throw new ApiError(404, 'not_found', 'pack not found');
   return c.json({ pack: summary(row), manifest: JSON.parse(row.manifest) });
 });
 
-packs.delete('/packs/:id', async (c) => {
+packs.delete('/packs/:id', requireAuth, async (c) => {
   const user = c.get('user') as AuthedUser;
   const result = await c.env.DB.prepare('DELETE FROM pigeon_packs WHERE id = ? AND owner_id = ?')
     .bind(c.req.param('id'), user.id).run();
@@ -88,7 +87,7 @@ packs.delete('/packs/:id', async (c) => {
   return c.json({ ok: true });
 });
 
-packs.get('/spaces/:spaceId/pack', async (c) => {
+packs.get('/spaces/:spaceId/pack', requireAuth, async (c) => {
   const user = c.get('user') as AuthedUser;
   const spaceId = c.req.param('spaceId');
   await requirePermission(c.env, user.id, spaceId, Permission.MANAGE_NEST);
@@ -105,7 +104,7 @@ packs.get('/spaces/:spaceId/pack', async (c) => {
   return c.json({ pack, digest: await packDigest(pack) });
 });
 
-packs.post('/spaces/:spaceId/packs/install', async (c) => {
+packs.post('/spaces/:spaceId/packs/install', requireAuth, async (c) => {
   const user = c.get('user') as AuthedUser;
   if (user.isBot) throw new ApiError(403, 'forbidden', 'bots cannot install packs');
   const spaceId = c.req.param('spaceId');
