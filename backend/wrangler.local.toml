@@ -1,0 +1,51 @@
+name = "pigeon-api-local"
+main = "src/index.ts"
+compatibility_date = "2026-07-01"
+workers_dev = true
+
+[vars]
+PASSWORD_PEPPER = "local-development-only"
+ADMIN_TOKEN = "local-development-only"
+SERVER_NAME = "pigeonsms-local"
+SERVER_VERSION = "3.0.0-dev"
+PUBLIC_BASE_URL = "http://localhost:8787"
+WEB_ORIGIN = "http://localhost:4173"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "pigeon-local"
+database_id = "local"
+migrations_dir = "migrations"
+
+[[r2_buckets]]
+binding = "MEDIA"
+bucket_name = "pigeon-media-local"
+
+[[queues.producers]]
+binding = "PUSH_QUEUE"
+queue = "pigeon-push-local"
+
+[[queues.consumers]]
+queue = "pigeon-push-local"
+max_batch_size = 20
+max_batch_timeout = 5
+
+[[durable_objects.bindings]]
+name = "USER_GATEWAY"
+class_name = "UserGateway"
+[[durable_objects.bindings]]
+name = "SPACE"
+class_name = "Space"
+[[durable_objects.bindings]]
+name = "DM_CHANNEL"
+class_name = "DmChannel"
+[[durable_objects.bindings]]
+name = "CALL_ROOM"
+class_name = "CallRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["UserGateway", "Space", "DmChannel"]
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["CallRoom"]

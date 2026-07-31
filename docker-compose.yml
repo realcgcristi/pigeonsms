@@ -1,0 +1,38 @@
+services:
+  api:
+    image: node:22-bookworm-slim
+    working_dir: /repo
+    volumes:
+      - .:/repo
+      - pigeon-wrangler:/root/.wrangler
+    ports:
+      - "8787:8787"
+    command: >-
+      sh -c "npm install --prefix backend --no-audit --no-fund
+      && npx --prefix backend wrangler dev --config wrangler.local.toml --ip 0.0.0.0 --port 8787 --persist-to /root/.wrangler/state"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8787/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  web:
+    image: node:22-bookworm-slim
+    working_dir: /repo
+    volumes:
+      - .:/repo
+    environment:
+      VITE_PIGEON_API: http://localhost:8787
+      VITE_PIGEON_GATEWAY: ws://localhost:8787/gateway
+    ports:
+      - "4173:4173"
+    depends_on:
+      api:
+        condition: service_healthy
+    command: >-
+      sh -c "npm install --prefix web --no-audit --no-fund
+      && npm run build --prefix web
+      && npm run preview --prefix web -- --host 0.0.0.0 --port 4173"
+
+volumes:
+  pigeon-wrangler:

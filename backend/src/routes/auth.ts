@@ -26,9 +26,19 @@ const auth = new Hono<AppEnv>();
 export function setSessionCookie(c: Context<AppEnv>, token: string | null): void {
   const maxAge = token ? Math.floor(SESSION_LIFETIME_MS / 1000) : 0;
   const value = token ? encodeURIComponent(token) : '';
+  const domain = c.env.SESSION_COOKIE_DOMAIN?.trim();
+  const secure = new URL(c.req.url).protocol === 'https:';
+  const attributes = [
+    'Path=/',
+    domain ? `Domain=${domain}` : '',
+    `Max-Age=${maxAge}`,
+    'HttpOnly',
+    secure ? 'Secure' : '',
+    'SameSite=Lax',
+  ].filter(Boolean).join('; ');
   c.header(
     'Set-Cookie',
-    `pigeon_session=${value}; Path=/; Domain=.pigeonsms.aldi.best; Max-Age=${maxAge}; HttpOnly; Secure; SameSite=Lax`,
+    `pigeon_session=${value}; ${attributes}`,
   );
 }
 

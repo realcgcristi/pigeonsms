@@ -3,7 +3,8 @@ import { ApiError } from './errors';
 import type { AppEnv, RateLimiter } from '../types';
 
 /** Check a rate-limit binding; throws 429 when exceeded. */
-export async function enforceRateLimit(limiter: RateLimiter, key: string): Promise<void> {
+export async function enforceRateLimit(limiter: RateLimiter | undefined, key: string): Promise<void> {
+  if (!limiter) return;
   // Requests with no verifiable client IP all resolve to the 'unknown' bucket
   // (see clientIp). Rather than let that shared bucket give header-absent
   // traffic a full, collective quota, hit it twice per call so it drains ~2x
@@ -66,6 +67,7 @@ export async function enforceActionLimit(
   scope: string,
 ): Promise<void> {
   const limiter = c.env.RL_GENERAL;
+  if (!limiter) return;
   const key = `${action}:${scope}`;
   const cost = RL_COST[action];
   // Drain (cost - 1) extra times; enforceRateLimit does the final, checked hit

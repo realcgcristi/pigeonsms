@@ -1,7 +1,9 @@
 import type { ApiErrorDetail } from '@/api/dto';
 
-export const API_BASE = 'https://api.pigeonsms.aldi.best';
-export const GATEWAY_URL = 'wss://api.pigeonsms.aldi.best/gateway';
+const configuredApi = (import.meta.env.VITE_PIGEON_API as string | undefined)?.trim();
+export const API_BASE = (configuredApi || 'https://api.pigeonsms.aldi.best').replace(/\/$/, '');
+const configuredGateway = (import.meta.env.VITE_PIGEON_GATEWAY as string | undefined)?.trim();
+export const GATEWAY_URL = configuredGateway || API_BASE.replace(/^http/, 'ws') + '/gateway';
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 export type QueryValue = string | number | boolean | null | undefined;
