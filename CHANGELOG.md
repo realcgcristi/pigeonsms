@@ -1,5 +1,12 @@
 # changelog
 
+## v3-beta2
+
+- ships the responsive web client, encrypted local-first cache, offline outbox, branches, channel categories, pigeon packs, migration, and bridge management
+- ships Open Pigeon discovery, schemas, compatibility fixtures, the public lab, and official TypeScript, Kotlin, and Rust sdks
+- ships the native Windows Tauri client and encrypted bot runtime foundations
+- includes the release APK plus Windows NSIS and MSI installers
+
 ## v2.9.7
 
 - `:emoji:` inside a message now renders for everyone, in every chat. emoji are resolved when the message is sent rather than when it's read, so one from another nest — or used in a DM, which has no nest at all — no longer falls back to plain text.
