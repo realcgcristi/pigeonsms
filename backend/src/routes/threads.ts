@@ -37,6 +37,8 @@ interface ThreadRow {
   last_reply_at: number | null;
   created_at: number;
   archived_at: number | null;
+  kind: string;
+  expires_at: number | null;
 }
 
 function serialize(row: ThreadRow) {
@@ -51,6 +53,8 @@ function serialize(row: ThreadRow) {
     created_at: row.created_at,
     archived: row.archived_at !== null,
     archived_at: row.archived_at,
+    kind: row.kind ?? 'thread',
+    expires_at: row.expires_at,
   };
 }
 
@@ -97,6 +101,10 @@ threads.post('/channels/:id/threads', requireAuth, async (c) => {
   // readable even when nobody bothered to name it.
   const title = (rawTitle || root.content.split('\n')[0] || 'thread').slice(0, 120);
 
+  const kind = body['kind'] === 'branch' ? 'branch' : 'thread';
+  const expiresIn = kind === 'branch'
+    ? Math.min(30 * 86400, Math.max(3600, Number(body['expires_in'] ?? 7 * 86400)))
+    : 0;
   const now = Date.now();
   const row: ThreadRow = {
     id: snowflake(),
@@ -108,12 +116,15 @@ threads.post('/channels/:id/threads', requireAuth, async (c) => {
     last_reply_at: null,
     created_at: now,
     archived_at: null,
+    kind,
+    expires_at: expiresIn ? now + expiresIn * 1000 : null,
   };
   await c.env.DB.batch([
     c.env.DB.prepare(
-      `INSERT INTO threads (id, channel_id, root_message_id, title, created_by, reply_count, last_reply_at, created_at)
-       VALUES (?, ?, ?, ?, ?, 0, NULL, ?)`,
-    ).bind(row.id, row.channel_id, row.root_message_id, row.title, row.created_by, now),
+      `INSERT INTO threads
+       (id, channel_id, root_message_id, title, created_by, reply_count, last_reply_at, created_at, kind, expires_at)
+       VALUES (?, ?, ?, ?, ?, 0, NULL, ?, ?, ?)`,
+    ).bind(row.id, row.channel_id, row.root_message_id, row.title, row.created_by, now, kind, row.expires_at),
     // The starter and the root author both follow by default — they're the two
     // people who definitely care that it exists.
     c.env.DB.prepare(
@@ -136,10 +147,11 @@ threads.get('/channels/:id/threads', requireAuth, async (c) => {
   const { results } = await c.env.DB.prepare(
     `SELECT * FROM threads
      WHERE channel_id = ? AND archived_at IS ${archived ? 'NOT NULL' : 'NULL'}
+       ${archived ? '' : 'AND (expires_at IS NULL OR expires_at > ?)'}
      ORDER BY COALESCE(last_reply_at, created_at) DESC
      LIMIT ?`,
   )
-    .bind(channel.id, PAGE)
+    .bind(...(archived ? [channel.id, PAGE] : [channel.id, Date.now(), PAGE]))
     .all<ThreadRow>();
   return c.json({ threads: results.map(serialize) });
 });
@@ -189,7 +201,7 @@ threads.get('/threads/:threadId/messages', requireAuth, async (c) => {
  */
 threads.post('/threads/:threadId/messages', requireAuth, async (c) => {
   const { user, thread, channel } = await loadThread(c, c.req.param('threadId') ?? '');
-  if (thread.archived_at !== null) {
+  if (thread.archived_at !== null || (thread.expires_at !== null && thread.expires_at <= Date.now())) {
     throw new ApiError(400, 'archived', 'this thread is archived');
   }
   await requirePermission(c.env, user.id, channel.space_id, Permission.SEND_MESSAGES, channel.id);

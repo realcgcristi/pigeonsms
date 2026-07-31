@@ -132,5 +132,13 @@ export async function sweepLingeringRows(env: Env): Promise<void> {
          LEFT JOIN user_devices d ON d.id = ke.to_device
          WHERE d.id IS NULL LIMIT ?)`,
     ).bind(SWEEP_LIMIT),
+    env.DB.prepare(
+      `UPDATE threads SET archived_at = COALESCE(archived_at, expires_at)
+       WHERE id IN (SELECT id FROM threads WHERE kind = 'branch' AND expires_at IS NOT NULL
+       AND expires_at <= ? AND archived_at IS NULL LIMIT ?)`,
+    ).bind(Date.now(), SWEEP_LIMIT),
+    env.DB.prepare(
+      'DELETE FROM bridge_dedup WHERE rowid IN (SELECT rowid FROM bridge_dedup WHERE created_at < ? LIMIT ?)',
+    ).bind(cutoff, SWEEP_LIMIT),
   ]);
 }

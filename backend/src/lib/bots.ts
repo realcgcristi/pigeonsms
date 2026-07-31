@@ -64,6 +64,8 @@ export interface BotRow {
   signing_secret: string;
   public: number;
   dm_enabled: number;
+  encryption_mode: string;
+  encryption_public_key: string | null;
   created_at: number;
   updated_at: number;
   deleted_at: number | null;
@@ -101,7 +103,7 @@ export interface BotInteractionRow {
 
 const BOT_COLUMNS =
   'id, user_id, owner_id, name, description, token_hash, interactions_url, signing_secret, ' +
-  'public, dm_enabled, created_at, updated_at, deleted_at';
+  'public, dm_enabled, encryption_mode, encryption_public_key, created_at, updated_at, deleted_at';
 
 const encoder = new TextEncoder();
 

@@ -25,6 +25,9 @@ import notifications from './routes/notifications';
 import calls from './routes/calls';
 import bots from './routes/bots';
 import interactions, { expireStaleInteractions } from './routes/interactions';
+import bridges from './routes/bridges';
+import packs from './routes/packs';
+import migrations from './routes/migrations';
 import { requireAuth } from './middleware/auth';
 import { sendPush } from './lib/fcm';
 import { sendWebPush, webPushTargets } from './lib/webpush';
@@ -91,6 +94,8 @@ app.get('/.well-known/pigeon', (c) => {
       'search', 'scheduled-messages', 'disappearing-messages', 'uploads.resumable',
       'e2ee.key-envelopes', 'push.web', 'gateway.resume',
       'channel-categories', 'jump-to-unread',
+      'local-first-sync', 'message-branches', 'pigeon-packs',
+      'space-migration', 'universal-bridges', 'e2ee-bots',
     ],
     limits: { message_length: 8000, upload_bytes: 524_288_000 },
   });
@@ -141,6 +146,9 @@ app.route('/calls', calls);
 // /interactions/:id/callback for its answer).
 app.route('/bots', bots);
 app.route('/', interactions);
+app.route('/', bridges);
+app.route('/', packs);
+app.route('/', migrations);
 app.route('/admin', admin);
 
 // WebSocket gateway: one socket per device, owned by the user's gateway DO.

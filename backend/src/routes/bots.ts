@@ -104,6 +104,8 @@ function serializeBot(bot: BotRow, botUser: BotUserFields | null) {
     interactions_url: bot.interactions_url,
     public: bot.public === 1,
     dm_enabled: bot.dm_enabled === 1,
+    encryption_mode: bot.encryption_mode ?? 'none',
+    encryption_public_key: bot.encryption_public_key ?? null,
     created_at: bot.created_at,
     updated_at: bot.updated_at,
     username: botUser?.username ?? null,
@@ -214,6 +216,7 @@ bots.get('/', async (c) => {
   const { results } = await c.env.DB.prepare(
     `SELECT b.id, b.user_id, b.owner_id, b.name, b.description, b.token_hash,
             b.interactions_url, b.signing_secret, b.public, b.dm_enabled,
+            b.encryption_mode, b.encryption_public_key,
             b.created_at, b.updated_at, b.deleted_at,
             u.username, u.display_name, u.avatar_key, u.avatar_square_key
      FROM bots b JOIN users u ON u.id = b.user_id
@@ -262,6 +265,15 @@ bots.post('/', async (c) => {
   const name = validateBotName(body['name']);
   const description = validateDescription(body['description']);
   const dmEnabled = body['dm_enabled'] === undefined ? 1 : body['dm_enabled'] ? 1 : 0;
+  const encryptionMode = ['local', 'enclave'].includes(String(body['encryption_mode']))
+    ? String(body['encryption_mode'])
+    : 'none';
+  const encryptionPublicKey = body['encryption_public_key'] == null
+    ? null
+    : String(body['encryption_public_key']).trim().slice(0, 512);
+  if (encryptionMode !== 'none' && !encryptionPublicKey) {
+    throw new ApiError(400, 'missing_key', 'encrypted bots need an encryption_public_key');
+  }
 
   const owned = await c.env.DB.prepare(
     'SELECT COUNT(*) AS count FROM bots WHERE owner_id = ? AND deleted_at IS NULL',
@@ -299,9 +311,15 @@ bots.post('/', async (c) => {
         ).bind(userId, username, email, name, BOT_USER_FLAG, now),
         c.env.DB.prepare(
           `INSERT INTO bots (id, user_id, owner_id, name, description, token_hash,
-                             signing_secret, public, dm_enabled, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
-        ).bind(botId, userId, user.id, name, description, hash, signingSecret, dmEnabled, now, now),
+                             signing_secret, public, dm_enabled, encryption_mode,
+                             encryption_public_key, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)`,
+        ).bind(botId, userId, user.id, name, description, hash, signingSecret, dmEnabled,
+          encryptionMode, encryptionPublicKey, now, now),
+        ...(encryptionPublicKey ? [c.env.DB.prepare(
+          `INSERT INTO user_devices (id, user_id, pub_key, name, created_at, last_seen)
+           VALUES (?, ?, ?, 'encrypted bot runtime', ?, ?)`,
+        ).bind(snowflake(), userId, encryptionPublicKey, now, now)] : []),
       ]);
       break;
     } catch (err) {
@@ -324,6 +342,8 @@ bots.post('/', async (c) => {
     signing_secret: signingSecret,
     public: 0,
     dm_enabled: dmEnabled,
+    encryption_mode: encryptionMode,
+    encryption_public_key: encryptionPublicKey,
     created_at: now,
     updated_at: now,
     deleted_at: null,
@@ -401,6 +421,17 @@ bots.patch('/:id', async (c) => {
     sets.push('dm_enabled = ?');
     binds.push(body['dm_enabled'] ? 1 : 0);
   }
+  if (body['encryption_mode'] !== undefined || body['encryption_public_key'] !== undefined) {
+    const mode = body['encryption_mode'] === undefined ? bot.encryption_mode : String(body['encryption_mode']);
+    const key = body['encryption_public_key'] === undefined
+      ? bot.encryption_public_key
+      : (body['encryption_public_key'] == null ? null : String(body['encryption_public_key']).trim().slice(0, 512));
+    if (!['none', 'local', 'enclave'].includes(mode) || (mode !== 'none' && !key)) {
+      throw new ApiError(400, 'bad_encryption', 'choose none, local, or enclave and provide a public key');
+    }
+    sets.push('encryption_mode = ?', 'encryption_public_key = ?');
+    binds.push(mode, key);
+  }
   if (sets.length === 0) return c.json({ bot: await botWithUser(c, bot) });
 
   const now = Date.now();
@@ -422,6 +453,18 @@ bots.patch('/:id', async (c) => {
     );
   }
   await c.env.DB.batch(statements);
+
+  if (body['encryption_public_key'] !== undefined) {
+    const key = body['encryption_public_key'] == null ? null : String(body['encryption_public_key']).trim().slice(0, 512);
+    await c.env.DB.prepare("DELETE FROM user_devices WHERE user_id = ? AND name = 'encrypted bot runtime'")
+      .bind(bot.user_id).run();
+    if (key) {
+      await c.env.DB.prepare(
+        `INSERT INTO user_devices (id, user_id, pub_key, name, created_at, last_seen)
+         VALUES (?, ?, ?, 'encrypted bot runtime', ?, ?)`,
+      ).bind(snowflake(), bot.user_id, key, now, now).run();
+    }
+  }
 
   const updated = await loadBot(c.env, bot.id);
   if (!updated) throw new ApiError(404, 'not_found', 'bot not found');
