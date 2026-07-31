@@ -94,6 +94,20 @@ backend/
 
 ## running it
 
+The fastest local setup is:
+
+```
+docker compose up --build
+```
+
+Then open `http://localhost:4173`. For a fresh Cloudflare deployment:
+
+```
+node scripts/pigeonctl.mjs cloudflare --name my-pigeon --web-origin https://chat.example.com
+```
+
+The command provisions D1, R2, Queue, applies migrations and deploys the Worker. See [self-hosting docs](docs/content/selfhost.md) and the [Open Pigeon Protocol](protocol/README.md).
+
 backend:
 
 ```
@@ -133,6 +147,9 @@ if you find something broken, fair, open an issue and i'll probably fix it
 ## roadmap
 
 the short version (full thing in [ROADMAP.md](ROADMAP.md)):
+
+- **v3 beta foundation** — jump-to-unread, channel categories, public protocol discovery, compatibility fixtures, and official TypeScript, Kotlin, and Rust SDKs are now in the repository.
+- **next v3 gates** — reliable calls with TURN, signed desktop releases, offline conflict tests, moderation workflows, and production SDK publishing.
 
 - **done in v2.8.0** — **end-to-end encryption for DMs** is shipped and off the roadmap: X25519 device keys, a double-ratchet message stream, and a password-derived key backup. it's experimental and ships off-by-default while it hardens, but the crypto is fully wired end to end. v2.8.0 also shipped server-side nest search, scheduled messages, and an accessibility pass.
 - **v3 big rocks** — fix calls for real (reliable native mic/camera capture + a TURN server so media traverses NAT) and a **desktop client** (thinking tauri, shared backend). with e2ee out of the way, v3 is all about calls + desktop.

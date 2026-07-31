@@ -19,6 +19,11 @@ export function SpaceChannelRail({
   const space =
     spaces.find((item) => item.id === spaceId) ??
     spaces.find((item) => item.channels?.some((channel) => channel.id === channelId))
+  const categories = space?.categories ?? []
+  const sections = [
+    ...categories.map((category) => ({ category, channels: (space?.channels ?? []).filter((channel) => channel.category_id === category.id) })),
+    { category: null, channels: (space?.channels ?? []).filter((channel) => !channel.category_id || !categories.some((category) => category.id === channel.category_id)) },
+  ].filter((section) => section.channels.length > 0)
 
   useEffect(() => {
     if (!space) void loadSpaces()
@@ -42,24 +47,29 @@ export function SpaceChannelRail({
         <button type="button" onClick={() => navigate(space ? `/nest/${space.id}` : '/spaces')}>view nest</button>
       </div>
       <div className="chat__sidebar-list">
-        {(space?.channels ?? []).map((channel) => (
-          <button
-            key={channel.id}
-            type="button"
-            className={channel.id === channelId ? 'chat__sidebar-row chat__sidebar-row--on' : 'chat__sidebar-row'}
-            onClick={() => open(channel.id, channel.kind, channel.name ?? 'channel')}
-          >
-            <span className="chat__sidebar-channel-icon">
-              {channel.kind === 'forum' ? <Forum size={18} /> : channel.kind === 'voice' ? <Campaign size={18} /> : <Tag size={18} />}
-            </span>
-            <span className="chat__sidebar-copy">
-              <strong>#{channel.name || 'channel'}</strong>
-              <small>{channel.topic || channel.kind || 'text channel'}</small>
-            </span>
-            <span className="chat__sidebar-meta">
-              {channel.unread ? <b>{channel.unread > 99 ? '99+' : channel.unread}</b> : null}
-            </span>
-          </button>
+        {sections.map((section) => (
+          <div key={section.category?.id ?? 'uncategorized'} className="chat__sidebar-section">
+            <div className="chat__sidebar-section-title">{section.category?.name ?? 'channels'}</div>
+            {section.channels.map((channel) => (
+              <button
+                key={channel.id}
+                type="button"
+                className={channel.id === channelId ? 'chat__sidebar-row chat__sidebar-row--on' : 'chat__sidebar-row'}
+                onClick={() => open(channel.id, channel.kind, channel.name ?? 'channel')}
+              >
+                <span className="chat__sidebar-channel-icon">
+                  {channel.kind === 'forum' ? <Forum size={18} /> : channel.kind === 'voice' ? <Campaign size={18} /> : <Tag size={18} />}
+                </span>
+                <span className="chat__sidebar-copy">
+                  <strong>#{channel.name || 'channel'}</strong>
+                  <small>{channel.topic || channel.kind || 'text channel'}</small>
+                </span>
+                <span className="chat__sidebar-meta">
+                  {channel.unread ? <b>{channel.unread > 99 ? '99+' : channel.unread}</b> : null}
+                </span>
+              </button>
+            ))}
+          </div>
         ))}
       </div>
     </aside>

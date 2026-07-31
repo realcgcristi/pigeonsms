@@ -240,6 +240,12 @@ class PigeonApi {
     });
   }
 
+  messagesAfter(channelId: string, after: number, limit?: number) {
+    return request<MessagesResponse>(`/channels/${seg(channelId)}/messages`, {
+      query: { after, limit },
+    });
+  }
+
   messages(channelId: string, before?: number) {
     return this.messagesPage(channelId, before).then((r) => r.messages);
   }
@@ -473,11 +479,31 @@ class PigeonApi {
     );
   }
 
-  createChannel(spaceId: string, name: string, kind = 'text') {
+  createChannel(spaceId: string, name: string, kind = 'text', categoryId?: string | null) {
     return request<CreateChannelResponse>(`/spaces/${seg(spaceId)}/channels`, {
       method: 'POST',
-      json: { name, kind },
+      json: { name, kind, category_id: categoryId ?? null },
     }).then((r) => r.channel);
+  }
+
+  categories(spaceId: string) {
+    return request<{ categories: import('@/api/dto').ChannelCategoryDto[] }>(`/spaces/${seg(spaceId)}/categories`).then((r) => r.categories);
+  }
+
+  createCategory(spaceId: string, name: string, position = 0) {
+    return request<{ category: import('@/api/dto').ChannelCategoryDto }>(`/spaces/${seg(spaceId)}/categories`, {
+      method: 'POST', json: { name, position },
+    }).then((r) => r.category);
+  }
+
+  updateCategory(spaceId: string, categoryId: string, fields: { name?: string; position?: number; collapsed?: boolean }) {
+    return request<{ category: import('@/api/dto').ChannelCategoryDto }>(`/spaces/${seg(spaceId)}/categories/${seg(categoryId)}`, {
+      method: 'PATCH', json: fields,
+    }).then((r) => r.category);
+  }
+
+  deleteCategory(spaceId: string, categoryId: string) {
+    return requestVoid(`/spaces/${seg(spaceId)}/categories/${seg(categoryId)}`, { method: 'DELETE' });
   }
 
   renameChannel(spaceId: string, channelId: string, name: string) {

@@ -35,7 +35,7 @@ Accounts are invite-only: `GET /auth/invite/:code` checks a code, `POST /auth/si
 
 ## Nests
 
-`GET /spaces` returns your nests with their channels and unread counts. `POST /spaces` creates one, `POST /spaces/:id/channels` adds a channel (`text`, `voice` or `forum`), `POST /spaces/:id/invites` mints an `SPC-…` code, and `GET /spaces/invites/:code/preview` shows what a code points at without consuming it.
+`GET /spaces` returns your nests with their channels, unread counts, and channel categories. `POST /spaces` creates one, `POST /spaces/:id/channels` adds a channel (`text`, `voice` or `forum`), and `/spaces/:id/categories` manages ordered channel groups. `POST /spaces/:id/invites` mints an `SPC-…` code, and `GET /spaces/invites/:code/preview` shows what a code points at without consuming it.
 
 Members live under `/spaces/:id/members` — the list carries each member's base role, their custom `role_ids` and an `is_bot` flag. Roles are `/spaces/:id/roles` with a permission bitfield; `GET /spaces/:id/permissions` resolves what *you* may do, optionally for one channel. Moderation is `DELETE /spaces/:id/members/:userId` (kick) and `POST /spaces/:id/bans`.
 

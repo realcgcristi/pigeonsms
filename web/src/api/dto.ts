@@ -468,6 +468,7 @@ export interface PeerDto {
 export interface DmDto {
   channel_id: string;
   last_seq: number;
+  last_read_seq?: number;
   unread: number;
   peer: PeerDto;
   last_message?: LastMessageDto | null;
@@ -492,6 +493,15 @@ export interface ChannelDto {
   last_read_seq?: number;
   unread?: number;
   kind?: string;
+  category_id?: string | null;
+}
+
+export interface ChannelCategoryDto {
+  id: string;
+  space_id: string;
+  name: string;
+  position: number;
+  collapsed: number;
 }
 
 export interface SpaceDto {
@@ -507,6 +517,7 @@ export interface SpaceDto {
   active_count?: number;
   created_at?: number;
   channels?: ChannelDto[];
+  categories?: ChannelCategoryDto[];
 }
 
 export interface SpacesResponse {

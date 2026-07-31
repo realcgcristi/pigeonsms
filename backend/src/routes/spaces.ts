@@ -183,7 +183,7 @@ spaces.get('/', async (c) => {
   const ph = Array(ids.length).fill('?').join(',');
   const channels = (
     await c.env.DB.prepare(
-      `SELECT ch.id, ch.space_id, ch.name, ch.topic, ch.kind, ch.last_seq,
+      `SELECT ch.id, ch.space_id, ch.name, ch.topic, ch.kind, ch.last_seq, ch.category_id,
               COALESCE(cm.last_read_seq, 0) AS last_read_seq
        FROM channels ch
        LEFT JOIN channel_members cm ON cm.channel_id = ch.id AND cm.user_id = ?
@@ -192,10 +192,17 @@ spaces.get('/', async (c) => {
       .bind(user.id, ...ids)
       .all()
   ).results;
+  const categories = (
+    await c.env.DB.prepare(
+      `SELECT id, space_id, name, position, collapsed FROM channel_categories
+       WHERE space_id IN (${ph}) ORDER BY position, created_at`,
+    ).bind(...ids).all()
+  ).results;
 
   return c.json({
     spaces: mine.map((s) => ({
       ...s,
+      categories: categories.filter((category) => category['space_id'] === s['id']),
       channels: channels
         .filter((ch) => ch['space_id'] === s['id'])
         .map((ch) => ({
@@ -204,10 +211,81 @@ spaces.get('/', async (c) => {
           topic: ch['topic'],
           kind: ch['kind'],
           last_seq: ch['last_seq'],
+          last_read_seq: ch['last_read_seq'],
+          category_id: ch['category_id'] ?? null,
           unread: Math.max(0, Number(ch['last_seq']) - Number(ch['last_read_seq'])),
         })),
     })),
   });
+});
+
+spaces.get('/:id/categories', async (c) => {
+  const user = c.get('user') as AuthedUser;
+  await requireRole(c, c.req.param('id'), user.id, ['owner', 'admin', 'member']);
+  const categories = (await c.env.DB.prepare(
+    'SELECT id, space_id, name, position, collapsed FROM channel_categories WHERE space_id = ? ORDER BY position, created_at',
+  ).bind(c.req.param('id')).all()).results;
+  return c.json({ categories });
+});
+
+spaces.post('/:id/categories', async (c) => {
+  const user = c.get('user') as AuthedUser;
+  const spaceId = c.req.param('id');
+  await requireRole(c, spaceId, user.id, ['owner', 'admin']);
+  const body = await readJsonBody(c);
+  const name = String(body['name'] ?? '').trim().slice(0, 64);
+  if (!name) throw new ApiError(400, 'bad_name', 'category name is required');
+  const id = snowflake();
+  const position = Number.isInteger(body['position']) ? Math.max(0, Number(body['position'])) : 0;
+  try {
+    await c.env.DB.prepare(
+      'INSERT INTO channel_categories (id, space_id, name, position, collapsed, created_at) VALUES (?, ?, ?, ?, 0, ?)',
+    ).bind(id, spaceId, name, position, Date.now()).run();
+  } catch {
+    throw new ApiError(409, 'category_exists', 'a category with that name already exists');
+  }
+  return c.json({ category: { id, space_id: spaceId, name, position, collapsed: 0 } }, 201);
+});
+
+spaces.patch('/:id/categories/:categoryId', async (c) => {
+  const user = c.get('user') as AuthedUser;
+  const spaceId = c.req.param('id');
+  await requireRole(c, spaceId, user.id, ['owner', 'admin']);
+  const body = await readJsonBody(c);
+  const sets: string[] = [];
+  const values: unknown[] = [];
+  if (body['name'] !== undefined) {
+    const name = String(body['name']).trim().slice(0, 64);
+    if (!name) throw new ApiError(400, 'bad_name', 'category name is required');
+    sets.push('name = ?');
+    values.push(name);
+  }
+  if (body['position'] !== undefined) {
+    sets.push('position = ?');
+    values.push(Math.max(0, Number(body['position']) || 0));
+  }
+  if (body['collapsed'] !== undefined) {
+    sets.push('collapsed = ?');
+    values.push(body['collapsed'] ? 1 : 0);
+  }
+  if (!sets.length) throw new ApiError(400, 'bad_request', 'no category changes');
+  const updated = await c.env.DB.prepare(
+    `UPDATE channel_categories SET ${sets.join(', ')} WHERE id = ? AND space_id = ? RETURNING id, space_id, name, position, collapsed`,
+  ).bind(...values, c.req.param('categoryId'), spaceId).first();
+  if (!updated) throw new ApiError(404, 'not_found', 'no such category');
+  return c.json({ category: updated });
+});
+
+spaces.delete('/:id/categories/:categoryId', async (c) => {
+  const user = c.get('user') as AuthedUser;
+  const spaceId = c.req.param('id');
+  await requireRole(c, spaceId, user.id, ['owner', 'admin']);
+  const result = await c.env.DB.batch([
+    c.env.DB.prepare('UPDATE channels SET category_id = NULL WHERE category_id = ? AND space_id = ?').bind(c.req.param('categoryId'), spaceId),
+    c.env.DB.prepare('DELETE FROM channel_categories WHERE id = ? AND space_id = ?').bind(c.req.param('categoryId'), spaceId),
+  ]);
+  if ((result[1]?.meta.changes ?? 0) === 0) throw new ApiError(404, 'not_found', 'no such category');
+  return c.json({ ok: true });
 });
 
 /** GET /spaces/:id — space information, channel summary, and active count. */
@@ -231,7 +309,7 @@ spaces.get('/:id', async (c) => {
   if (!space) throw new ApiError(404, 'not_found', 'no such space');
   const channels = (
     await c.env.DB.prepare(
-      `SELECT ch.id, ch.name, ch.topic, ch.kind, ch.last_seq,
+      `SELECT ch.id, ch.name, ch.topic, ch.kind, ch.last_seq, ch.category_id,
               COALESCE(cm.last_read_seq, 0) AS last_read_seq
        FROM channels ch LEFT JOIN channel_members cm
          ON cm.channel_id = ch.id AND cm.user_id = ?
@@ -241,14 +319,19 @@ spaces.get('/:id', async (c) => {
       .all<Record<string, unknown>>()
   ).results.map((channel) => ({
     ...channel,
+    category_id: channel['category_id'] ?? null,
     unread: Math.max(0, Number(channel['last_seq']) - Number(channel['last_read_seq'])),
   }));
+  const categories = (await c.env.DB.prepare(
+    'SELECT id, space_id, name, position, collapsed FROM channel_categories WHERE space_id = ? ORDER BY position, created_at',
+  ).bind(spaceId).all()).results;
   return c.json({
     space: {
       ...space,
       role,
       member_count: Number(space['member_count']),
       active_count: Number(space['active_count']),
+      categories,
       channels,
     },
   });
@@ -350,14 +433,21 @@ spaces.post('/:id/channels', async (c) => {
     throw new ApiError(400, 'bad_channel_kind', 'kind must be text, voice, or forum');
   }
   const topic = body['topic'] === undefined ? null : String(body['topic']).trim().slice(0, 300);
+  const categoryId = body['category_id'] ? String(body['category_id']) : null;
+  if (categoryId) {
+    const category = await c.env.DB.prepare(
+      'SELECT id FROM channel_categories WHERE id = ? AND space_id = ?',
+    ).bind(categoryId, spaceId).first();
+    if (!category) throw new ApiError(400, 'bad_category', 'category does not belong to this nest');
+  }
   const id = snowflake();
   await c.env.DB.prepare(
-    'INSERT INTO channels (id, space_id, name, topic, kind, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+    'INSERT INTO channels (id, space_id, name, topic, kind, category_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
   )
-    .bind(id, spaceId, name, topic, kind, Date.now())
+    .bind(id, spaceId, name, topic, kind, categoryId, Date.now())
     .run();
   audit(c, user.id, 'channel.create', id);
-  return c.json({ channel: { id, name, topic, kind } }, 201);
+  return c.json({ channel: { id, name, topic, kind, category_id: categoryId } }, 201);
 });
 
 /** PATCH /spaces/:id/channels/:channelId { name } — owner only. Also renames a forum's title. */
@@ -367,16 +457,33 @@ spaces.patch('/:id/channels/:channelId', async (c) => {
   const channelId = c.req.param('channelId');
   await requireRole(c, spaceId, user.id, ['owner']);
   const body = await readJsonBody(c);
-  if (body['name'] === undefined) throw new ApiError(400, 'bad_name', 'name is required');
-  const name = String(body['name']).trim().toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 32);
-  if (name.length < 2) throw new ApiError(400, 'bad_name', 'channel name needs 2+ characters');
+  const sets: string[] = [];
+  const values: unknown[] = [];
+  if (body['name'] !== undefined) {
+    const name = String(body['name']).trim().toLowerCase().replace(/[^a-z0-9-]/g, '-').slice(0, 32);
+    if (name.length < 2) throw new ApiError(400, 'bad_name', 'channel name needs 2+ characters');
+    sets.push('name = ?');
+    values.push(name);
+  }
+  if (body['category_id'] !== undefined) {
+    const categoryId = body['category_id'] ? String(body['category_id']) : null;
+    if (categoryId) {
+      const category = await c.env.DB.prepare(
+        'SELECT id FROM channel_categories WHERE id = ? AND space_id = ?',
+      ).bind(categoryId, spaceId).first();
+      if (!category) throw new ApiError(400, 'bad_category', 'category does not belong to this nest');
+    }
+    sets.push('category_id = ?');
+    values.push(categoryId);
+  }
+  if (!sets.length) throw new ApiError(400, 'bad_request', 'no channel changes');
 
   const updated = await c.env.DB.prepare(
-    `UPDATE channels SET name = ? WHERE id = ? AND space_id = ? AND deleted_at IS NULL
-     RETURNING id, name, topic, kind`,
+    `UPDATE channels SET ${sets.join(', ')} WHERE id = ? AND space_id = ? AND deleted_at IS NULL
+     RETURNING id, name, topic, kind, category_id`,
   )
-    .bind(name, channelId, spaceId)
-    .first<{ id: string; name: string; topic: string | null; kind: string }>();
+    .bind(...values, channelId, spaceId)
+    .first<{ id: string; name: string; topic: string | null; kind: string; category_id: string | null }>();
   if (!updated) throw new ApiError(404, 'not_found', 'no such channel');
   audit(c, user.id, 'channel.update', channelId);
 

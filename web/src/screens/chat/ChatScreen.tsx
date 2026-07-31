@@ -653,6 +653,11 @@ export default function ChatScreen() {
   const space = spaces.find((item) => item.channels?.some((channel) => channel.id === channelId))
   const spaceChannels = space?.channels ?? []
   const currentSpaceChannel = spaceChannels.find((channel) => channel.id === channelId)
+  const unreadStart = currentSpaceChannel?.unread && currentSpaceChannel.unread > 0
+    ? currentSpaceChannel.last_read_seq ?? 0
+    : dm?.unread && dm.unread > 0
+      ? dm.last_read_seq ?? 0
+      : undefined
   const title =
     params.get('name') ??
     currentSpaceChannel?.name ??
@@ -666,11 +671,11 @@ export default function ChatScreen() {
   }, [isSpace, loadSpaces])
 
   useEffect(() => {
-    void load(channelId, true)
+    void load(channelId, true, unreadStart)
     void loadDetails(channelId)
     void loadEmoji()
     return subscribe()
-  }, [channelId, load, loadDetails, loadEmoji, subscribe])
+  }, [channelId, load, loadDetails, loadEmoji, subscribe, unreadStart])
 
   useEffect(() => {
     if (!list.length) return
@@ -680,7 +685,14 @@ export default function ChatScreen() {
     const scrollToEnd = () => {
       const node = listRef.current
       if (!node) return
-      const target = targetMessage ? document.getElementById(`message-${targetMessage}`) : null
+      const unreadMessage = unreadStart === undefined
+        ? null
+        : list.find((message) => (message.seq ?? 0) > unreadStart)
+      const target = targetMessage
+        ? document.getElementById(`message-${targetMessage}`)
+        : unreadMessage
+          ? document.getElementById(`message-${unreadMessage.id}`)
+          : null
       if (target) {
         target.scrollIntoView({ block: 'center' })
         target.classList.add('chat__message-anchor--highlight')
@@ -696,7 +708,14 @@ export default function ChatScreen() {
       cancelAnimationFrame(frame)
       window.clearTimeout(timeout)
     }
-  }, [list.length, channelId, markRead, clearUnread, params])
+  }, [list.length, channelId, markRead, clearUnread, params, unreadStart])
+
+  const jumpToUnread = useCallback(() => {
+    if (unreadStart === undefined) return
+    const message = list.find((item) => (item.seq ?? 0) > unreadStart)
+    if (!message) return
+    document.getElementById(`message-${message.id}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  }, [list, unreadStart])
 
   const submit = useCallback(
     (body: string, options: SendOptions) => {
@@ -996,6 +1015,11 @@ export default function ChatScreen() {
           if (e.currentTarget.scrollTop < 60) void loadMore(channelId)
         }}
           >
+          {unreadStart !== undefined && list.some((message) => (message.seq ?? 0) > unreadStart) ? (
+            <button type="button" className="chat__unread-jump" onClick={jumpToUnread}>
+              jump to unread
+            </button>
+          ) : null}
           <MessageList
           messages={list}
           meId={me?.id}

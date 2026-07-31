@@ -31,6 +31,7 @@ dms.get('/', async (c) => {
     dms: results.map((r) => ({
       channel_id: r['channel_id'],
       last_seq: r['last_seq'],
+      last_read_seq: r['last_read_seq'],
       unread: Math.max(0, Number(r['last_seq']) - Number(r['last_read_seq'])),
       peer: {
         id: r['peer_id'],

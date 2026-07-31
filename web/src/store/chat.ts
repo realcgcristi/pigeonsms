@@ -40,7 +40,7 @@ export interface ChatState {
   emoji: SpaceEmojiDto[];
   emojiLoaded: boolean;
   channel: (id: string) => ChannelState;
-  load: (channelId: string, force?: boolean) => Promise<void>;
+  load: (channelId: string, force?: boolean, afterSeq?: number) => Promise<void>;
   loadMore: (channelId: string) => Promise<void>;
   loadDetails: (channelId: string) => Promise<void>;
   send: (
@@ -95,13 +95,15 @@ export const useChat = create<ChatState>((set, get) => ({
 
   channel: (id) => get().channels[id] ?? EMPTY,
 
-  load: async (channelId, force) => {
+  load: async (channelId, force, afterSeq) => {
     const current = get().channels[channelId];
     if (current?.loading) return;
     if (!force && current && current.messages.length > 0) return;
     set((s) => patchChannel(s, channelId, (c) => ({ ...c, loading: true, error: null })));
     try {
-      const page = await api.messagesPage(channelId);
+      const page = afterSeq && afterSeq > 0
+        ? await api.messagesAfter(channelId, afterSeq)
+        : await api.messagesPage(channelId);
       set((s) =>
         patchChannel(s, channelId, (c) => ({
           ...c,

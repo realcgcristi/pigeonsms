@@ -8,6 +8,8 @@ const PAGES = [
   { slug: 'sdk', title: 'pigeonsms.js', source: '../packages/pigeonsms.js/README.md' },
   { slug: 'api', title: 'HTTP API', source: 'content/api.md' },
   { slug: 'clients', title: 'Clients', source: 'content/clients.md' },
+  { slug: 'protocol', title: 'Open Protocol', source: 'content/protocol.md' },
+  { slug: 'selfhost', title: 'Self-hosting', source: 'content/selfhost.md' },
 ];
 
 const NAV = PAGES.map((page) => ({ href: page.slug === 'index' ? '/' : `/${page.slug}`, title: page.title }));

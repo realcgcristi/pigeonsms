@@ -47,6 +47,14 @@
 .chat { display: flex; flex-direction: column; height: 100%; background: var(--ink); }
 .chat__conversation { display: flex; flex: 1 1 auto; flex-direction: column; min-width: 0; min-height: 0; }
 .chat__sidebar { display: none; }
+.chat__sidebar-section-title {
+  padding: 12px 12px 5px;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+}
 .chat__list {
   flex: 1 1 auto;
   min-height: 0;
@@ -56,6 +64,20 @@
   flex-direction: column;
   gap: 2px;
   padding: var(--sp-m) var(--sp-s) var(--sp-xl);
+}
+.chat__unread-jump {
+  position: sticky;
+  top: 8px;
+  z-index: 2;
+  align-self: center;
+  border: 1px solid color-mix(in srgb, var(--accent) 70%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 92%, var(--accent));
+  color: var(--text-primary);
+  padding: 7px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
 }
 .chat__day {
   align-self: center;
