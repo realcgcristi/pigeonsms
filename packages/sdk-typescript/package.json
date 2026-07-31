@@ -1,0 +1,31 @@
+{
+  "name": "@pigeonsms/sdk",
+  "version": "1.0.0-beta.1",
+  "description": "Official Open Pigeon Protocol SDK for TypeScript, browsers, Node.js and bots",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "README.md", "LICENSE"],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test test/*.test.mjs",
+    "prepublishOnly": "npm test"
+  },
+  "devDependencies": { "typescript": "^5.8.0" },
+  "engines": { "node": ">=20" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/realcgcristi/pigeonsms.git",
+    "directory": "packages/sdk-typescript"
+  },
+  "keywords": ["pigeonsms", "open-pigeon", "chat", "bot", "sdk"],
+  "license": "MIT"
+}

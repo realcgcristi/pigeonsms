@@ -16,3 +16,7 @@ local.properties
 google-services.json
 *.tok
 *.local
+# SDK build outputs
+packages/sdk-rust/target/
+packages/sdk-typescript/dist/
+packages/sdk-kotlin/build/

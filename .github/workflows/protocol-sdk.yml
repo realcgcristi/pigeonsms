@@ -1,0 +1,43 @@
+name: protocol-and-sdks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  protocol-typescript:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: conformance fixtures
+        run: node --test protocol/conformance/fixtures.test.mjs
+      - name: TypeScript SDK
+        working-directory: packages/sdk-typescript
+        run: npm install --ignore-scripts && npm test
+
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Rust SDK
+        working-directory: packages/sdk-rust
+        run: cargo test --all-targets
+
+  kotlin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Kotlin SDK
+        run: ./android/gradlew -p packages/sdk-kotlin test --no-daemon
