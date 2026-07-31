@@ -1,5 +1,9 @@
 # pigeonsms
 
+[![build](https://github.com/realcgcristi/pigeonsms/actions/workflows/build.yml/badge.svg)](https://github.com/realcgcristi/pigeonsms/actions/workflows/build.yml)
+[![protocol + sdks](https://github.com/realcgcristi/pigeonsms/actions/workflows/protocol-sdk.yml/badge.svg)](https://github.com/realcgcristi/pigeonsms/actions/workflows/protocol-sdk.yml)
+[![license](https://img.shields.io/badge/license-gpl--3.0-blue.svg)](LICENSE)
+
 so this is pigeonsms, a chat app i've been chipping away at for the past couple weeks. android app plus a backend that lives entirely on cloudflare. dms, group servers (i call them "nests"), the whole thing
 
 it's a passion project, built with privacy in mind — a way for friend groups to chat on a platform they actually control. you can self-host the whole thing (it's all here, gpl'd), or just use the instance i already run at pigeonsms.aldi.best. no ads, no tracking, no data mining, no premium tier gating features behind a paywall. it's yours.
@@ -59,6 +63,9 @@ it started as a "i bet i can build a messenger in a weekend" kind of idea and uh
 - totp 2fa
 - the ui itself: jetpack compose, a liquid-glass look i'm a bit obsessed with, ~20 custom app icons, chat wallpapers
 - three whole UI skins you can flip between in settings: **classic** (the original), **nova** (a flatter, cleaner redesign), and **galaxy** (nova cranked up — deep space-indigo, aurora backgrounds, glow, spring physics everywhere). same app, three vibes
+- the web client works from phone to ultrawide desktop, with encrypted offline cache, queued sends, jump-to-unread, channel categories, branches, packs, migration, and bridge management
+- a native windows client lives in `desktop/` through tauri and shares the same api
+- open pigeon discovery, schemas, fixtures, compatibility checks, and official TypeScript, Kotlin, and Rust sdks live in `protocol/` and `packages/`
 
 ## the one thing that doesn't work: calls
 
@@ -75,6 +82,7 @@ everything sits on cloudflare so there's no server bill and nothing to ssh into 
 - r2 for media blobs
 - durable objects for the realtime spine, one per user for their gateway socket, one per channel for fanout, one per call room for signaling
 - queues to push fcm notifications
+- open pigeon protocol contracts for discovery, branches, bridges, packs, migration, and encrypted bot runtimes
 
 android side is pretty standard modern kotlin. compose for ui, room for the offline cache, ktor for both http and the gateway websocket, thin repository layer gluing them. it's multi-module:
 
@@ -95,11 +103,14 @@ packages/
   sdk-kotlin/     official Kotlin/JVM client
   sdk-rust/       official Rust client
   bridge-kit/     Matrix, Discord, IRC, Slack and email connectors
+web/              responsive browser client and encrypted local-first cache
+desktop/          native windows shell built with tauri
+protocol/         public schemas, fixtures, openapi, and compatibility lab
 ```
 
 ## running it
 
-The fastest local setup is:
+the fastest local setup is:
 
 ```
 docker compose up --build
@@ -112,6 +123,22 @@ node scripts/pigeonctl.mjs cloudflare --name my-pigeon --web-origin https://chat
 ```
 
 The command provisions D1, R2, Queue, applies migrations and deploys the Worker. See [self-hosting docs](docs/content/selfhost.md) and the [Open Pigeon Protocol](protocol/README.md).
+
+to run the desktop shell during development:
+
+```
+cd desktop
+npm install
+npm run dev
+```
+
+to run the core checks locally:
+
+```
+cd backend && npm test
+cd ../web && npm test && npm run build
+cd .. && node --test protocol/conformance/fixtures.test.mjs
+```
 
 backend:
 
@@ -140,11 +167,11 @@ you'll need your own google-services.json in android/app (a firebase project, fo
 being honest since someone's gonna read the code anyway
 
 - `messages.ts` is like 1100 lines. it started clean i promise. it is no longer clean
-- tests are a joke. there's a handful in backend/test and that's it, i mostly test by using the app and seeing what explodes
+- coverage is still lighter than a big production chat app, but backend, web, protocol fixtures, sdk, bridge, and compatibility checks run in ci
 - calls (see the section above) — the big one. help wanted
 - error handling is inconsistent, some paths retry nicely and some just swallow the error and move on. sorry
 - the liquid glass eats a bit of gpu on cheap phones, there's a fallback but it's not perfect
-- migrations are just numbered sql files i run in order like an animal, no real migration tooling
+- migrations are numbered sql files tracked by wrangler; keep them additive and apply them before deploying a new worker
 - there is dead code in here. i know. i'll get to it eventually (i won't)
 
 if you find something broken, fair, open an issue and i'll probably fix it
@@ -153,14 +180,10 @@ if you find something broken, fair, open an issue and i'll probably fix it
 
 the short version (full thing in [ROADMAP.md](ROADMAP.md)):
 
-- **v3 beta foundation** — jump-to-unread, channel categories, public protocol discovery, compatibility fixtures, and official TypeScript, Kotlin, and Rust SDKs are now in the repository.
-- **v3 open platform** — encrypted local-first web messaging, expiring message branches, Pigeon Packs, whole-nest migration, scoped Matrix/Discord/IRC/Slack/email bridges, encrypted bot runtimes, and the public compatibility lab are implemented behind Open Pigeon contracts.
-- **next v3 gates** — reliable calls with TURN, signed desktop releases, offline conflict tests, moderation workflows, and production SDK publishing.
-
-- **done in v2.8.0** — **end-to-end encryption for DMs** is shipped and off the roadmap: X25519 device keys, a double-ratchet message stream, and a password-derived key backup. it's experimental and ships off-by-default while it hardens, but the crypto is fully wired end to end. v2.8.0 also shipped server-side nest search, scheduled messages, and an accessibility pass.
-- **v3 big rocks** — fix calls for real (reliable native mic/camera capture + a TURN server so media traverses NAT) and a **desktop client** (thinking tauri, shared backend). with e2ee out of the way, v3 is all about calls + desktop.
-- **smaller v3 wants** — a web client, better forum threading, richer per-nest roles, gifs/stickers, data export, and one-command self-host.
-- **someday** — federation between self-hosted instances, a small bot/automation api.
+- **v3 beta foundation** — jump-to-unread, channel categories, public protocol discovery, compatibility fixtures, and official TypeScript, Kotlin, and Rust sdks are shipped.
+- **v3 open platform** — encrypted local-first web messaging, expiring message branches, pigeon packs, whole-nest migration, scoped Matrix/Discord/IRC/Slack/email bridges, encrypted bot runtimes, and the public compatibility lab are shipped behind Open Pigeon contracts.
+- **next gates** — reliable calls with TURN, signed desktop releases, offline conflict tests, moderation workflows, and production sdk publishing.
+- **someday** — federation between self-hosted instances and a broader bot automation api.
 
 calls are the #1 priority and the thing i most want help with (see [CONTRIBUTING.md](CONTRIBUTING.md)).
 
