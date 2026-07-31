@@ -160,7 +160,7 @@ cd android
 ./gradlew :app:assembleRelease
 ```
 
-you'll need your own google-services.json in android/app (a firebase project, for fcm), point PIGEON_BASE in core/network at your worker url, and wire your own signing keystore in app/build.gradle.kts, the config block is right at the top
+you'll need jdk 17, android sdk 36, your own google-services.json in android/app (a firebase project, for fcm), a worker url in `PIGEON_BASE`, and a signing keystore in app/build.gradle.kts. the config block is right at the top
 
 ## rough edges, aka stuff i'm not proud of
 
