@@ -27,3 +27,18 @@ bot.command({ name: 'ping', description: 'checks the bot' }, () => ({ type: 'mes
 await bot.syncCommands()
 await bot.start()
 ```
+
+Encrypted bot runtimes keep plaintext on the connector machine:
+
+```ts
+import { EncryptedBotRuntime, generateEncryptedBotIdentity } from '@pigeonsms/sdk'
+
+const runtime = await EncryptedBotRuntime.create({
+  baseUrl: process.env.PIGEON_URL!,
+  token: process.env.PIGEON_TOKEN!,
+  identity: await generateEncryptedBotIdentity(),
+})
+await runtime.register()
+```
+
+The runtime uses the Open Pigeon encrypted-bot vectors and sends ciphertext with `encrypted: true`.

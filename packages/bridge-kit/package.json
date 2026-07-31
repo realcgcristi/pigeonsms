@@ -1,0 +1,17 @@
+{
+  "name": "@pigeonsms/bridge-kit",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Open Pigeon bridge runtime for Matrix, Discord, IRC, Slack and email",
+  "bin": {
+    "pigeon-bridge": "src/cli.mjs"
+  },
+  "exports": "./src/index.mjs",
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "AGPL-3.0-or-later"
+}

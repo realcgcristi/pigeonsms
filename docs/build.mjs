@@ -10,6 +10,7 @@ const PAGES = [
   { slug: 'clients', title: 'Clients', source: 'content/clients.md' },
   { slug: 'protocol', title: 'Open Protocol', source: 'content/protocol.md' },
   { slug: 'selfhost', title: 'Self-hosting', source: 'content/selfhost.md' },
+  { slug: 'platform', title: 'V3 Platform', source: 'content/platform.md' },
 ];
 
 const NAV = PAGES.map((page) => ({ href: page.slug === 'index' ? '/' : `/${page.slug}`, title: page.title }));

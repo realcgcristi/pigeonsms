@@ -90,6 +90,11 @@ backend/
   src/do/         durable objects
   src/lib/        crypto, fcm, mentions, validation, etc
   migrations/     d1 schema, applied in order
+packages/
+  sdk-typescript/ official TypeScript client and encrypted-bot runtime
+  sdk-kotlin/     official Kotlin/JVM client
+  sdk-rust/       official Rust client
+  bridge-kit/     Matrix, Discord, IRC, Slack and email connectors
 ```
 
 ## running it
@@ -149,6 +154,7 @@ if you find something broken, fair, open an issue and i'll probably fix it
 the short version (full thing in [ROADMAP.md](ROADMAP.md)):
 
 - **v3 beta foundation** — jump-to-unread, channel categories, public protocol discovery, compatibility fixtures, and official TypeScript, Kotlin, and Rust SDKs are now in the repository.
+- **v3 open platform** — encrypted local-first web messaging, expiring message branches, Pigeon Packs, whole-nest migration, scoped Matrix/Discord/IRC/Slack/email bridges, encrypted bot runtimes, and the public compatibility lab are implemented behind Open Pigeon contracts.
 - **next v3 gates** — reliable calls with TURN, signed desktop releases, offline conflict tests, moderation workflows, and production SDK publishing.
 
 - **done in v2.8.0** — **end-to-end encryption for DMs** is shipped and off the roadmap: X25519 device keys, a double-ratchet message stream, and a password-derived key backup. it's experimental and ships off-by-default while it hardens, but the crypto is fully wired end to end. v2.8.0 also shipped server-side nest search, scheduled messages, and an accessibility pass.

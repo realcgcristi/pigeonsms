@@ -12,7 +12,10 @@
   },
   "scripts": {
     "test": "echo \"Run package-specific tests\"",
-    "pigeonctl": "node scripts/pigeonctl.mjs"
+    "pigeonctl": "node scripts/pigeonctl.mjs",
+    "protocol:fixtures": "node protocol/conformance/fixtures.test.mjs",
+    "protocol:lab": "node protocol/conformance/src/lab.mjs protocol/lab/servers.json protocol/lab/site",
+    "bridge:test": "npm test --prefix packages/bridge-kit"
   },
   "repository": {
     "type": "git",

@@ -77,6 +77,15 @@ export class PigeonClient {
   deleteMessage(id: string): Promise<void> { return this.request(`/messages/${segment(id)}`, { method: 'DELETE' }); }
   markRead(channelId: string, seq: number): Promise<void> { return this.request(`/channels/${segment(channelId)}/read`, { method: 'PUT', json: { seq } }); }
   typing(channelId: string): Promise<void> { return this.request(`/channels/${segment(channelId)}/typing`, { method: 'POST' }); }
+  registerDevice(publicKey: string, name = 'sdk') {
+    return this.request<{ id: string }>('/auth/devices', { method: 'POST', json: { pub_key: publicKey, name } });
+  }
+  keyEnvelopes(channelId: string) {
+    return this.request<{ envelopes: Array<{ id: string; to_device: string; from_user: string; wrapped_key: string; created_at: number }> }>(`/channels/${segment(channelId)}/key-envelopes`).then((value) => value.envelopes);
+  }
+  putKeyEnvelopes(channelId: string, envelopes: Array<{ to_device: string; wrapped_key: string }>) {
+    return this.request(`/channels/${segment(channelId)}/key-envelopes`, { method: 'POST', json: { envelopes } });
+  }
 
   spaces(): Promise<Space[]> { return this.request<{ spaces: Space[] }>('/spaces').then((value) => value.spaces); }
   space(id: string): Promise<Space> { return this.request<{ space: Space }>(`/spaces/${segment(id)}`).then((value) => value.space); }
