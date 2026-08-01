@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '@/api/client'
 import type { MutualSpaceDto, ProfileDto } from '@/api/dto'
-import { Block, ChatBubbleOutline, Edit, PersonAdd, Verified } from '@/components/icons'
+import { Block, ChatBubbleOutline, Edit, Key, PersonAdd, Verified } from '@/components/icons'
 import { Avatar } from '@/components/ui/Avatar'
 import { Button } from '@/components/ui/Button'
 import { TextField } from '@/components/ui/TextField'
@@ -135,6 +135,12 @@ export default function ProfileScreen() {
 
         {!mine ? (
           <>
+          <ListRow
+            title="verify device keys"
+            subtitle="pin this person's public key history"
+            leading={<Key size={19} />}
+            onClick={() => navigate(`/settings/key-transparency/${id}`)}
+          />
           <ListRow
             title="nickname"
             subtitle={nicknames[id] ? `only you see “${nicknames[id]}”` : 'set a private nickname'}

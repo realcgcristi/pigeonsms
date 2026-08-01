@@ -24,6 +24,8 @@ const EditProfileScreen = lazy(() => import('@/screens/settings/EditProfileScree
 const DevicesScreen = lazy(() => import('@/screens/settings/DevicesScreen'));
 const HistoryScreen = lazy(() => import('@/screens/settings/HistoryScreen'));
 const SecurityScreen = lazy(() => import('@/screens/settings/SecurityScreen'));
+const KeyTransparencyScreen = lazy(() => import('@/screens/settings/KeyTransparencyScreen'));
+const NetworklessScreen = lazy(() => import('@/screens/settings/NetworklessScreen'));
 const BlockedScreen = lazy(() => import('@/screens/settings/BlockedScreen'));
 const AppearanceScreen = lazy(() => import('@/screens/settings/AppearanceScreen'));
 const AppIconScreen = lazy(() => import('@/screens/settings/AppIconScreen'));
@@ -31,6 +33,7 @@ const PrivacyScreen = lazy(() => import('@/screens/settings/PrivacyScreen'));
 const NotificationSettingsScreen = lazy(() => import('@/screens/settings/NotificationSettingsScreen'));
 const NestSettingsScreen = lazy(() => import('@/screens/settings/NestSettingsScreen'));
 const NestManageScreen = lazy(() => import('@/screens/settings/NestManageScreen'));
+const TimeMachineScreen = lazy(() => import('@/screens/settings/TimeMachineScreen'));
 const ChannelPermissionsScreen = lazy(() => import('@/screens/spaces/ChannelPermissionsScreen'));
 const BotsScreen = lazy(() => import('@/screens/settings/BotsScreen'));
 const BridgesScreen = lazy(() => import('@/screens/settings/BridgesScreen'));
@@ -94,6 +97,9 @@ export default function App() {
               <Route path="/settings/devices" element={<Gate><DevicesScreen /></Gate>} />
               <Route path="/settings/history" element={<Gate><HistoryScreen /></Gate>} />
               <Route path="/settings/security" element={<Gate><SecurityScreen /></Gate>} />
+              <Route path="/settings/key-transparency" element={<Gate><KeyTransparencyScreen /></Gate>} />
+              <Route path="/settings/key-transparency/:userId" element={<Gate><KeyTransparencyScreen /></Gate>} />
+              <Route path="/settings/networkless" element={<Gate><NetworklessScreen /></Gate>} />
               <Route path="/settings/blocked" element={<Gate><BlockedScreen /></Gate>} />
               <Route path="/settings/appearance" element={<Gate><AppearanceScreen /></Gate>} />
               <Route path="/settings/appicon" element={<Gate><AppIconScreen /></Gate>} />
@@ -101,6 +107,7 @@ export default function App() {
               <Route path="/settings/notifications" element={<Gate><NotificationSettingsScreen /></Gate>} />
               <Route path="/settings/nests" element={<Gate><NestSettingsScreen /></Gate>} />
               <Route path="/settings/nests/:spaceId" element={<Gate><NestManageScreen /></Gate>} />
+              <Route path="/settings/nests/:spaceId/time-machine" element={<Gate><TimeMachineScreen /></Gate>} />
               <Route path="/nest/:spaceId/channel/:channelId/permissions" element={<Gate><ChannelPermissionsScreen /></Gate>} />
               <Route path="/settings/bots" element={<Gate><BotsScreen /></Gate>} />
               <Route path="/settings/nests/:spaceId/bridges" element={<Gate><BridgesScreen /></Gate>} />

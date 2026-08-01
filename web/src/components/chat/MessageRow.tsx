@@ -70,7 +70,7 @@ function MessageRowBase({
     },
   ]
   if (mine && message.state === 'sent') items.push({ key: 'edit', label: 'edit', onSelect: onEdit })
-  if (message.state === 'failed' || message.state === 'queued') items.push({ key: 'retry', label: 'send now', onSelect: onRetry })
+  if (message.state === 'failed' || message.state === 'queued' || (mine && message.state === 'nearby')) items.push({ key: 'retry', label: 'send now', onSelect: onRetry })
   if (message.state === 'sent') {
     items.push({ key: 'pin', label: message.pinned ? 'unpin' : 'pin message', onSelect: onPin })
     items.push({ key: 'super-pin', label: 'make super pin', onSelect: onSuperPin })
@@ -246,11 +246,12 @@ function MessageRowBase({
         ) : null}
 
         <div className="msg__meta">
-          {message.state === 'pending' || message.state === 'queued' ? <Schedule size={12} /> : null}
+          {message.state === 'pending' || message.state === 'queued' || message.state === 'nearby' ? <Schedule size={12} /> : null}
           {message.state === 'failed' ? <ErrorOutline size={12} /> : null}
           {message.state === 'sent' && mine ? <DoneAll size={12} /> : null}
           {timeOfDay(message.created_at ?? 0)}
           {message.state === 'queued' ? ' · queued offline' : ''}
+          {message.state === 'nearby' ? ' · shared nearby, awaiting internet' : ''}
           {message.edited_at ? ' · edited' : ''}
           {mine && seenCount ? ` · seen by ${seenCount}` : ''}
         </div>

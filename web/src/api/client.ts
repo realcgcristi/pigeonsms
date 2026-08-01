@@ -69,6 +69,9 @@ import type {
   SearchResponse,
   SendInteractionResponse,
   SendResponse,
+  TimeCapsuleDto,
+  TimeEventsResponse,
+  TransparencyResponse,
   SessionsResponse,
   SpaceEmojiResponse,
   SpaceEmojisResponse,
@@ -493,11 +496,51 @@ class PigeonApi {
     return request<{ bundle: Record<string, unknown>; digest: string }>(`/spaces/${seg(spaceId)}/migration`);
   }
 
-  importSpaceMigration(bundle: Record<string, unknown>, name?: string) {
+  importSpaceMigration(bundle: Record<string, unknown>, name?: string, force = false) {
     return request<{ ok: boolean; space_id: string; imported?: Record<string, number> }>('/spaces/migrate', {
       method: 'POST',
-      json: { bundle, ...(name ? { name } : {}) },
+      json: { bundle, force, ...(name ? { name } : {}) },
     });
+  }
+
+  timeEvents(spaceId: string, after = 0, limit = 200) {
+    return request<TimeEventsResponse>(`/spaces/${seg(spaceId)}/time-machine/events`, {
+      query: { after, limit },
+    });
+  }
+
+  timeCapsules(spaceId: string) {
+    return request<{ capsules: TimeCapsuleDto[] }>(`/spaces/${seg(spaceId)}/time-machine/capsules`).then(
+      (response) => response.capsules,
+    );
+  }
+
+  createTimeCapsule(spaceId: string, input: { name: string; ciphertext: string; iv: string; salt: string; kdf: string }) {
+    return request<{ capsule: TimeCapsuleDto }>(`/spaces/${seg(spaceId)}/time-machine/capsules`, {
+      method: 'POST',
+      json: input,
+    }).then((response) => response.capsule);
+  }
+
+  timeCapsule(spaceId: string, capsuleId: string) {
+    return request<{ capsule: TimeCapsuleDto }>(
+      `/spaces/${seg(spaceId)}/time-machine/capsules/${seg(capsuleId)}`,
+    ).then((response) => response.capsule);
+  }
+
+  deleteTimeCapsule(spaceId: string, capsuleId: string) {
+    return requestVoid(`/spaces/${seg(spaceId)}/time-machine/capsules/${seg(capsuleId)}`, { method: 'DELETE' });
+  }
+
+  transparency(userId: string) {
+    return request<TransparencyResponse>(`/transparency/${seg(userId)}`);
+  }
+
+  gossipTransparency(userId: string, checkpoint: { tree_size: number; root_hash: string }) {
+    return request<{ ok: boolean; conflict: boolean; roots: { root_hash: string; observers: number }[] }>(
+      `/transparency/${seg(userId)}/gossip`,
+      { method: 'POST', json: checkpoint },
+    );
   }
 
   exportSpacePack(spaceId: string, theme?: { accent?: string; ui_skin?: string }) {

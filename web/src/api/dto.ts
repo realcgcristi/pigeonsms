@@ -383,6 +383,67 @@ export interface SendResponse {
   scheduled?: ScheduledMessageDto;
 }
 
+export interface TimeEventDto {
+  id: string;
+  space_id: string;
+  sequence: number;
+  kind: string;
+  entity_id?: string | null;
+  actor_id?: string | null;
+  payload: JsonObject;
+  created_at: number;
+  previous_hash?: string | null;
+  event_hash: string;
+}
+
+export interface TimeEventsResponse {
+  events: TimeEventDto[];
+  cursor: number;
+  latest_sequence: number;
+  root_hash?: string | null;
+  has_more: boolean;
+}
+
+export interface TimeCapsuleDto {
+  id: string;
+  space_id: string;
+  created_by: string;
+  name: string;
+  iv: string;
+  salt: string;
+  kdf: string;
+  digest: string;
+  event_from: number;
+  event_to: number;
+  size: number;
+  created_at: number;
+  ciphertext?: string;
+}
+
+export interface TransparencyEntryDto {
+  id: string;
+  user_id: string;
+  device_id: string;
+  action: 'register' | 'revoke';
+  public_key?: string | null;
+  previous_hash?: string | null;
+  entry_hash: string;
+  created_at: number;
+}
+
+export interface TransparencyCheckpointDto {
+  tree_size: number;
+  root_hash: string;
+  latest_hash?: string | null;
+  generated_at: number;
+}
+
+export interface TransparencyResponse {
+  entries: TransparencyEntryDto[];
+  checkpoint: TransparencyCheckpointDto;
+  active_devices: { device_id: string; public_key: string }[];
+}
+
 export interface SendMessageInput {
   content: string;
   nonce: string;

@@ -253,6 +253,7 @@ export default function NestManageScreen() {
 
             {owner ? (
               <SettingsGroup label="portability and pigeon packs">
+                <SettingsRow icon={<History size={18} />} title="nest time machine" value="replay, restore or fork encrypted history" onClick={() => navigate(`/settings/nests/${spaceId}/time-machine`)} />
                 <SettingsRow icon={<Download size={18} />} title="server migration backup" value="community, history, roles and media manifest" onClick={() => void exportMigration()} />
                 <SettingsRow icon={<Upload size={18} />} title="migrate from another server" value="import a .pigeon.json bundle as a new nest" onClick={() => migrationRef.current?.click()} />
                 <SettingsRow icon={<Download size={18} />} title="export pigeon pack" value="channels, roles, permissions, bots and theme" onClick={() => void exportPack()} />

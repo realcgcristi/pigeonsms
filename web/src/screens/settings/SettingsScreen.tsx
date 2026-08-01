@@ -13,6 +13,7 @@ import {
   Notifications,
   Palette,
   Shield,
+  Wifi,
 } from '@/components/icons'
 import { Avatar } from '@/components/ui/Avatar'
 import { ChevronRight } from '@/components/icons'
@@ -55,6 +56,7 @@ export default function SettingsScreen() {
         </SettingsGroup>
 
         <SettingsGroup label="app">
+          <SettingsRow icon={<Wifi size={18} />} title="networkless mode" value="encrypted nearby messaging over LAN" onClick={() => navigate('/settings/networkless')} />
           <SettingsRow icon={<Bolt size={18} />} title="bots" value="build bots and slash commands" onClick={() => navigate('/settings/bots')} />
           <SettingsRow icon={<DarkMode size={18} />} title="app style" value="choose the complete interface skin" onClick={() => navigate('/settings/appicon')} />
           <SettingsRow icon={<Info size={18} />} title="about" onClick={() => navigate('/settings/about')} />

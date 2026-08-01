@@ -143,6 +143,15 @@ export default function SecurityScreen() {
           ) : null}
         </SettingsGroup>
 
+        <SettingsGroup label="device identity">
+          <SettingsRow
+            icon={<Key size={18} />}
+            title="key transparency"
+            value="verify every device key against the public cryptographic log"
+            onClick={() => navigate('/settings/key-transparency')}
+          />
+        </SettingsGroup>
+
         {setup ? (
           <div className="settings__form settings__form--security">
             {qr ? <img className="settings__qr" src={qr} alt="authenticator QR code" /> : null}

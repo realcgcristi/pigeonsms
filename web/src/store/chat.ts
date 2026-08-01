@@ -5,8 +5,9 @@ import type { AttachmentDto, MessageDto, SpaceEmojiDto, SuperPinDto } from '@/ap
 import { usePrefs } from '@/store/prefs';
 import { useSocial } from '@/store/social';
 import { cacheMessages, cachedMessages, queueMessage, queuedMessages, removeQueuedMessage, type QueuedMessage } from '@/lib/localFirst';
+import type { NearbyMessage } from '@/lib/networkless';
 
-export type SendState = 'sent' | 'pending' | 'queued' | 'failed';
+export type SendState = 'sent' | 'pending' | 'queued' | 'nearby' | 'failed';
 
 export interface ChatMessage extends MessageDto {
   state: SendState;
@@ -62,6 +63,7 @@ export interface ChatState {
   loadEmoji: (force?: boolean) => Promise<void>;
   subscribe: () => () => void;
   syncOutbox: () => Promise<void>;
+  receiveNearby: (message: NearbyMessage) => void;
 }
 
 function patchChannel(
@@ -117,7 +119,10 @@ export const useChat = create<ChatState>((set, get) => ({
       if (local.length) {
         set((s) => patchChannel(s, channelId, (c) => ({
           ...c,
-          messages: local.map((message) => ({ ...message, state: 'sent' as SendState })),
+          messages: local.map((message) => ({
+            ...message,
+            state: (message.metadata as { networkless?: boolean } | null)?.networkless ? 'nearby' : 'sent',
+          } as ChatMessage)),
         })));
       }
     }
@@ -130,7 +135,12 @@ export const useChat = create<ChatState>((set, get) => ({
           ...c,
           loading: false,
           error: null,
-          messages: page.messages.map((m) => ({ ...m, state: 'sent' as SendState })),
+          messages: page.messages
+            .map((m) => ({ ...m, state: 'sent' as SendState }))
+            .concat(c.messages.filter((local) =>
+              local.state !== 'sent' && !page.messages.some((remote) => !!local.nonce && remote.nonce === local.nonce),
+            ))
+            .sort((a, b) => a.created_at - b.created_at || (a.seq ?? 0) - (b.seq ?? 0)),
           read: page.read ?? c.read,
           hasMore: page.messages.length >= 40,
         })),
@@ -293,7 +303,7 @@ export const useChat = create<ChatState>((set, get) => ({
   retry: async (channelId, id) => {
     const message = get().channel(channelId).messages.find((m) => m.id === id);
     if (!message) return;
-    if (message.state === 'queued' && message.nonce) await removeQueuedMessage(`outbox:${message.nonce}`);
+    if ((message.state === 'queued' || message.state === 'nearby') && message.nonce) await removeQueuedMessage(`outbox:${message.nonce}`);
     set((s) =>
       patchChannel(s, channelId, (c) => ({ ...c, messages: c.messages.filter((m) => m.id !== id) })),
     );
@@ -320,7 +330,7 @@ export const useChat = create<ChatState>((set, get) => ({
 
   remove: async (channelId, id) => {
     const local = get().channel(channelId).messages.find((m) => m.id === id);
-    if (local?.state === 'failed' || id.startsWith('local-')) {
+    if (local?.state === 'failed' || local?.state === 'queued' || local?.state === 'nearby' || id.startsWith('local-')) {
       if (local?.nonce) await removeQueuedMessage(`outbox:${local.nonce}`);
       get().discard(channelId, id);
       void persist(channelId, get().channel(channelId).messages);
@@ -426,6 +436,33 @@ export const useChat = create<ChatState>((set, get) => ({
         await removeQueuedMessage(item.id);
       }
     }
+  },
+
+  receiveNearby: (nearby) => {
+    const current = get().channel(nearby.channelId).messages.find((message) => message.nonce === nearby.nonce)
+    if (current?.state === 'sent') return
+    const message: ChatMessage = {
+      id: current?.id ?? `nearby-${nearby.nonce}`,
+      channel_id: nearby.channelId,
+      seq: current?.seq ?? Number.MAX_SAFE_INTEGER - 1,
+      author: nearby.author,
+      content: nearby.content,
+      created_at: nearby.createdAt,
+      nonce: nearby.nonce,
+      attachment: null,
+      reply_to: null,
+      reactions: [],
+      metadata: { networkless: true },
+      state: 'nearby',
+    }
+    set((state) => patchChannel(state, nearby.channelId, (channel) => ({
+      ...channel,
+      messages: channel.messages
+        .filter((item) => item.nonce !== nearby.nonce)
+        .concat(message)
+        .sort((a, b) => a.created_at - b.created_at || (a.seq ?? 0) - (b.seq ?? 0)),
+    })))
+    void persist(nearby.channelId, get().channel(nearby.channelId).messages)
   },
 
   subscribe: () => {
