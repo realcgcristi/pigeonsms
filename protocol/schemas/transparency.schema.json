@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pigeonsms.com/protocol/v1/transparency.schema.json",
+  "title": "Key transparency response",
+  "type": "object",
+  "required": ["entries", "checkpoint", "active_devices"],
+  "properties": {
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "user_id", "device_id", "action", "entry_hash", "created_at"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[0-9]+$" },
+          "user_id": { "type": "string", "pattern": "^[0-9]+$" },
+          "device_id": { "type": "string", "minLength": 1 },
+          "action": { "enum": ["register", "revoke"] },
+          "public_key": { "type": ["string", "null"] },
+          "previous_hash": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+          "entry_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "created_at": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "checkpoint": {
+      "type": "object",
+      "required": ["tree_size", "root_hash", "generated_at"],
+      "properties": {
+        "tree_size": { "type": "integer", "minimum": 0 },
+        "root_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "latest_hash": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+        "generated_at": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "active_devices": { "type": "array", "items": { "type": "object" } }
+  },
+  "additionalProperties": true
+}

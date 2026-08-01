@@ -1,0 +1,6 @@
+{
+  "$schema": "../../schemas/transparency.schema.json",
+  "entries": [],
+  "checkpoint": { "tree_size": -1, "root_hash": "bad", "generated_at": -1 },
+  "active_devices": []
+}

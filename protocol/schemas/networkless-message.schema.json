@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pigeonsms.com/protocol/v1/networkless-message.schema.json",
+  "title": "Networkless message",
+  "type": "object",
+  "required": ["version", "spaceId", "channelId", "nonce", "author", "content", "createdAt"],
+  "properties": {
+    "version": { "const": 1 },
+    "spaceId": { "type": "string", "pattern": "^[0-9]+$" },
+    "channelId": { "type": "string", "pattern": "^[0-9]+$" },
+    "nonce": { "type": "string", "minLength": 8, "maxLength": 128 },
+    "author": { "$ref": "./user.schema.json" },
+    "content": { "type": "string", "maxLength": 8000 },
+    "createdAt": { "type": "integer", "minimum": 0 }
+  },
+  "additionalProperties": true
+}

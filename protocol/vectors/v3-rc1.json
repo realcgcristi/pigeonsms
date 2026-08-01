@@ -1,0 +1,48 @@
+{
+  "networkless": {
+    "space_id": "72351096507367425",
+    "passphrase": "nearby pigeons",
+    "message": {
+      "version": 1,
+      "spaceId": "72351096507367425",
+      "channelId": "72351096507367426",
+      "nonce": "device-a-00000001",
+      "author": { "id": "72351096507367420", "username": "pigeon" },
+      "content": "still here",
+      "createdAt": 1785600000000
+    },
+    "salt_hex": "0b0ab929f24021f246c9157a5cdac52b",
+    "key_hex": "ec48747b188682b0e7305ad4c2964872e590f062d6a8a442de97d46eea3ba093",
+    "frame": {
+      "iv": "AAECAwQFBgcICQoL",
+      "data": "M27rkek3UWBk4rOr64GQhkuJi5JkGrfmEX_zKbs90Y-lhnBu8WLFuM-MjM32VMpmYemE5ZIZ1zdkv5dtxnC_aW5LjU3K0eUCRbnFtmCE75OVcpb02ZmEKiF3tUZOw6Vivf2tne2APtFk1gg7gpoGb2V3fAkRciacOPjxQx84bmEMoNb8WCQvEfyoBno41l7dyX1N6aUTsBwoKtWDdHJR1gjpMNVWNq8b83WkHwo7nVuW9X2JMckt0ybPKvj7EMhQ11BEq4vvF_xoNtK-_KF_AFzCQn1K3yzu48qDIOA5h_k"
+    }
+  },
+  "time_event": {
+    "event": {
+      "id": "09af038ae8ff4f6ba398568937ea4e60",
+      "space_id": "72351096507367425",
+      "sequence": 14,
+      "kind": "channel.updated",
+      "entity_id": "72351096507367426",
+      "actor_id": null,
+      "payload": { "name": "general", "kind": "text" },
+      "created_at": 1785600000000,
+      "previous_hash": null
+    },
+    "event_hash": "c09c7c75fc4668ba7bce08df2664e53cbb7f21121340c625d96dd3a4138d85b1"
+  },
+  "key_transparency": {
+    "entry": {
+      "id": "72351096507367430",
+      "user_id": "72351096507367420",
+      "device_id": "72351096507367429",
+      "action": "register",
+      "public_key": "x25519-public-key",
+      "previous_hash": null,
+      "created_at": 1785600000000
+    },
+    "entry_hash": "1df5152cb79011eec455abb055488b648a5fffa449fa061a9e6a5278f14863c2",
+    "empty_root": "dcd24b9a63c43ae16adc78ce26856ba2fbb21187b0e2b8810cfa93706b32fea1"
+  }
+}

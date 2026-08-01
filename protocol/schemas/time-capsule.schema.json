@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pigeonsms.com/protocol/v1/time-capsule.schema.json",
+  "title": "Encrypted nest checkpoint",
+  "type": "object",
+  "required": ["id", "space_id", "name", "iv", "salt", "kdf", "digest", "event_from", "event_to", "size", "created_at"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^[0-9]+$" },
+    "space_id": { "type": "string", "pattern": "^[0-9]+$" },
+    "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+    "iv": { "type": "string", "minLength": 16, "maxLength": 32 },
+    "salt": { "type": "string", "minLength": 20, "maxLength": 40 },
+    "kdf": { "const": "pbkdf2-sha256-250000" },
+    "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "event_from": { "type": "integer", "minimum": 0 },
+    "event_to": { "type": "integer", "minimum": 0 },
+    "size": { "type": "integer", "minimum": 1 },
+    "created_at": { "type": "integer", "minimum": 0 },
+    "ciphertext": { "type": "string", "minLength": 16 }
+  },
+  "additionalProperties": true
+}

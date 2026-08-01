@@ -5,6 +5,7 @@ import { assertChannelAccess } from '../lib/channels';
 import { snowflake } from '../lib/ids';
 import type { AppEnv, AuthedUser } from '../types';
 import { readJsonBody } from '../lib/validate';
+import { appendTransparencyEntry, ensureTransparencyEntries } from '../lib/keyTransparency';
 
 // E2EE endpoints (2.8.0). Ships behind the client `e2ee` flag (default OFF).
 // The server is a dumb store here: it holds device public keys, an opaque
@@ -35,12 +36,35 @@ devices.post('/auth/devices', requireAuth, async (c) => {
 
   const id = snowflake();
   const now = Date.now();
+  await ensureTransparencyEntries(c.env, user.id);
   await c.env.DB.prepare(
     'INSERT INTO user_devices (id, user_id, pub_key, name, created_at, last_seen) VALUES (?, ?, ?, ?, ?, ?)',
   )
     .bind(id, user.id, pubKey, name, now, now)
     .run();
+  try {
+    await appendTransparencyEntry(c.env, user.id, id, 'register', pubKey, now);
+  } catch (error) {
+    await c.env.DB.prepare('DELETE FROM user_devices WHERE id = ? AND user_id = ?').bind(id, user.id).run();
+    throw error;
+  }
   return c.json({ id }, 201);
+});
+
+devices.delete('/auth/devices/:id', requireAuth, async (c) => {
+  const user = c.get('user') as AuthedUser;
+  const id = c.req.param('id');
+  await ensureTransparencyEntries(c.env, user.id);
+  const device = await c.env.DB.prepare(
+    'SELECT id, pub_key FROM user_devices WHERE id = ? AND user_id = ?',
+  ).bind(id, user.id).first<{ id: string; pub_key: string }>();
+  if (!device) return c.json({ ok: true });
+  await appendTransparencyEntry(c.env, user.id, id, 'revoke', device.pub_key);
+  await c.env.DB.batch([
+    c.env.DB.prepare('DELETE FROM key_envelopes WHERE to_device = ?').bind(id),
+    c.env.DB.prepare('DELETE FROM user_devices WHERE id = ? AND user_id = ?').bind(id, user.id),
+  ]);
+  return c.json({ ok: true });
 });
 
 /** GET /auth/devices — the caller's own devices. */

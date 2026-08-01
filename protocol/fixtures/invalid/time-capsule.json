@@ -1,0 +1,14 @@
+{
+  "$schema": "../../schemas/time-capsule.schema.json",
+  "id": "1",
+  "space_id": "2",
+  "name": "",
+  "iv": "bad",
+  "salt": "bad",
+  "kdf": "plain",
+  "digest": "bad",
+  "event_from": -1,
+  "event_to": 0,
+  "size": 0,
+  "created_at": -1
+}

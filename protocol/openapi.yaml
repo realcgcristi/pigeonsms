@@ -20,6 +20,8 @@ tags:
   - name: Bridges
   - name: Portability
   - name: Templates
+  - name: Recovery
+  - name: Security
 paths:
   /.well-known/pigeon:
     get:
@@ -638,6 +640,7 @@ paths:
               properties:
                 bundle: { type: object }
                 name: { type: string, maxLength: 48 }
+                force: { type: boolean, default: false }
       responses:
         '201': { description: Imported nest and media-copy status }
   /spaces/{spaceId}/pack:
@@ -672,6 +675,119 @@ paths:
                 pack: { $ref: ./schemas/pack.schema.json }
       responses:
         '201': { description: Installed resources and one-time bot credentials }
+  /spaces/{spaceId}/time-machine/events:
+    get:
+      tags: [Recovery]
+      operationId: replayNestHistory
+      parameters:
+        - $ref: '#/components/parameters/SpaceId'
+        - name: after
+          in: query
+          schema: { type: integer, minimum: 0 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+      responses:
+        '200':
+          description: Verifiable nest event page
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events: { type: array, items: { $ref: ./schemas/time-event.schema.json } }
+                  cursor: { type: integer }
+                  latest_sequence: { type: integer }
+                  root_hash: { type: [string, 'null'] }
+                  has_more: { type: boolean }
+  /spaces/{spaceId}/time-machine/capsules:
+    parameters:
+      - $ref: '#/components/parameters/SpaceId'
+    get:
+      tags: [Recovery]
+      operationId: listNestCapsules
+      responses:
+        '200': { description: Encrypted checkpoint metadata }
+    post:
+      tags: [Recovery]
+      operationId: createNestCapsule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, ciphertext, iv, salt, kdf]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 80 }
+                ciphertext: { type: string }
+                iv: { type: string }
+                salt: { type: string }
+                kdf: { const: pbkdf2-sha256-250000 }
+      responses:
+        '201': { description: Stored encrypted checkpoint }
+  /spaces/{spaceId}/time-machine/capsules/{capsuleId}:
+    parameters:
+      - $ref: '#/components/parameters/SpaceId'
+      - name: capsuleId
+        in: path
+        required: true
+        schema: { $ref: '#/components/schemas/Id' }
+    get:
+      tags: [Recovery]
+      operationId: getNestCapsule
+      responses:
+        '200':
+          description: Encrypted checkpoint with ciphertext
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [capsule]
+                properties:
+                  capsule: { $ref: ./schemas/time-capsule.schema.json }
+    delete:
+      tags: [Recovery]
+      operationId: deleteNestCapsule
+      responses:
+        '200': { description: Checkpoint deleted }
+  /transparency/{userId}:
+    get:
+      tags: [Security]
+      security: []
+      operationId: getKeyTransparency
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { $ref: '#/components/schemas/Id' }
+      responses:
+        '200':
+          description: Device-key entries and Merkle checkpoint
+          content:
+            application/json:
+              schema: { $ref: ./schemas/transparency.schema.json }
+  /transparency/{userId}/gossip:
+    post:
+      tags: [Security]
+      operationId: gossipKeyCheckpoint
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { $ref: '#/components/schemas/Id' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tree_size, root_hash]
+              properties:
+                tree_size: { type: integer, minimum: 0 }
+                root_hash: { type: string, pattern: '^[a-f0-9]{64}$' }
+      responses:
+        '200': { description: Gossip accepted with equivocation status }
 components:
   securitySchemes:
     bearerAuth:

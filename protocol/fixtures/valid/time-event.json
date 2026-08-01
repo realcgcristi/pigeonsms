@@ -1,0 +1,13 @@
+{
+  "$schema": "../../schemas/time-event.schema.json",
+  "id": "09af038ae8ff4f6ba398568937ea4e60",
+  "space_id": "72351096507367425",
+  "sequence": 14,
+  "kind": "channel.updated",
+  "entity_id": "72351096507367426",
+  "actor_id": null,
+  "payload": { "name": "general", "kind": "text" },
+  "created_at": 1785600000000,
+  "previous_hash": null,
+  "event_hash": "c09c7c75fc4668ba7bce08df2664e53cbb7f21121340c625d96dd3a4138d85b1"
+}

@@ -1,0 +1,14 @@
+{
+  "$schema": "../../schemas/time-capsule.schema.json",
+  "id": "72351096507367428",
+  "space_id": "72351096507367425",
+  "name": "before launch",
+  "iv": "Q2hhbmdlTWVCZWZvcmU=",
+  "salt": "U2FsdGVkUGlnZW9uU2FsdA==",
+  "kdf": "pbkdf2-sha256-250000",
+  "digest": "052d794e1f9909942d003da0180541462f37046c67a9239666072ec2218cb2f4",
+  "event_from": 1,
+  "event_to": 14,
+  "size": 4096,
+  "created_at": 1785600000000
+}

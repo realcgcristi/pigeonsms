@@ -1,0 +1,10 @@
+{
+  "$schema": "../../schemas/networkless-message.schema.json",
+  "version": 2,
+  "spaceId": "not-an-id",
+  "channelId": "1",
+  "nonce": "x",
+  "author": {},
+  "content": "bad",
+  "createdAt": -1
+}

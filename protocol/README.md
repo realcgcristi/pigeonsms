@@ -61,6 +61,9 @@ Conformance profiles are additive:
 - [Compatibility lab](extensions/compatibility-lab.md)
 - [Message branches](extensions/message-branches.md)
 - [Pigeon Packs](extensions/pigeon-packs.md)
+- [Nest Time Machine](extensions/nest-time-machine.md)
+- [Networkless mode](extensions/networkless.md)
+- [Key transparency](extensions/key-transparency.md)
 
 Generate live compatibility reports and embeddable badges with:
 
@@ -69,6 +72,8 @@ npm run lab --prefix protocol/conformance
 ```
 
 The fixtures are normative. Prose and generated documentation are explanatory.
+
+Cryptographic compatibility vectors live in `vectors/` and run with the same conformance command.
 
 ## Versioning
 

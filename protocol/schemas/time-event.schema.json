@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pigeonsms.com/protocol/v1/time-event.schema.json",
+  "title": "Nest time event",
+  "type": "object",
+  "required": ["id", "space_id", "sequence", "kind", "payload", "created_at", "event_hash"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^[a-f0-9]{16,64}$" },
+    "space_id": { "type": "string", "pattern": "^[0-9]+$" },
+    "sequence": { "type": "integer", "minimum": 1 },
+    "kind": { "type": "string", "minLength": 3, "maxLength": 64 },
+    "entity_id": { "type": ["string", "null"] },
+    "actor_id": { "type": ["string", "null"] },
+    "payload": { "type": "object" },
+    "created_at": { "type": "integer", "minimum": 0 },
+    "previous_hash": { "type": ["string", "null"], "pattern": "^[a-f0-9]{64}$" },
+    "event_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+  },
+  "additionalProperties": true
+}

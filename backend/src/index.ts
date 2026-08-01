@@ -28,6 +28,8 @@ import interactions, { expireStaleInteractions } from './routes/interactions';
 import bridges from './routes/bridges';
 import packs from './routes/packs';
 import migrations from './routes/migrations';
+import timeMachine from './routes/timeMachine';
+import transparency from './routes/transparency';
 import { requireAuth } from './middleware/auth';
 import { sendPush } from './lib/fcm';
 import { sendWebPush, webPushTargets } from './lib/webpush';
@@ -80,7 +82,7 @@ app.get('/.well-known/pigeon', (c) => {
     protocol: { name: 'open-pigeon', versions: ['1.0'], preferred: '1.0' },
     server: {
       name: c.env.SERVER_NAME ?? 'pigeonsms',
-      version: c.env.SERVER_VERSION ?? '3.0.0-beta',
+      version: c.env.SERVER_VERSION ?? '3.0.0-rc.1',
       source: 'https://github.com/realcgcristi/pigeonsms',
     },
     endpoints: {
@@ -96,6 +98,7 @@ app.get('/.well-known/pigeon', (c) => {
       'channel-categories', 'jump-to-unread',
       'local-first-sync', 'message-branches', 'pigeon-packs',
       'space-migration', 'universal-bridges', 'e2ee-bots',
+      'nest-time-machine', 'networkless-mode', 'key-transparency',
     ],
     limits: { message_length: 8000, upload_bytes: 524_288_000 },
   });
@@ -149,6 +152,8 @@ app.route('/', interactions);
 app.route('/', bridges);
 app.route('/', packs);
 app.route('/', migrations);
+app.route('/', timeMachine);
+app.route('/', transparency);
 app.route('/admin', admin);
 
 // WebSocket gateway: one socket per device, owned by the user's gateway DO.

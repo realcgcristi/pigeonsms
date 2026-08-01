@@ -115,8 +115,9 @@ migrations.post('/spaces/migrate', requireAuth, async (c) => {
   if (user.isBot) throw new ApiError(403, 'forbidden', 'bots cannot import nests');
   const body = await readJsonBody(c);
   const bundle = parseBundle(body['bundle']);
+  const force = body['force'] === true;
   const digest = await sha256Hex(JSON.stringify(bundle));
-  const previous = await c.env.DB.prepare(
+  const previous = force ? null : await c.env.DB.prepare(
     'SELECT space_id FROM migration_imports WHERE imported_by = ? AND digest = ?',
   ).bind(user.id, digest).first<{ space_id: string }>();
   if (previous) return c.json({ ok: true, duplicate: true, space_id: previous.space_id });

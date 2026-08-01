@@ -1,0 +1,11 @@
+{
+  "$schema": "../../schemas/transparency.schema.json",
+  "entries": [],
+  "checkpoint": {
+    "tree_size": 0,
+    "root_hash": "dcd24b9a63c43ae16adc78ce26856ba2fbb21187b0e2b8810cfa93706b32fea1",
+    "latest_hash": null,
+    "generated_at": 1785600000000
+  },
+  "active_devices": []
+}

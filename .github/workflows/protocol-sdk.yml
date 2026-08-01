@@ -16,8 +16,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: conformance fixtures
-        run: node --test protocol/conformance/fixtures.test.mjs
+      - name: conformance suite
+        run: npm test --prefix protocol/conformance
       - name: TypeScript SDK
         working-directory: packages/sdk-typescript
         run: npm install --ignore-scripts && npm test

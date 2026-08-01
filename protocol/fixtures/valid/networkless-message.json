@@ -1,0 +1,10 @@
+{
+  "$schema": "../../schemas/networkless-message.schema.json",
+  "version": 1,
+  "spaceId": "72351096507367425",
+  "channelId": "72351096507367426",
+  "nonce": "device-a-00000001",
+  "author": { "id": "72351096507367420", "username": "pigeon" },
+  "content": "still here",
+  "createdAt": 1785600000000
+}
