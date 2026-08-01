@@ -118,6 +118,7 @@ export const useSession = create<SessionState>((set, get) => ({
       onUnauthorized(() => {
         void write(null);
         gateway.stop();
+        void import('@/store/networkless').then(({ stopNetworkless }) => stopNetworkless());
         set({ token: null, user: null, restored: true });
       });
     }
@@ -176,6 +177,8 @@ export const useSession = create<SessionState>((set, get) => ({
     }
     await write(null);
     gateway.stop();
+    const { stopNetworkless } = await import('@/store/networkless');
+    stopNetworkless();
     set({ token: null, user: null, error: null, totpRequired: false });
   },
 

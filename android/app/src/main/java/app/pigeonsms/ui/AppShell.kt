@@ -41,6 +41,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.Badge
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -150,6 +151,12 @@ fun AppShell(session: LocalSession) {
     // the backend. Both are no-ops when Firebase isn't configured (no
     // google-services.json) — the app works fine without push.
     val appContext = androidx.compose.ui.platform.LocalContext.current
+    val container = remember(appContext) {
+        (appContext.applicationContext as app.pigeonsms.PigeonApp).container
+    }
+    DisposableEffect(session.userId) {
+        onDispose { container.networklessManager.stop() }
+    }
     val notifPermission = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
     ) { }
@@ -300,7 +307,10 @@ fun AppShell(session: LocalSession) {
                     onNetworkless = { nav.navigate("networkless") },
                     onAbout = { nav.navigate("about") },
                     onBots = { nav.navigate("bots") },
-                    onSignOut = { app.viewModelScopeSignOut() },
+                    onSignOut = {
+                        container.networklessManager.stop()
+                        app.viewModelScopeSignOut()
+                    },
                 )
             }
             composable(
@@ -376,7 +386,6 @@ fun AppShell(session: LocalSession) {
                 )
             }
             composable("networkless") {
-                val container = (androidx.compose.ui.platform.LocalContext.current.applicationContext as app.pigeonsms.PigeonApp).container
                 NetworklessScreen(home.spaces, session, container.networklessManager, onBack = { nav.popBackStack() })
             }
             composable("timemachine/{spaceId}/{spaceName}") { entry ->

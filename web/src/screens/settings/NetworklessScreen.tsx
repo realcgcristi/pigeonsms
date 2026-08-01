@@ -1,95 +1,41 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { CloudOff, Wifi } from '@/components/icons'
 import { Button } from '@/components/ui/Button'
 import { Screen, ScreenBody, SettingsGroup, TopBar } from '@/components/ui/Layout'
 import { TextField } from '@/components/ui/TextField'
 import { useToast } from '@/components/ui/Toast'
-import { queuedMessages } from '@/lib/localFirst'
-import { NetworklessSession, type NetworklessState } from '@/lib/networkless'
-import { useChat } from '@/store/chat'
-import { useSession } from '@/store/session'
+import { useNetworkless } from '@/store/networkless'
 import { useSocial } from '@/store/social'
 import './Settings.css'
 
 export default function NetworklessScreen() {
   const navigate = useNavigate()
   const toast = useToast()
-  const user = useSession((state) => state.user)
   const spaces = useSocial((state) => state.spaces)
   const loadSpaces = useSocial((state) => state.loadSpaces)
-  const [spaceId, setSpaceId] = useState('')
+  const runtimeSpaceId = useNetworkless((state) => state.spaceId)
+  const status = useNetworkless((state) => state.status)
+  const shared = useNetworkless((state) => state.shared)
+  const offer = useNetworkless((state) => state.offer)
+  const answer = useNetworkless((state) => state.answer)
+  const startHost = useNetworkless((state) => state.host)
+  const startJoin = useNetworkless((state) => state.join)
+  const acceptAnswer = useNetworkless((state) => state.accept)
+  const stopSession = useNetworkless((state) => state.stop)
+  const [spaceId, setSpaceId] = useState(runtimeSpaceId)
   const [passphrase, setPassphrase] = useState('')
-  const [offer, setOffer] = useState('')
-  const [answer, setAnswer] = useState('')
   const [peerOffer, setPeerOffer] = useState('')
   const [peerAnswer, setPeerAnswer] = useState('')
-  const [status, setStatus] = useState<NetworklessState>('closed')
-  const [shared, setShared] = useState(0)
-  const sessionRef = useRef<NetworklessSession | null>(null)
-  const sentRef = useRef(new Set<string>())
-
-  const selected = spaces.find((space) => space.id === spaceId)
-  const channelIds = selected?.channels?.filter((channel) => channel.kind !== 'voice').map((channel) => channel.id) ?? []
 
   useEffect(() => {
     void loadSpaces()
   }, [loadSpaces])
 
   useEffect(() => {
-    if (!spaceId && spaces[0]) setSpaceId(spaces[0].id)
-  }, [spaceId, spaces])
-
-  useEffect(() => () => sessionRef.current?.close(), [])
-
-  const drain = useCallback(async (session = sessionRef.current) => {
-    if (!session || !user) return
-    const allowed = new Set(channelIds)
-    const queued = await queuedMessages(user.id)
-    for (const item of queued) {
-      if (!allowed.has(item.channelId) || item.options.attachment || sentRef.current.has(item.nonce)) continue
-      const nearby = {
-        version: 1 as const,
-        spaceId,
-        channelId: item.channelId,
-        nonce: item.nonce,
-        author: {
-          id: user.id,
-          username: user.username,
-          display_name: user.display_name,
-          avatar_key: user.avatar_key,
-          accent: user.accent,
-        },
-        content: item.content,
-        createdAt: item.createdAt,
-      }
-      if (await session.send(nearby)) {
-        sentRef.current.add(item.nonce)
-        useChat.getState().receiveNearby(nearby)
-        setShared((count) => count + 1)
-      }
-    }
-  }, [channelIds, spaceId, user])
-
-  useEffect(() => {
-    const handle = () => void drain()
-    window.addEventListener('pigeon:outbox', handle)
-    return () => window.removeEventListener('pigeon:outbox', handle)
-  }, [drain])
-
-  const attach = (session: NetworklessSession) => {
-    sessionRef.current?.close()
-    sessionRef.current = session
-    sentRef.current.clear()
-    session.onState((next) => {
-      setStatus(next)
-      if (next === 'connected') void drain(session)
-    })
-    session.onMessage((message) => {
-      useChat.getState().receiveNearby(message)
-      setShared((count) => count + 1)
-    })
-  }
+    if (runtimeSpaceId) setSpaceId(runtimeSpaceId)
+    else if (!spaceId && spaces[0]) setSpaceId(spaces[0].id)
+  }, [runtimeSpaceId, spaceId, spaces])
 
   const validate = () => {
     if (!spaceId) return 'choose a nest first'
@@ -102,11 +48,7 @@ export default function NetworklessScreen() {
     const error = validate()
     if (error) return toast.error(error)
     try {
-      const created = await NetworklessSession.host(spaceId, passphrase)
-      attach(created.session)
-      setOffer(created.offer)
-      setAnswer('')
-      setStatus('pairing')
+      await startHost(spaceId, passphrase)
     } catch (reason) {
       toast.error(reason instanceof Error ? reason.message : 'could not open nearby mode')
     }
@@ -116,10 +58,7 @@ export default function NetworklessScreen() {
     const error = validate()
     if (error) return toast.error(error)
     try {
-      const created = await NetworklessSession.join(spaceId, passphrase, peerOffer)
-      attach(created.session)
-      setAnswer(created.answer)
-      setStatus('pairing')
+      await startJoin(spaceId, passphrase, peerOffer)
     } catch (reason) {
       toast.error(reason instanceof Error ? reason.message : 'that offer code is not valid')
     }
@@ -127,18 +66,14 @@ export default function NetworklessScreen() {
 
   const accept = async () => {
     try {
-      await sessionRef.current?.accept(peerAnswer)
+      await acceptAnswer(peerAnswer)
     } catch {
       toast.error('that answer code is not valid')
     }
   }
 
   const stop = () => {
-    sessionRef.current?.close()
-    sessionRef.current = null
-    setStatus('closed')
-    setOffer('')
-    setAnswer('')
+    stopSession()
   }
 
   return (
