@@ -1,5 +1,12 @@
 # changelog
 
+## v3-rc1
+
+- adds nest time machine with verifiable event replay and client-encrypted restore or fork checkpoints
+- adds networkless messaging over lan, wi-fi direct and local webrtc with automatic nonce reconciliation after reconnecting
+- adds public key transparency with hash-chain checks, merkle checkpoints, local pinning and gossip conflict detection
+- ships the new flows on android, web and the tauri desktop client, plus public Open Pigeon schemas and fixtures
+
 ## v3-beta2
 
 - ships the responsive web client, encrypted local-first cache, offline outbox, branches, channel categories, pigeon packs, migration, and bridge management

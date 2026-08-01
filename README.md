@@ -64,6 +64,7 @@ it started as a "i bet i can build a messenger in a weekend" kind of idea and uh
 - the ui itself: jetpack compose, a liquid-glass look i'm a bit obsessed with, ~20 custom app icons, chat wallpapers
 - three whole UI skins you can flip between in settings: **classic** (the original), **nova** (a flatter, cleaner redesign), and **galaxy** (nova cranked up — deep space-indigo, aurora backgrounds, glow, spring physics everywhere). same app, three vibes
 - the web client works from phone to ultrawide desktop, with encrypted offline cache, queued sends, jump-to-unread, channel categories, branches, packs, migration, and bridge management
+- nest time machine, networkless nearby messaging, and key transparency work on android and web, with the same public Open Pigeon contracts
 - a native windows client lives in `desktop/` through tauri and shares the same api
 - open pigeon discovery, schemas, fixtures, compatibility checks, and official TypeScript, Kotlin, and Rust sdks live in `protocol/` and `packages/`
 
@@ -82,7 +83,7 @@ everything sits on cloudflare so there's no server bill and nothing to ssh into 
 - r2 for media blobs
 - durable objects for the realtime spine, one per user for their gateway socket, one per channel for fanout, one per call room for signaling
 - queues to push fcm notifications
-- open pigeon protocol contracts for discovery, branches, bridges, packs, migration, and encrypted bot runtimes
+- open pigeon protocol contracts for discovery, branches, bridges, packs, migration, time machine, networkless messaging, key transparency, and encrypted bot runtimes
 
 android side is pretty standard modern kotlin. compose for ui, room for the offline cache, ktor for both http and the gateway websocket, thin repository layer gluing them. it's multi-module:
 
@@ -181,7 +182,7 @@ if you find something broken, fair, open an issue and i'll probably fix it
 the short version (full thing in [ROADMAP.md](ROADMAP.md)):
 
 - **v3 beta foundation** — jump-to-unread, channel categories, public protocol discovery, compatibility fixtures, and official TypeScript, Kotlin, and Rust sdks are shipped.
-- **v3 open platform** — encrypted local-first web messaging, expiring message branches, pigeon packs, whole-nest migration, scoped Matrix/Discord/IRC/Slack/email bridges, encrypted bot runtimes, and the public compatibility lab are shipped behind Open Pigeon contracts.
+- **v3 release candidate** — encrypted local-first messaging, networkless nearby delivery, nest time machine, key transparency, expiring branches, pigeon packs, whole-nest migration, scoped bridges, encrypted bot runtimes, and the public compatibility lab are shipped behind Open Pigeon contracts.
 - **next gates** — reliable calls with TURN, signed desktop releases, offline conflict tests, moderation workflows, and production sdk publishing.
 - **someday** — federation between self-hosted instances and a broader bot automation api.
 
