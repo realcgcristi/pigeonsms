@@ -12,6 +12,13 @@
 [![web app](https://img.shields.io/badge/web_app-live-f68263?style=flat-square&logo=googlechrome&logoColor=white)](https://pigeonsms.aldi.best)
 [![self-hostable](https://img.shields.io/badge/self--hostable-one_command-22c55e?style=flat-square&logo=docker&logoColor=white)](docs/content/selfhost.md)
 
+[![contributors](https://img.shields.io/github/contributors/realcgcristi/pigeonsms?style=flat-square&label=contributors&color=6d5dfc)](https://github.com/realcgcristi/pigeonsms/graphs/contributors)
+[![web status](https://img.shields.io/website?url=https%3A%2F%2Fpigeonsms.aldi.best&style=flat-square&label=web&up_message=online&down_message=offline)](https://pigeonsms.aldi.best)
+[![api status](https://img.shields.io/website?url=https%3A%2F%2Fapi.pigeonsms.aldi.best%2Fhealth&style=flat-square&label=api&up_message=online&down_message=offline)](https://api.pigeonsms.aldi.best/health)
+[![prs welcome](https://img.shields.io/badge/prs-welcome-22c55e?style=flat-square&logo=github&logoColor=white)](CONTRIBUTING.md)
+[![privacy](https://img.shields.io/badge/privacy-no_ads_%C2%B7_no_tracking-f68263?style=flat-square)](SECURITY.md)
+[![made in romania](https://img.shields.io/badge/made_in-romania-002b7f?style=flat-square)](https://github.com/realcgcristi)
+
 [![cloudflare](https://img.shields.io/badge/cloudflare-workers-f38020?style=flat-square&logo=cloudflare&logoColor=white)](https://developers.cloudflare.com/workers/)
 [![tauri](https://img.shields.io/badge/tauri-2-24c8db?style=flat-square&logo=tauri&logoColor=white)](https://v2.tauri.app/)
 [![kotlin](https://img.shields.io/badge/kotlin-2-7f52ff?style=flat-square&logo=kotlin&logoColor=white)](https://kotlinlang.org/)
