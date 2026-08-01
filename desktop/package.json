@@ -8,7 +8,7 @@
     "check": "cargo check --manifest-path src-tauri/Cargo.toml",
     "build:app": "tauri build --no-bundle",
     "build": "tauri build",
-    "build:windows": "tauri build --bundles nsis,msi",
+    "build:windows": "tauri build --bundles nsis",
     "icon": "tauri icon ../web/public/icon-512.png"
   },
   "devDependencies": {
