@@ -4,6 +4,20 @@
 [![protocol + sdks](https://github.com/realcgcristi/pigeonsms/actions/workflows/protocol-sdk.yml/badge.svg)](https://github.com/realcgcristi/pigeonsms/actions/workflows/protocol-sdk.yml)
 [![license](https://img.shields.io/badge/license-gpl--3.0-blue.svg)](LICENSE)
 
+[![stable release](https://img.shields.io/github/v/release/realcgcristi/pigeonsms?sort=semver&display_name=tag&style=flat-square&label=stable&color=6d5dfc)](https://github.com/realcgcristi/pigeonsms/releases/latest)
+[![dev release](https://img.shields.io/github/v/release/realcgcristi/pigeonsms?include_prereleases&display_name=tag&style=flat-square&label=dev&color=a97bff)](https://github.com/realcgcristi/pigeonsms/releases)
+[![downloads](https://img.shields.io/github/downloads/realcgcristi/pigeonsms/total?style=flat-square&label=downloads&color=ff8e72)](https://github.com/realcgcristi/pigeonsms/releases)
+[![android](https://img.shields.io/badge/android-ready-3ddc84?style=flat-square&logo=android&logoColor=white)](https://github.com/realcgcristi/pigeonsms/releases)
+[![windows](https://img.shields.io/badge/windows-native-0078d4?style=flat-square&logo=windows11&logoColor=white)](https://github.com/realcgcristi/pigeonsms/releases)
+[![web app](https://img.shields.io/badge/web_app-live-f68263?style=flat-square&logo=googlechrome&logoColor=white)](https://pigeonsms.aldi.best)
+[![self-hostable](https://img.shields.io/badge/self--hostable-one_command-22c55e?style=flat-square&logo=docker&logoColor=white)](docs/content/selfhost.md)
+
+[![cloudflare](https://img.shields.io/badge/cloudflare-workers-f38020?style=flat-square&logo=cloudflare&logoColor=white)](https://developers.cloudflare.com/workers/)
+[![tauri](https://img.shields.io/badge/tauri-2-24c8db?style=flat-square&logo=tauri&logoColor=white)](https://v2.tauri.app/)
+[![kotlin](https://img.shields.io/badge/kotlin-2-7f52ff?style=flat-square&logo=kotlin&logoColor=white)](https://kotlinlang.org/)
+[![typescript](https://img.shields.io/badge/typescript-5-3178c6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![rust](https://img.shields.io/badge/rust-stable-000000?style=flat-square&logo=rust&logoColor=white)](https://www.rust-lang.org/)
+
 so this is pigeonsms, a chat app i've been chipping away at for the past couple weeks. android app plus a backend that lives entirely on cloudflare. dms, group servers (i call them "nests"), the whole thing
 
 it's a passion project, built with privacy in mind — a way for friend groups to chat on a platform they actually control. you can self-host the whole thing (it's all here, gpl'd), or just use the instance i already run at pigeonsms.aldi.best. no ads, no tracking, no data mining, no premium tier gating features behind a paywall. it's yours.
