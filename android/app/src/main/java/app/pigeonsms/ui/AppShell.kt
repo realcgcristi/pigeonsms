@@ -92,6 +92,9 @@ import app.pigeonsms.ui.settings.SecurityScreen
 import app.pigeonsms.ui.settings.SettingsScreen
 import app.pigeonsms.ui.settings.NestSettingsScreen
 import app.pigeonsms.ui.settings.NotificationSettingsScreen
+import app.pigeonsms.ui.settings.KeyTransparencyScreen
+import app.pigeonsms.ui.settings.NetworklessScreen
+import app.pigeonsms.ui.settings.NestTimeMachineScreen
 import app.pigeonsms.ui.forum.ForumScreen
 import app.pigeonsms.ui.search.SearchScreen
 import app.pigeonsms.ui.threads.ThreadsScreen
@@ -293,6 +296,8 @@ fun AppShell(session: LocalSession) {
                     onPrivacy = { nav.navigate("privacy") },
                     onNotifications = { nav.navigate("notifications") },
                     onNests = { nav.navigate("nestsettings") },
+                    onKeyTransparency = { nav.navigate("keytransparency") },
+                    onNetworkless = { nav.navigate("networkless") },
                     onAbout = { nav.navigate("about") },
                     onBots = { nav.navigate("bots") },
                     onSignOut = { app.viewModelScopeSignOut() },
@@ -335,7 +340,12 @@ fun AppShell(session: LocalSession) {
             composable("profile/{id}") { entry ->
                 CompositionLocalProvider(LocalNavAnimatedScope provides this) {
                     val profileId = entry.arguments?.getString("id") ?: session.userId
-                    ProfileScreen(profileId, onBack = { nav.popBackStack() }, isSelf = profileId == session.userId)
+                    ProfileScreen(
+                        profileId,
+                        onBack = { nav.popBackStack() },
+                        isSelf = profileId == session.userId,
+                        onKeyTransparency = { nav.navigate("keytransparency/$profileId") },
+                    )
                 }
             }
             composable("editprofile") { EditProfileScreen(selfProfile, onBack = { nav.popBackStack() }) }
@@ -349,7 +359,39 @@ fun AppShell(session: LocalSession) {
             }
             composable("privacy") { PrivacyScreen(username = session.username, onBack = { nav.popBackStack() }, onBlocked = { nav.navigate("blocked") }) }
             composable("notifications") { NotificationSettingsScreen(onBack = { nav.popBackStack() }) }
-            composable("nestsettings") { NestSettingsScreen(app, onBack = { nav.popBackStack() }) }
+            composable("nestsettings") {
+                NestSettingsScreen(
+                    app,
+                    onBack = { nav.popBackStack() },
+                    onTimeMachine = { space -> nav.navigate("timemachine/${space.id}/${enc(space.name)}") },
+                )
+            }
+            composable("keytransparency") {
+                KeyTransparencyScreen(userId = session.userId, onBack = { nav.popBackStack() })
+            }
+            composable("keytransparency/{userId}") { entry ->
+                KeyTransparencyScreen(
+                    userId = entry.arguments?.getString("userId") ?: session.userId,
+                    onBack = { nav.popBackStack() },
+                )
+            }
+            composable("networkless") {
+                val container = (androidx.compose.ui.platform.LocalContext.current.applicationContext as app.pigeonsms.PigeonApp).container
+                NetworklessScreen(home.spaces, session, container.networklessManager, onBack = { nav.popBackStack() })
+            }
+            composable("timemachine/{spaceId}/{spaceName}") { entry ->
+                val spaceId = entry.arguments?.getString("spaceId") ?: return@composable
+                val spaceName = entry.arguments?.getString("spaceName") ?: "bird nest"
+                NestTimeMachineScreen(
+                    spaceId = spaceId,
+                    spaceName = spaceName,
+                    onBack = { nav.popBackStack() },
+                    onImported = {
+                        app.refreshSpaces()
+                        nav.navigate("nestsettings") { launchSingleTop = true }
+                    },
+                )
+            }
             // 2.9.5: per-nest custom emoji + stickers. Reachable from a nest's
             // channel list; the API enforces MANAGE_EMOJI regardless of who gets here.
             // 2.9.5: threads in text channels, roles/permissions.

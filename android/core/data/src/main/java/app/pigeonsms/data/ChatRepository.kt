@@ -36,6 +36,14 @@ sealed interface PinEvent {
     data class SuperPinRemoved(override val channelId: String) : PinEvent
 }
 
+data class NearbyOutbound(
+    val channelId: String,
+    val nonce: String,
+    val content: String,
+    val createdAt: Long,
+    val hasAttachment: Boolean,
+)
+
 /**
  * Offline-first messaging. Room is the source of truth for the chat screen;
  * network + gateway feed it. Sends go through the outbox for reliable delivery.
@@ -116,6 +124,8 @@ class ChatRepository(
     /** Pin state isn't cached in Room — gateway pin events fan out to open chat screens here. */
     private val _pinEvents = kotlinx.coroutines.flow.MutableSharedFlow<PinEvent>(extraBufferCapacity = 16)
     val pinEvents: kotlinx.coroutines.flow.SharedFlow<PinEvent> = _pinEvents
+    private val _networklessOutbox = kotlinx.coroutines.flow.MutableSharedFlow<NearbyOutbound>(extraBufferCapacity = 64)
+    val networklessOutbox: kotlinx.coroutines.flow.SharedFlow<NearbyOutbound> = _networklessOutbox
 
     fun applyPinEvent(event: PinEvent) { _pinEvents.tryEmit(event) }
 
@@ -128,6 +138,56 @@ class ChatRepository(
     }
 
     fun mediaUrl(key: String) = api.mediaUrl(key)
+
+    suspend fun networklessPending(channelIds: Set<String>): List<NearbyOutbound> = db.outbox().all()
+        .filter { it.channelId in channelIds }
+        .map { item ->
+            NearbyOutbound(
+                channelId = item.channelId,
+                nonce = item.nonce,
+                content = item.content,
+                createdAt = item.createdAt,
+                hasAttachment = item.attachmentKey != null,
+            )
+        }
+
+    suspend fun markNearby(nonce: String) {
+        val message = db.messages().byNonce(nonce) ?: return
+        if (message.state != "SENT") db.messages().setState(nonce, "NEARBY")
+    }
+
+    suspend fun applyNearby(message: NetworklessMessage) {
+        val existing = db.messages().byNonce(message.nonce)
+        if (existing != null) {
+            if (existing.state != "SENT") db.messages().setState(message.nonce, "NEARBY")
+            return
+        }
+        db.messages().upsertOne(
+            MessageEntity(
+                id = "nearby-${message.nonce}",
+                channelId = message.channelId,
+                seq = pendingSeq.incrementAndGet(),
+                authorId = message.author.id,
+                authorName = message.author.display_name ?: message.author.username,
+                authorAvatar = message.author.avatar_key,
+                authorAccent = message.author.accent,
+                content = message.content,
+                replyTo = null,
+                nonce = message.nonce,
+                attachmentKey = null,
+                attachmentName = null,
+                attachmentType = null,
+                attachmentSize = null,
+                createdAt = message.createdAt,
+                editedAt = null,
+                deleted = false,
+                reactionsJson = "[]",
+                revisionsJson = null,
+                metadataJson = "{\"networkless\":true}",
+                state = "NEARBY",
+            )
+        )
+    }
 
     fun stream(channelId: String): Flow<List<MessageEntity>> =
         db.messages().stream(channelId).map { list -> list.distinctBy { it.id } }
@@ -332,6 +392,7 @@ class ChatRepository(
         )
         pendingSendMeta[nonce] = SendMeta(ttl = ttl, sendAt = sendAt, encrypted = encrypted)
         db.outbox().add(OutboxEntity(nonce, channelId, wireContent, replyTo, attachment?.key, attachment?.name, attachment?.type, attachment?.size, now))
+        _networklessOutbox.tryEmit(NearbyOutbound(channelId, nonce, content, now, attachment != null))
     }
 
     suspend fun flushOutbox(channelId: String? = null) = flushMutex.withLock {

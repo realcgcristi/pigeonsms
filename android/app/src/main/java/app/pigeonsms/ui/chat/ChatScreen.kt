@@ -1989,6 +1989,12 @@ private fun MessageMeta(message: MessageEntity, showSentTime: Boolean, onRetry: 
             color = MaterialTheme.colorScheme.error,
             style = MaterialTheme.typography.labelSmall,
         )
+        "NEARBY" -> Text(
+            "shared nearby · awaiting internet",
+            modifier = Modifier.padding(horizontal = Spacing.s, vertical = Spacing.xxs),
+            color = MaterialTheme.colorScheme.primary,
+            style = MaterialTheme.typography.labelSmall,
+        )
         else -> if (showSentTime || seen) {
             val nova = LocalExperimentalRedesign.current
             Row(

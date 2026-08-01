@@ -26,6 +26,7 @@ import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Groups
+import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Tag
 import androidx.compose.material.icons.outlined.VolumeUp
 import androidx.compose.material3.AlertDialog
@@ -75,7 +76,7 @@ import coil.compose.AsyncImage
  * helpers.
  */
 @Composable
-fun NestSettingsScreen(app: AppViewModel, onBack: () -> Unit) {
+fun NestSettingsScreen(app: AppViewModel, onBack: () -> Unit, onTimeMachine: (SpaceDto) -> Unit) {
     val vm: SpacesViewModel = pigeonVm { c, _ -> SpacesViewModel(c.socialRepository, c.api) }
     val home by app.home.collectAsState()
     val ui by vm.ui.collectAsState()
@@ -148,6 +149,21 @@ fun NestSettingsScreen(app: AppViewModel, onBack: () -> Unit) {
                                         "leave ${space.name}",
                                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
+                                }
+                            }
+                        }
+
+                        if (owner) {
+                            RowDivider()
+                            Row(
+                                Modifier.fillMaxWidth().clickable { onTimeMachine(space) }
+                                    .heightIn(min = 56.dp).padding(horizontal = Spacing.l),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(Icons.Outlined.History, null, tint = MaterialTheme.colorScheme.primary)
+                                Column(Modifier.padding(start = Spacing.m)) {
+                                    Text("nest time machine", color = MaterialTheme.colorScheme.onSurface)
+                                    Text("encrypted replay, restore and forks", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }
                         }

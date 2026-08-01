@@ -309,6 +309,50 @@ class PigeonApi(
     suspend fun leaveSpace(spaceId: String) { client.delete("$baseUrl/spaces/$spaceId/members/me") { auth() }.unwrap<OkResponse>() }
     suspend fun deleteSpace(spaceId: String) { client.delete("$baseUrl/spaces/$spaceId") { auth() }.unwrap<OkResponse>() }
 
+    suspend fun exportSpaceMigration(spaceId: String) =
+        client.get("$baseUrl/spaces/$spaceId/migration") { auth() }.unwrap<MigrationExportResponse>()
+
+    suspend fun importSpaceMigration(bundle: JsonObject, name: String? = null, force: Boolean = false) =
+        client.post("$baseUrl/spaces/migrate") {
+            auth(); contentType(ContentType.Application.Json)
+            setBody(buildJsonObject {
+                put("bundle", bundle)
+                put("force", force)
+                if (!name.isNullOrBlank()) put("name", name)
+            })
+        }.unwrap<MigrationImportResponse>()
+
+    suspend fun timeEvents(spaceId: String, after: Long = 0, limit: Int = 500) =
+        client.get("$baseUrl/spaces/$spaceId/time-machine/events?after=$after&limit=$limit") { auth() }
+            .unwrap<TimeEventsResponse>()
+
+    suspend fun timeCapsules(spaceId: String) =
+        client.get("$baseUrl/spaces/$spaceId/time-machine/capsules") { auth() }
+            .unwrap<TimeCapsulesResponse>().capsules
+
+    suspend fun createTimeCapsule(
+        spaceId: String,
+        name: String,
+        ciphertext: String,
+        iv: String,
+        salt: String,
+        kdf: String,
+    ) = client.post("$baseUrl/spaces/$spaceId/time-machine/capsules") {
+        auth(); contentType(ContentType.Application.Json)
+        setBody(buildJsonObject {
+            put("name", name); put("ciphertext", ciphertext); put("iv", iv)
+            put("salt", salt); put("kdf", kdf)
+        })
+    }.unwrap<TimeCapsuleResponse>().capsule
+
+    suspend fun timeCapsule(spaceId: String, capsuleId: String) =
+        client.get("$baseUrl/spaces/$spaceId/time-machine/capsules/$capsuleId") { auth() }
+            .unwrap<TimeCapsuleResponse>().capsule
+
+    suspend fun deleteTimeCapsule(spaceId: String, capsuleId: String) {
+        client.delete("$baseUrl/spaces/$spaceId/time-machine/capsules/$capsuleId") { auth() }.unwrap<OkResponse>()
+    }
+
     // --- forums (forum-kind channels only; the plain message endpoints 400 there) ---
     /** sort is one of "active" (default), "recent", "oldest". tag filters by tag id or name. */
     suspend fun forumPosts(channelId: String, sort: String = "active", tag: String? = null) =
@@ -407,6 +451,17 @@ class PigeonApi(
     suspend fun myDevices() = client.get("$baseUrl/auth/devices") { auth() }.unwrap<DevicesResponse>().devices
     /** Another user's device pub keys — only when a mutual DM/friend exists (403 otherwise). */
     suspend fun userDevices(userId: String) = client.get("$baseUrl/users/$userId/devices") { auth() }.unwrap<DevicesResponse>().devices
+    suspend fun transparency(userId: String) =
+        client.get("$baseUrl/transparency/$userId").unwrap<TransparencyResponse>()
+
+    suspend fun gossipTransparency(userId: String, checkpoint: TransparencyCheckpointDto) =
+        client.post("$baseUrl/transparency/$userId/gossip") {
+            auth(); contentType(ContentType.Application.Json)
+            setBody(buildJsonObject {
+                put("tree_size", checkpoint.tree_size)
+                put("root_hash", checkpoint.root_hash)
+            })
+        }.unwrap<TransparencyGossipResponse>()
     /** Password-derived encrypted key backup for multi-device recovery; null when none stored. */
     suspend fun getKeyBackup() = client.get("$baseUrl/auth/key-backup") { auth() }.unwrap<KeyBackupResponse>().backup
     suspend fun putKeyBackup(blob: String, salt: String, params: String) {

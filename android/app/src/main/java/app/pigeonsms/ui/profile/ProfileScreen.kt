@@ -46,6 +46,7 @@ import androidx.compose.material.icons.outlined.AlternateEmail
 import androidx.compose.material.icons.outlined.CalendarToday
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material3.AlertDialog
@@ -128,7 +129,7 @@ private const val MAX_AVATAR_BYTES = 8 * 1024 * 1024
 private const val MAX_BANNER_BYTES = 16 * 1024 * 1024
 
 @Composable
-fun ProfileScreen(userId: String, onBack: () -> Unit, isSelf: Boolean = false) {
+fun ProfileScreen(userId: String, onBack: () -> Unit, isSelf: Boolean = false, onKeyTransparency: () -> Unit) {
     val vm: ProfileViewModel = pigeonVm(key = "profile-$userId") { c, _ -> ProfileViewModel(c.socialRepository, userId) }
     val ui by vm.ui.collectAsState()
 
@@ -171,6 +172,17 @@ fun ProfileScreen(userId: String, onBack: () -> Unit, isSelf: Boolean = false) {
             ) {
                 Text(if (nicknames[userId].isNullOrBlank()) "add nickname" else "edit nickname")
             }
+        }
+
+        if (ui.profile != null) {
+            ExtendedFloatingActionButton(
+                onClick = onKeyTransparency,
+                modifier = Modifier.align(Alignment.BottomStart)
+                    .navigationBarsPadding()
+                    .padding(Spacing.l),
+                icon = { Icon(Icons.Outlined.Key, null) },
+                text = { Text("verify keys") },
+            )
         }
     }
 

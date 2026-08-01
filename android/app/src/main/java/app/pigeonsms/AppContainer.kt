@@ -6,6 +6,7 @@ import app.pigeonsms.data.ChatRepository
 import app.pigeonsms.data.SessionStore
 import app.pigeonsms.data.SocialRepository
 import app.pigeonsms.data.ThemeStore
+import app.pigeonsms.data.NetworklessManager
 import app.pigeonsms.data.e2ee.DefaultE2eeManager
 import app.pigeonsms.data.e2ee.E2eeManager
 import app.pigeonsms.db.PigeonDatabase
@@ -42,6 +43,7 @@ class AppContainer(context: Context) {
      */
     val e2eeManager: E2eeManager = DefaultE2eeManager.create(context.applicationContext, api, db)
     val chatRepository = ChatRepository(api, db, e2eeManager)
+    val networklessManager = NetworklessManager(context.applicationContext, chatRepository)
     val gateway = Gateway(api, appScope, tokenProvider = { sessionStore.session.first()?.token })
 
     @Volatile private var deviceBootstrapped = false

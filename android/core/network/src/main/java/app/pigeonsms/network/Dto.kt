@@ -2,6 +2,7 @@ package app.pigeonsms.network
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 
 @Serializable
 data class ApiUser(
@@ -683,4 +684,95 @@ data class InvitePreviewResponse(
     val valid: Boolean = false,
     val space: InvitePreviewSpaceDto? = null,
     val already_member: Boolean = false,
+)
+
+@Serializable
+data class MigrationExportResponse(
+    val bundle: JsonObject,
+    val digest: String = "",
+)
+
+@Serializable
+data class MigrationImportResponse(
+    val ok: Boolean = true,
+    val space_id: String,
+    val imported: Map<String, Int> = emptyMap(),
+)
+
+@Serializable
+data class TimeEventDto(
+    val id: String,
+    val space_id: String,
+    val sequence: Long,
+    val kind: String,
+    val entity_id: String? = null,
+    val actor_id: String? = null,
+    val payload: JsonObject = JsonObject(emptyMap()),
+    val created_at: Long,
+    val previous_hash: String? = null,
+    val event_hash: String,
+)
+
+@Serializable
+data class TimeEventsResponse(
+    val events: List<TimeEventDto> = emptyList(),
+    val cursor: Long = 0,
+    val latest_sequence: Long = 0,
+    val root_hash: String? = null,
+    val has_more: Boolean = false,
+)
+
+@Serializable
+data class TimeCapsuleDto(
+    val id: String,
+    val space_id: String,
+    val created_by: String,
+    val name: String,
+    val iv: String,
+    val salt: String,
+    val kdf: String,
+    val digest: String,
+    val event_from: Long = 0,
+    val event_to: Long = 0,
+    val size: Long = 0,
+    val created_at: Long = 0,
+    val ciphertext: String? = null,
+)
+
+@Serializable data class TimeCapsulesResponse(val capsules: List<TimeCapsuleDto> = emptyList())
+@Serializable data class TimeCapsuleResponse(val capsule: TimeCapsuleDto)
+
+@Serializable
+data class TransparencyEntryDto(
+    val id: String,
+    val user_id: String,
+    val device_id: String,
+    val action: String,
+    val public_key: String? = null,
+    val previous_hash: String? = null,
+    val entry_hash: String,
+    val created_at: Long,
+)
+
+@Serializable
+data class TransparencyCheckpointDto(
+    val tree_size: Int,
+    val root_hash: String,
+    val latest_hash: String? = null,
+    val generated_at: Long = 0,
+)
+
+@Serializable
+data class TransparencyResponse(
+    val entries: List<TransparencyEntryDto> = emptyList(),
+    val checkpoint: TransparencyCheckpointDto,
+    val active_devices: List<TransparencyDeviceDto> = emptyList(),
+)
+
+@Serializable data class TransparencyDeviceDto(val device_id: String, val public_key: String)
+@Serializable data class TransparencyRootDto(val root_hash: String, val observers: Int = 0)
+@Serializable data class TransparencyGossipResponse(
+    val ok: Boolean = true,
+    val conflict: Boolean = false,
+    val roots: List<TransparencyRootDto> = emptyList(),
 )

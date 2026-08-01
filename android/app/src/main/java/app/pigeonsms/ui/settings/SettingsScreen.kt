@@ -31,6 +31,7 @@ import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.SmartToy
 import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.PersonAdd
@@ -39,6 +40,7 @@ import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Groups
 import androidx.compose.material.icons.outlined.Forum
+import androidx.compose.material.icons.outlined.WifiOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -123,6 +125,8 @@ fun SettingsScreen(
     onPrivacy: () -> Unit,
     onNotifications: () -> Unit,
     onNests: () -> Unit,
+    onKeyTransparency: () -> Unit,
+    onNetworkless: () -> Unit,
     onAbout: () -> Unit,
     onBots: () -> Unit = {},
     onSignOut: () -> Unit,
@@ -192,10 +196,14 @@ fun SettingsScreen(
                 MenuRow(Icons.Outlined.History, "login history", "recent sign-ins", onHistory)
                 RowDivider()
                 MenuRow(Icons.Outlined.Lock, "two-factor auth", "extra account security", onSecurity)
+                RowDivider()
+                MenuRow(Icons.Outlined.Key, "key transparency", "verify the public device-key log", onKeyTransparency)
             }
 
             Group("app")
             GroupCard {
+                MenuRow(Icons.Outlined.WifiOff, "networkless mode", "encrypted messaging over LAN and Wi-Fi Direct", onNetworkless)
+                RowDivider()
                 MenuRow(Icons.Outlined.SmartToy, "bots", "slash commands for your nests", onBots)
                 RowDivider()
                 MenuRow(Icons.Outlined.Info, "about", "version, creator, updates", onAbout)
