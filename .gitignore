@@ -5,6 +5,7 @@ dist/
 build/
 .gradle/
 .wrangler/
+.d1-*/
 .env
 .env.*
 *.keystore

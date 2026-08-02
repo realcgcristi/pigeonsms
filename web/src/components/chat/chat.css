@@ -112,6 +112,8 @@
 .msg { display: flex; gap: var(--sp-s); padding: 1px var(--sp-s); max-width: 100%; }
 .chat__message-anchor {
   border-radius: var(--r-button);
+  content-visibility: auto;
+  contain-intrinsic-size: auto 72px;
   transition: background 180ms ease, box-shadow 180ms ease;
 }
 .chat__message-anchor--highlight {

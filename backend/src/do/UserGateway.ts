@@ -22,6 +22,11 @@ const SINCE_TIMESTAMP_THRESHOLD = 1_000_000_000_000; // 2001-09-09 in ms
  *  the buffer once per channel). If we would exceed it, we stop replaying and
  *  tell the client to backfill from D1 instead (see `resume` frame below). */
 const MAX_REPLAY_EVENTS = REPLAY_BUFFER_SIZE;
+const MAX_CONNECTIONS_PER_USER = 32;
+const MAX_NOTIFY_BYTES = 256 * 1024;
+const MAX_CLIENT_FRAME_BYTES = 1024;
+const MAX_RESUME_BYTES = 32 * 1024;
+const MAX_RESUME_CHANNELS = 256;
 
 /** A per-channel resume cursor map the client may send on connect: the highest
  *  message `seq` it has durably applied for each channel. We replay buffered
@@ -53,8 +58,8 @@ function channelSeqOf(payload: string): { channelId: string; seq: number } | nul
 /** Parse the optional `?resume=` query value: a base64url- or plain-encoded JSON
  *  object of `{ [channelId]: lastSeq }`. Malformed input yields null (no resume),
  *  never an error — resume is strictly additive and must never break connect. */
-function parseResumeCursors(raw: string | null): ResumeCursors | null {
-  if (!raw) return null;
+export function parseResumeCursors(raw: string | null): ResumeCursors | null {
+  if (!raw || raw.length > MAX_RESUME_BYTES) return null;
   let text = raw;
   // Accept a base64(url) blob too, since a cursor map can grow past what fits
   // comfortably in a bare query param; fall back to treating it as raw JSON.
@@ -70,9 +75,19 @@ function parseResumeCursors(raw: string | null): ResumeCursors | null {
     return null;
   }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
+  const entries = Object.entries(parsed as Record<string, unknown>);
+  if (entries.length > MAX_RESUME_CHANNELS) return null;
   const cursors: ResumeCursors = {};
-  for (const [channelId, value] of Object.entries(parsed as Record<string, unknown>)) {
-    if (typeof value === 'number' && Number.isFinite(value)) cursors[channelId] = value;
+  for (const [channelId, value] of entries) {
+    if (
+      channelId.length > 0 &&
+      channelId.length <= 128 &&
+      typeof value === 'number' &&
+      Number.isSafeInteger(value) &&
+      value >= 0
+    ) {
+      cursors[channelId] = value;
+    }
   }
   return Object.keys(cursors).length ? cursors : null;
 }
@@ -113,6 +128,9 @@ export class UserGateway {
     }
 
     if (req.headers.get('upgrade')?.toLowerCase() === 'websocket') {
+      if (this.state.getWebSockets().length >= MAX_CONNECTIONS_PER_USER) {
+        return Response.json({ error: { code: 'too_many_connections', message: 'too many connected devices' } }, { status: 429 });
+      }
       const pair = new WebSocketPair();
       this.state.acceptWebSocket(pair[1]);
       // touchPresence is a no-op if /bind has not landed yet on a cold DO; the
@@ -132,6 +150,14 @@ export class UserGateway {
 
     if (url.pathname === '/notify' && req.method === 'POST') {
       const payload = await req.text();
+      if (new TextEncoder().encode(payload).byteLength > MAX_NOTIFY_BYTES) {
+        return Response.json({ error: { code: 'payload_too_large', message: 'gateway payload is too large' } }, { status: 413 });
+      }
+      try {
+        JSON.parse(payload);
+      } catch {
+        return Response.json({ error: { code: 'invalid_payload', message: 'gateway payload must be JSON' } }, { status: 400 });
+      }
       this.buffer(payload);
       const sockets = this.state.getWebSockets();
       let delivered = 0;
@@ -150,6 +176,11 @@ export class UserGateway {
   }
 
   async webSocketMessage(ws: WebSocket, message: ArrayBuffer | string): Promise<void> {
+    const size = typeof message === 'string' ? new TextEncoder().encode(message).byteLength : message.byteLength;
+    if (size > MAX_CLIENT_FRAME_BYTES) {
+      ws.close(1009, 'frame too large');
+      return;
+    }
     if (message === 'ping') {
       ws.send('pong');
       await this.touchPresence();
