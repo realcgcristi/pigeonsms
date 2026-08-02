@@ -11,6 +11,26 @@
   border-left: 3px solid var(--accent);
   color: var(--text-secondary);
 }
+
+.msg__report-form {
+  display: grid;
+  gap: 14px;
+  color: var(--text-primary);
+}
+
+.msg__report-form label { display: grid; gap: 7px; }
+.msg__report-form label > span,
+.msg__report-form > small { color: var(--text-secondary); font-size: 12px; }
+
+.msg__report-form select {
+  min-height: 48px;
+  padding: 0 12px;
+  border: 1px solid var(--outline);
+  border-radius: var(--r-input);
+  background: var(--surface-high);
+  color: var(--text-primary);
+  font: inherit;
+}
 .md-code {
   padding: 1px 5px;
   border-radius: 6px;

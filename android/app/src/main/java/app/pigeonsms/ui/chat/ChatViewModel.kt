@@ -489,6 +489,16 @@ class ChatViewModel(
         }
     }
 
+    fun report(message: MessageEntity, category: String, reason: String) {
+        if (!isSpace || isOwn(message) || message.deleted || message.state != "SENT") return
+        if (!beginMessageAction(message.id)) return
+        viewModelScope.launch {
+            runCatching { repo.report(message.id, category, reason.trim().ifBlank { null }) }
+                .onFailure { _ui.update { state -> state.copy(error = "couldn't send report") } }
+            finishMessageAction(message.id)
+        }
+    }
+
     fun toggleReaction(message: MessageEntity, emoji: String, on: Boolean) {
         if (message.deleted || message.state != "SENT" || emoji.isBlank()) return
         if (!beginMessageAction(message.id)) return

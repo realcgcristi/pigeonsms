@@ -389,6 +389,49 @@ class PigeonApi(
         auth(); contentType(ContentType.Application.Json); setBody(buildJsonObject { put("code", code) })
     }.unwrap<JoinSpaceResponse>().space_id
     suspend fun spaceMembers(spaceId: String) = client.get("$baseUrl/spaces/$spaceId/members") { auth() }.unwrap<MembersResponse>().members
+    suspend fun nestShield(spaceId: String) = client.get("$baseUrl/spaces/$spaceId/shield") { auth() }.unwrap<NestShieldResponse>()
+    suspend fun updateNestShield(spaceId: String, settings: NestShieldSettingsDto) =
+        client.put("$baseUrl/spaces/$spaceId/shield") {
+            auth(); contentType(ContentType.Application.Json)
+            setBody(json.encodeToJsonElement(NestShieldSettingsDto.serializer(), settings))
+        }.unwrap<NestShieldResponse>().settings
+    suspend fun updateChannelShield(spaceId: String, channelId: String, seconds: Int) {
+        client.put("$baseUrl/spaces/$spaceId/shield/channels/$channelId") {
+            auth(); contentType(ContentType.Application.Json)
+            setBody(buildJsonObject { put("slowmode_seconds", seconds) })
+        }.unwrap<OkResponse>()
+    }
+    suspend fun shieldActions(spaceId: String) = client.get("$baseUrl/spaces/$spaceId/shield/actions") { auth() }
+        .unwrap<ShieldActionsResponse>().actions
+    suspend fun memberTimeouts(spaceId: String) = client.get("$baseUrl/spaces/$spaceId/timeouts") { auth() }
+        .unwrap<MemberTimeoutsResponse>().timeouts
+    suspend fun timeoutMember(spaceId: String, userId: String, duration: Int, reason: String?) =
+        client.put("$baseUrl/spaces/$spaceId/timeouts/$userId") {
+            auth(); contentType(ContentType.Application.Json)
+            setBody(buildJsonObject {
+                put("duration_seconds", duration)
+                if (!reason.isNullOrBlank()) put("reason", reason)
+            })
+        }.unwrap<MemberTimeoutResponse>().timeout
+    suspend fun clearMemberTimeout(spaceId: String, userId: String) {
+        client.delete("$baseUrl/spaces/$spaceId/timeouts/$userId") { auth() }.unwrap<OkResponse>()
+    }
+    suspend fun moderationReports(spaceId: String) = client.get("$baseUrl/spaces/$spaceId/reports?status=open") { auth() }
+        .unwrap<ModerationReportsResponse>().reports
+    suspend fun resolveModerationReport(spaceId: String, reportId: String, status: String) {
+        client.patch("$baseUrl/spaces/$spaceId/reports/$reportId") {
+            auth(); contentType(ContentType.Application.Json)
+            setBody(buildJsonObject { put("status", status) })
+        }.unwrap<OkResponse>()
+    }
+    suspend fun reportMessage(messageId: String, category: String, reason: String?) =
+        client.post("$baseUrl/messages/$messageId/report") {
+            auth(); contentType(ContentType.Application.Json)
+            setBody(buildJsonObject {
+                put("category", category)
+                if (!reason.isNullOrBlank()) put("reason", reason)
+            })
+        }.unwrap<ModerationReportResponse>().report
     suspend fun setRole(spaceId: String, userId: String, role: String) { client.put("$baseUrl/spaces/$spaceId/members/$userId/role") {
         auth(); contentType(ContentType.Application.Json); setBody(buildJsonObject { put("role", role) })
     }.unwrap<OkResponse>() }

@@ -365,6 +365,83 @@ data class SpaceMemberDto(
     val is_bot: Boolean = false,
 )
 
+@Serializable
+data class NestShieldSettingsDto(
+    val enabled: Boolean = false,
+    val anti_raid: Boolean = true,
+    val raid_join_limit: Int = 12,
+    val raid_window_seconds: Int = 60,
+    val automod_enabled: Boolean = true,
+    val blocked_terms: List<String> = emptyList(),
+    val block_external_invites: Boolean = true,
+    val block_spam: Boolean = true,
+    val mention_limit: Int = 8,
+    val default_slowmode_seconds: Int = 0,
+    val lockdown: Boolean = false,
+)
+
+@Serializable
+data class ChannelShieldDto(
+    val channel_id: String,
+    val name: String? = null,
+    val slowmode_seconds: Int = 0,
+)
+
+@Serializable data class NestShieldResponse(
+    val settings: NestShieldSettingsDto,
+    val channels: List<ChannelShieldDto> = emptyList(),
+)
+
+@Serializable
+data class ShieldActionDto(
+    val id: String,
+    val kind: String,
+    val detail: String? = null,
+    val username: String? = null,
+    val display_name: String? = null,
+    val created_at: Long = 0,
+)
+
+@Serializable data class ShieldActionsResponse(val actions: List<ShieldActionDto> = emptyList())
+
+@Serializable
+data class MemberTimeoutDto(
+    val user_id: String,
+    val username: String = "",
+    val display_name: String? = null,
+    val avatar_key: String? = null,
+    val until_at: Long,
+    val reason: String? = null,
+    val created_by: String = "",
+    val created_at: Long = 0,
+)
+
+@Serializable data class MemberTimeoutsResponse(val timeouts: List<MemberTimeoutDto> = emptyList())
+@Serializable data class MemberTimeoutResponse(val timeout: MemberTimeoutDto)
+
+@Serializable
+data class ModerationReportDto(
+    val id: String,
+    val message_id: String,
+    val reported_user_id: String,
+    val reported_username: String? = null,
+    val category: String,
+    val reason: String? = null,
+    val status: String,
+    val evidence: JsonObject? = null,
+    val evidence_hash: String,
+    val created_at: Long,
+)
+
+@Serializable data class ModerationReportsResponse(val reports: List<ModerationReportDto> = emptyList())
+@Serializable data class ModerationReportReceiptDto(
+    val id: String,
+    val status: String,
+    val evidence_hash: String,
+    val created_at: Long,
+)
+@Serializable data class ModerationReportResponse(val report: ModerationReportReceiptDto)
+
 
 /** A bot you own (v3). The raw token only ever rides on create/rotate. */
 @Serializable

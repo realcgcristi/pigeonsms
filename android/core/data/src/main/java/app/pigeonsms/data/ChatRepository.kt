@@ -563,6 +563,9 @@ class ChatRepository(
         db.messages().markDeleted(id)
     }
 
+    suspend fun report(id: String, category: String, reason: String?) =
+        api.reportMessage(id, category, reason)
+
     suspend fun react(id: String, emoji: String, on: Boolean) = reactionMutex.withLock {
         val before = db.messages().byId(id)
         val beforeJson = before?.reactionsJson

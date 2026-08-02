@@ -1427,3 +1427,72 @@ export interface MessageDeleteEventDto {
   channel_id: string;
   id: string;
 }
+
+export interface NestShieldSettingsDto {
+  enabled: boolean;
+  anti_raid: boolean;
+  raid_join_limit: number;
+  raid_window_seconds: number;
+  automod_enabled: boolean;
+  blocked_terms: string[];
+  block_external_invites: boolean;
+  block_spam: boolean;
+  mention_limit: number;
+  default_slowmode_seconds: number;
+  lockdown: boolean;
+}
+
+export interface ChannelShieldDto {
+  channel_id: string;
+  name?: string | null;
+  slowmode_seconds: number;
+}
+
+export interface NestShieldResponse {
+  settings: NestShieldSettingsDto;
+  channels: ChannelShieldDto[];
+}
+
+export interface ShieldActionDto {
+  id: string;
+  space_id: string;
+  channel_id?: string | null;
+  user_id?: string | null;
+  username?: string | null;
+  display_name?: string | null;
+  kind: string;
+  detail?: string | null;
+  created_at: number;
+}
+
+export interface MemberTimeoutDto {
+  space_id: string;
+  user_id: string;
+  username: string;
+  display_name?: string | null;
+  avatar_key?: string | null;
+  until_at: number;
+  reason?: string | null;
+  created_by: string;
+  created_at: number;
+}
+
+export interface ModerationReportDto {
+  id: string;
+  space_id: string;
+  channel_id: string;
+  message_id: string;
+  reporter_id: string;
+  reported_user_id: string;
+  reporter_username?: string | null;
+  reported_username?: string | null;
+  category: string;
+  reason?: string | null;
+  status: 'open' | 'resolved' | 'dismissed';
+  evidence?: JsonObject | null;
+  evidence_hash: string;
+  created_at: number;
+  resolved_by?: string | null;
+  resolved_at?: number | null;
+  resolution?: string | null;
+}

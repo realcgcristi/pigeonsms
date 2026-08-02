@@ -28,4 +28,13 @@ describe('public routes', () => {
       checkpoint: { tree_size: 0 },
     })
   })
+
+  it('mounts Nest Shield routes behind authentication', async () => {
+    const response = await worker.fetch(
+      new Request('https://api.test/spaces/space-1/shield'),
+      { DB: database() } as Env,
+      {} as ExecutionContext,
+    )
+    expect(response.status).toBe(401)
+  })
 })

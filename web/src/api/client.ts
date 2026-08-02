@@ -51,6 +51,7 @@ import type {
   LatestReleaseResponse,
   LikeMutationResponse,
   MarkMutationResponse,
+  MemberTimeoutDto,
   MembersResponse,
   MemberRolesResponse,
   MentionsResponse,
@@ -59,6 +60,7 @@ import type {
   MessagesResponse,
   NotificationPreferencesResponse,
   NotificationsResponse,
+  NestShieldResponse,
   OkResponse,
   OpenDmResponse,
   PairingInviteResponse,
@@ -72,9 +74,11 @@ import type {
   PollVoteResponse,
   ProfileResponse,
   ProfileUpdateInput,
+  ModerationReportDto,
   ReactionMutationResponse,
   RecoveryResponse,
   ScheduledResponse,
+  ShieldActionDto,
   SearchResponse,
   SendInteractionResponse,
   SendResponse,
@@ -785,6 +789,63 @@ class PigeonApi {
 
   spaceAudit(spaceId: string) {
     return request<AuditResponse>(`/spaces/${seg(spaceId)}/audit`).then((r) => r.audit);
+  }
+
+  nestShield(spaceId: string) {
+    return request<NestShieldResponse>(`/spaces/${seg(spaceId)}/shield`);
+  }
+
+  updateNestShield(spaceId: string, fields: Partial<NestShieldResponse['settings']>) {
+    return request<{ settings: NestShieldResponse['settings'] }>(`/spaces/${seg(spaceId)}/shield`, {
+      method: 'PUT',
+      json: fields,
+    }).then((response) => response.settings);
+  }
+
+  updateChannelShield(spaceId: string, channelId: string, slowmodeSeconds: number) {
+    return request<{ channel_id: string; slowmode_seconds: number }>(
+      `/spaces/${seg(spaceId)}/shield/channels/${seg(channelId)}`,
+      { method: 'PUT', json: { slowmode_seconds: slowmodeSeconds } },
+    );
+  }
+
+  shieldActions(spaceId: string) {
+    return request<{ actions: ShieldActionDto[] }>(`/spaces/${seg(spaceId)}/shield/actions`).then((r) => r.actions);
+  }
+
+  memberTimeouts(spaceId: string) {
+    return request<{ timeouts: MemberTimeoutDto[] }>(`/spaces/${seg(spaceId)}/timeouts`).then((r) => r.timeouts);
+  }
+
+  timeoutMember(spaceId: string, userId: string, durationSeconds: number, reason?: string) {
+    return request<{ timeout: MemberTimeoutDto }>(`/spaces/${seg(spaceId)}/timeouts/${seg(userId)}`, {
+      method: 'PUT',
+      json: { duration_seconds: durationSeconds, reason: reason || undefined },
+    }).then((r) => r.timeout);
+  }
+
+  clearMemberTimeout(spaceId: string, userId: string) {
+    return requestVoid(`/spaces/${seg(spaceId)}/timeouts/${seg(userId)}`, { method: 'DELETE' });
+  }
+
+  reportMessage(messageId: string, category: string, reason?: string) {
+    return request<{ report: Pick<ModerationReportDto, 'id' | 'status' | 'evidence_hash' | 'created_at'> }>(
+      `/messages/${seg(messageId)}/report`,
+      { method: 'POST', json: { category, reason: reason || undefined } },
+    ).then((r) => r.report);
+  }
+
+  moderationReports(spaceId: string, status: ModerationReportDto['status'] | 'all' = 'open') {
+    return request<{ reports: ModerationReportDto[] }>(`/spaces/${seg(spaceId)}/reports`, {
+      query: { status },
+    }).then((r) => r.reports);
+  }
+
+  resolveModerationReport(spaceId: string, reportId: string, status: ModerationReportDto['status'], resolution?: string) {
+    return requestVoid(`/spaces/${seg(spaceId)}/reports/${seg(reportId)}`, {
+      method: 'PATCH',
+      json: { status, resolution: resolution || undefined },
+    });
   }
 
   spaceEmojis(spaceId: string) {

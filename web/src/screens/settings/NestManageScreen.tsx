@@ -28,6 +28,7 @@ import { relativeTime } from '@/lib/format'
 import { useSession } from '@/store/session'
 import { useSocial } from '@/store/social'
 import { useThemeStore } from '@/store/theme'
+import { NestShieldPanel } from './NestShieldPanel'
 import './Settings.css'
 
 type Tab = 'overview' | 'channels' | 'moderation' | 'audit'
@@ -361,6 +362,7 @@ export default function NestManageScreen() {
 
         {tab === 'moderation' ? (
           <>
+            {canManage ? <NestShieldPanel spaceId={spaceId} members={members} /> : null}
             <SettingsGroup label="member tools">
               <SettingsRow icon={<Groups size={18} />} title="manage members" value="assign roles, kick or ban" onClick={() => navigate(`/nest/${spaceId}/members`)} />
             </SettingsGroup>

@@ -532,6 +532,7 @@ const MessageList = memo(function MessageList({
   onSuperPin,
   onThread,
   onOpenMedia,
+  canReport,
   read,
 }: {
   messages: ChatMessage[]
@@ -549,6 +550,7 @@ const MessageList = memo(function MessageList({
   onSuperPin: (message: ChatMessage) => void
   onThread: (message: ChatMessage) => void
   onOpenMedia: (message: ChatMessage) => void
+  canReport: boolean
   read: Record<string, number>
 }) {
   return (
@@ -582,6 +584,7 @@ const MessageList = memo(function MessageList({
               onSuperPin={() => onSuperPin(message)}
               onThread={() => onThread(message)}
               onOpenMedia={() => onOpenMedia(message)}
+              canReport={canReport}
               seenCount={
                 message.seq
                   ? Object.entries(read).filter(([userId, seq]) => userId !== meId && seq >= (message.seq ?? 0)).length
@@ -1045,6 +1048,7 @@ export default function ChatScreen() {
           onSuperPin={(message) => void onSuperPin(message)}
           onThread={(message) => void onThread(message)}
           onOpenMedia={setMediaMessage}
+          canReport={isSpace}
           read={read ?? {}}
           />
         </div>

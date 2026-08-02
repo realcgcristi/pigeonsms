@@ -27,6 +27,7 @@ import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Groups
 import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material.icons.outlined.Tag
 import androidx.compose.material.icons.outlined.VolumeUp
 import androidx.compose.material3.AlertDialog
@@ -76,7 +77,12 @@ import coil.compose.AsyncImage
  * helpers.
  */
 @Composable
-fun NestSettingsScreen(app: AppViewModel, onBack: () -> Unit, onTimeMachine: (SpaceDto) -> Unit) {
+fun NestSettingsScreen(
+    app: AppViewModel,
+    onBack: () -> Unit,
+    onTimeMachine: (SpaceDto) -> Unit,
+    onShield: (SpaceDto) -> Unit,
+) {
     val vm: SpacesViewModel = pigeonVm { c, _ -> SpacesViewModel(c.socialRepository, c.api) }
     val home by app.home.collectAsState()
     val ui by vm.ui.collectAsState()
@@ -118,6 +124,7 @@ fun NestSettingsScreen(app: AppViewModel, onBack: () -> Unit, onTimeMachine: (Sp
             } else {
                 home.spaces.forEach { space ->
                     val owner = space.role == "owner"
+                    val moderator = owner || space.role == "admin"
                     Group(space.name)
                     GroupCard {
                         // nest header row: icon + name + role, with leave for non-owned nests
@@ -164,6 +171,21 @@ fun NestSettingsScreen(app: AppViewModel, onBack: () -> Unit, onTimeMachine: (Sp
                                 Column(Modifier.padding(start = Spacing.m)) {
                                     Text("nest time machine", color = MaterialTheme.colorScheme.onSurface)
                                     Text("encrypted replay, restore and forks", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                        }
+
+                        if (moderator) {
+                            RowDivider()
+                            Row(
+                                Modifier.fillMaxWidth().clickable { onShield(space) }
+                                    .heightIn(min = 56.dp).padding(horizontal = Spacing.l),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(Icons.Outlined.Security, null, tint = MaterialTheme.colorScheme.primary)
+                                Column(Modifier.padding(start = Spacing.m)) {
+                                    Text("Nest Shield", color = MaterialTheme.colorScheme.onSurface)
+                                    Text("raid protection, automod and reports", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }
                         }

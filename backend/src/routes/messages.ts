@@ -21,6 +21,7 @@ import { normalizeReactionEmoji } from '../lib/social';
 import { enforceRateLimit } from '../middleware/ratelimit';
 import type { AppEnv, AuthedUser, Env } from '../types';
 import { readJsonBody } from '../lib/validate';
+import { enforceNestShield } from '../lib/nestShield';
 
 const messages = new Hono<AppEnv>();
 // scoped: this router mounts at '/', a bare use() would guard the whole app
@@ -666,6 +667,10 @@ messages.post('/channels/:id/messages', async (c) => {
   if (!content.trim() && !attachment && kind !== 'poll') {
     throw new ApiError(400, 'empty_message', 'say something');
   }
+  await enforceNestShield(c.env, channel, user.id, content, {
+    encrypted,
+    hasAttachment: attachment !== null,
+  });
 
   // DMs respect blocks in both directions
   if (!channel.space_id) {
@@ -791,6 +796,7 @@ messages.post('/channels/:id/messages', async (c) => {
     poll,
     ttlMs,
     encrypted,
+    shieldChecked: true,
   });
 
   return c.json({ message: serialized }, 201);
@@ -815,6 +821,7 @@ export interface MessageDeliveryInput {
   poll: PollInput | null;
   ttlMs: number | null;
   encrypted: boolean;
+  shieldChecked?: boolean;
 }
 
 export async function deliverMessage(
@@ -825,6 +832,12 @@ export async function deliverMessage(
   input: MessageDeliveryInput,
 ): Promise<Record<string, unknown>> {
   const { content, replyTo, threadId, nonce, attachment, kind, metadata, poll, ttlMs, encrypted } = input;
+  if (!input.shieldChecked) {
+    await enforceNestShield(env, channel, author.id, content, {
+      encrypted,
+      hasAttachment: attachment !== null,
+    });
+  }
   const mentions = encrypted ? [] : await resolveMentions(env, channel, author, content);
 
   // 2.9.0: allocated by the channel's Durable Object, not a D1 single-row bump.
@@ -1359,6 +1372,11 @@ async function createForumMessage(
   if (root && !content.trim() && !attachment) {
     throw new ApiError(400, 'empty_message', 'reply content is required');
   }
+  const shieldText = root ? content : `${String(metadata?.['title'] ?? '')}\n${content}`;
+  await enforceNestShield(c.env, channel, user.id, shieldText, {
+    encrypted: false,
+    hasAttachment: attachment !== null,
+  });
 
   // Tag reference (posts only): must be a tag defined for this forum channel.
   let forumTagId: string | null = null;

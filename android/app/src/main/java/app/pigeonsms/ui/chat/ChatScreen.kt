@@ -89,6 +89,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -248,6 +249,16 @@ private const val MAX_ATTACHMENT_BYTES = 500L * 1024L * 1024L
 /** Past this, stream from the Uri instead of buffering the file in the heap. */
 private const val STREAM_ATTACHMENT_BYTES = 8L * 1024L * 1024L
 private val chatJson = Json { ignoreUnknownKeys = true }
+private val reportCategories = listOf(
+    "spam" to "spam",
+    "harassment" to "harassment",
+    "hate" to "hate",
+    "sexual" to "sexual content",
+    "violence" to "violence",
+    "scam" to "scam",
+    "privacy" to "privacy",
+    "other" to "other",
+)
 private val reactionChoices = listOf("👍", "❤️", "😂", "🎉", "🐦", "🔥")
 
 @OptIn(ExperimentalLayoutApi::class, androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
@@ -544,6 +555,8 @@ fun ChatScreen(
                             onReply = { vm.setReply(message) },
                             onEdit = { vm.setEditing(message) },
                             onDelete = { vm.delete(message) },
+                            canReport = isSpace,
+                            onReport = { category, reason -> vm.report(message, category, reason) },
                             onReact = { emoji, on -> vm.toggleReaction(message, emoji, on) },
                             customEmoji = customEmoji,
                             onTokenClick = { tag, value ->
@@ -1421,6 +1434,8 @@ private fun MessageBubble(
     onReply: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
+    canReport: Boolean,
+    onReport: (String, String) -> Unit,
     onReact: (String, Boolean) -> Unit,
     onPin: (Boolean) -> Unit,
     onRetry: () -> Unit,
@@ -1444,6 +1459,7 @@ private fun MessageBubble(
     var menuOpen by remember { mutableStateOf(false) }
     var reactionPickerOpen by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var reportOpen by remember { mutableStateOf(false) }
     var bubbleWindowY by remember(message.id) { mutableStateOf(-1f) }
     val haptics = LocalHapticFeedback.current
     val reducedMotion = LocalReducedMotion.current
@@ -1895,6 +1911,7 @@ private fun MessageBubble(
             canPin = canMutate,
             canSuperPin = isAdmin || self,
             canCopy = canCopy,
+            canReport = canReport && !self && canMutate,
             pinned = pinned,
             superPinned = superPinned,
             onDismiss = { menuOpen = false },
@@ -1910,6 +1927,7 @@ private fun MessageBubble(
                 clipboard.setText(AnnotatedString(message.content))
                 Toast.makeText(copyContext, "Copied to clipboard", Toast.LENGTH_SHORT).show()
             },
+            onReport = { menuOpen = false; reportOpen = true },
             showSeenBy = showSeenBy,
             onSeenBy = { menuOpen = false; onSeenBy() },
             onSelect = { menuOpen = false; onEnterSelection() },
@@ -1942,6 +1960,47 @@ private fun MessageBubble(
             },
             dismissButton = {
                 TextButton(onClick = { confirmDelete = false }) { Text("cancel") }
+            },
+        )
+    }
+
+    if (reportOpen) {
+        var category by remember { mutableStateOf("spam") }
+        var reason by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { reportOpen = false },
+            icon = { Icon(Icons.Outlined.ErrorOutline, null) },
+            title = { Text("report message") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(Spacing.m)) {
+                    Text("choose what happened", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
+                        items(reportCategories) { option ->
+                            FilterChip(
+                                selected = category == option.first,
+                                onClick = { category = option.first },
+                                label = { Text(option.second) },
+                            )
+                        }
+                    }
+                    OutlinedTextField(
+                        value = reason,
+                        onValueChange = { reason = it.take(500) },
+                        label = { Text("details (optional)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 3,
+                        maxLines = 5,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    reportOpen = false
+                    onReport(category, reason)
+                }) { Text("send report") }
+            },
+            dismissButton = {
+                TextButton(onClick = { reportOpen = false }) { Text("cancel") }
             },
         )
     }
@@ -2322,6 +2381,7 @@ private fun MessageMenu(
     canPin: Boolean,
     canSuperPin: Boolean,
     canCopy: Boolean,
+    canReport: Boolean,
     pinned: Boolean,
     superPinned: Boolean,
     onDismiss: () -> Unit,
@@ -2333,6 +2393,7 @@ private fun MessageMenu(
     onReactPicker: () -> Unit,
     onSuperPin: (Boolean) -> Unit,
     onCopy: () -> Unit,
+    onReport: () -> Unit,
     showSeenBy: Boolean = false,
     onSeenBy: () -> Unit = {},
     onSelect: () -> Unit = {},
@@ -2447,6 +2508,7 @@ private fun MessageMenu(
                             )
                         }
                         if (showSeenBy) MenuRow(Icons.Outlined.Info, "seen by", onSeenBy)
+                        if (canReport) MenuRow(Icons.Outlined.ErrorOutline, "report", onReport)
                         MenuRow(Icons.Outlined.Done, "select", onSelect)
                         if (canEdit) MenuRow(Icons.Outlined.Edit, "edit", onEdit)
                         if (canDelete) MenuRow(Icons.Outlined.Delete, "delete", onDelete, danger = true)

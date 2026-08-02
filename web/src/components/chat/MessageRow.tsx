@@ -4,8 +4,11 @@ import { api } from '@/api/client'
 import type { MessageDto, SpaceEmojiDto } from '@/api/dto'
 import { Description, DoneAll, ErrorOutline, MoreVert, Schedule } from '@/components/icons'
 import { Avatar } from '@/components/ui/Avatar'
-import { ContextMenu } from '@/components/ui/Overlay'
+import { Button } from '@/components/ui/Button'
+import { ContextMenu, Dialog } from '@/components/ui/Overlay'
 import type { MenuItem } from '@/components/ui/Overlay'
+import { TextField } from '@/components/ui/TextField'
+import { useToast } from '@/components/ui/Toast'
 import { bytes, timeOfDay } from '@/lib/format'
 import { isEmojiOnly, renderMarkdown } from '@/lib/markdown'
 import type { ChatMessage } from '@/store/chat'
@@ -32,6 +35,7 @@ function MessageRowBase({
   onSuperPin,
   onThread,
   onOpenMedia,
+  canReport,
   seenCount,
 }: {
   message: ChatMessage
@@ -51,10 +55,16 @@ function MessageRowBase({
   onSuperPin: () => void
   onThread: () => void
   onOpenMedia: () => void
+  canReport: boolean
   seenCount?: number
 }) {
   const navigate = useNavigate()
+  const toast = useToast()
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
+  const [reportOpen, setReportOpen] = useState(false)
+  const [reportCategory, setReportCategory] = useState('spam')
+  const [reportReason, setReportReason] = useState('')
+  const [reporting, setReporting] = useState(false)
   const attachmentMedia = useAttachmentUrl(message)
 
   const author = message.author
@@ -77,6 +87,9 @@ function MessageRowBase({
     items.push({ key: 'pin', label: message.pinned ? 'unpin' : 'pin message', onSelect: onPin })
     items.push({ key: 'super-pin', label: 'make super pin', onSelect: onSuperPin })
     items.push({ key: 'thread', label: message.thread_id ? 'open branch' : 'branch from here', onSelect: onThread })
+  }
+  if (canReport && !mine && message.state === 'sent') {
+    items.push({ key: 'report', label: 'report to nest moderators', danger: true, onSelect: () => setReportOpen(true) })
   }
   if (mine) items.push({ key: 'delete', label: 'delete', danger: true, onSelect: onDelete })
 
@@ -289,6 +302,51 @@ function MessageRowBase({
         )}
         onClose={() => setMenu(null)}
       />
+      <Dialog
+        open={reportOpen}
+        title="report message"
+        onClose={() => setReportOpen(false)}
+        actions={
+          <>
+            <Button variant="text" onClick={() => setReportOpen(false)}>cancel</Button>
+            <Button
+              variant="danger"
+              loading={reporting}
+              onClick={async () => {
+                setReporting(true)
+                try {
+                  await api.reportMessage(message.id, reportCategory, reportReason)
+                  setReportOpen(false)
+                  setReportReason('')
+                  toast.show('report sent with a protected evidence snapshot')
+                } catch (error) {
+                  toast.error(error instanceof Error ? error.message : 'could not send report')
+                } finally {
+                  setReporting(false)
+                }
+              }}
+            >send report</Button>
+          </>
+        }
+      >
+        <div className="msg__report-form">
+          <label>
+            <span>reason</span>
+            <select value={reportCategory} onChange={(event) => setReportCategory(event.target.value)}>
+              <option value="spam">spam</option>
+              <option value="harassment">harassment</option>
+              <option value="hate">hate</option>
+              <option value="sexual">sexual content</option>
+              <option value="violence">violence</option>
+              <option value="scam">scam</option>
+              <option value="privacy">privacy</option>
+              <option value="other">other</option>
+            </select>
+          </label>
+          <TextField label="details" value={reportReason} onChange={setReportReason} multiline rows={3} maxLength={1000} />
+          <small>The message, edits and attachment metadata are captured and hashed when you submit.</small>
+        </div>
+      </Dialog>
     </div>
   )
 }

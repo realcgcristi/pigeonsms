@@ -30,6 +30,7 @@ import packs from './routes/packs';
 import migrations from './routes/migrations';
 import timeMachine from './routes/timeMachine';
 import transparency from './routes/transparency';
+import shield from './routes/shield';
 import passkeys from './routes/passkeys';
 import pairings from './routes/pairings';
 import { requireAuth } from './middleware/auth';
@@ -159,6 +160,7 @@ app.route('/', packs);
 app.route('/', migrations);
 app.route('/', timeMachine);
 app.route('/', transparency);
+app.route('/', shield);
 app.route('/admin', admin);
 
 // WebSocket gateway: one socket per device, owned by the user's gateway DO.

@@ -96,6 +96,7 @@ import app.pigeonsms.ui.settings.NotificationSettingsScreen
 import app.pigeonsms.ui.settings.KeyTransparencyScreen
 import app.pigeonsms.ui.settings.NetworklessScreen
 import app.pigeonsms.ui.settings.NestTimeMachineScreen
+import app.pigeonsms.ui.settings.NestShieldScreen
 import app.pigeonsms.ui.forum.ForumScreen
 import app.pigeonsms.ui.search.SearchScreen
 import app.pigeonsms.ui.threads.ThreadsScreen
@@ -374,6 +375,7 @@ fun AppShell(session: LocalSession) {
                     app,
                     onBack = { nav.popBackStack() },
                     onTimeMachine = { space -> nav.navigate("timemachine/${space.id}/${enc(space.name)}") },
+                    onShield = { space -> nav.navigate("nestshield/${space.id}/${enc(space.name)}") },
                 )
             }
             composable("keytransparency") {
@@ -400,6 +402,11 @@ fun AppShell(session: LocalSession) {
                         nav.navigate("nestsettings") { launchSingleTop = true }
                     },
                 )
+            }
+            composable("nestshield/{spaceId}/{spaceName}") { entry ->
+                val spaceId = entry.arguments?.getString("spaceId") ?: return@composable
+                val spaceName = entry.arguments?.getString("spaceName") ?: "bird nest"
+                NestShieldScreen(spaceId, spaceName, onBack = { nav.popBackStack() })
             }
             // 2.9.5: per-nest custom emoji + stickers. Reachable from a nest's
             // channel list; the API enforces MANAGE_EMOJI regardless of who gets here.

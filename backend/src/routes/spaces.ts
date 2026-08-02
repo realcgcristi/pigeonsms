@@ -10,6 +10,7 @@ import { normalizeProfileImageType, spaceCreationKey } from '../lib/social';
 import type { AppEnv, AuthedUser } from '../types';
 import { Permission, requirePermission } from '../lib/permissions';
 import { readJsonBody } from '../lib/validate';
+import { antiRaidCheck } from '../lib/nestShield';
 
 const spaces = new Hono<AppEnv>();
 spaces.use(requireAuth);
@@ -697,6 +698,22 @@ spaces.post('/join', async (c) => {
     .first();
   if (already) return c.json({ space_id: invite.space_id });
 
+  const raid = await antiRaidCheck(c.env, invite.space_id);
+  if (raid.lockdown) {
+    if (raid.settings?.lockdown !== 1) {
+      const now = Date.now();
+      await c.env.DB.batch([
+        c.env.DB.prepare(
+          'UPDATE space_shield_settings SET lockdown = 1, updated_at = ? WHERE space_id = ?',
+        ).bind(now, invite.space_id),
+        c.env.DB.prepare(
+          'INSERT INTO shield_actions (id, space_id, user_id, kind, detail, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+        ).bind(snowflake(), invite.space_id, user.id, 'raid_lockdown', 'join velocity limit reached', now),
+      ]);
+    }
+    throw new ApiError(403, 'nest_lockdown', 'this nest is temporarily locked during a join raid');
+  }
+
   const consumed = await c.env.DB.prepare(
     `UPDATE space_invites SET uses = uses + 1
      WHERE code = ? AND (max_uses IS NULL OR uses < max_uses)
@@ -710,11 +727,29 @@ spaces.post('/join', async (c) => {
     .first<{ space_id: string }>();
   if (!consumed) throw new ApiError(400, 'invalid_invite', 'that invite is not valid');
 
-  await c.env.DB.prepare(
-    "INSERT INTO space_members (space_id, user_id, role, joined_at) VALUES (?, ?, 'member', ?)",
-  )
-    .bind(consumed.space_id, user.id, Date.now())
-    .run();
+  const joinedAt = Date.now();
+  await c.env.DB.batch([
+    c.env.DB.prepare(
+      "INSERT INTO space_members (space_id, user_id, role, joined_at) VALUES (?, ?, 'member', ?)",
+    ).bind(consumed.space_id, user.id, joinedAt),
+    c.env.DB.prepare(
+      'INSERT INTO space_join_events (id, space_id, user_id, created_at) VALUES (?, ?, ?, ?)',
+    ).bind(snowflake(), consumed.space_id, user.id, joinedAt),
+    c.env.DB.prepare(
+      'DELETE FROM space_join_events WHERE space_id = ? AND created_at < ?',
+    ).bind(consumed.space_id, joinedAt - 86_400_000),
+  ]);
+  const reached = await antiRaidCheck(c.env, consumed.space_id);
+  if (reached.lockdown && reached.settings?.lockdown !== 1) {
+    await c.env.DB.batch([
+      c.env.DB.prepare(
+        'UPDATE space_shield_settings SET lockdown = 1, updated_at = ? WHERE space_id = ?',
+      ).bind(joinedAt, consumed.space_id),
+      c.env.DB.prepare(
+        'INSERT INTO shield_actions (id, space_id, user_id, kind, detail, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+      ).bind(snowflake(), consumed.space_id, user.id, 'raid_lockdown', 'join velocity limit reached', joinedAt),
+    ]);
+  }
   audit(c, user.id, 'space.join', consumed.space_id);
   return c.json({ space_id: consumed.space_id });
 });
