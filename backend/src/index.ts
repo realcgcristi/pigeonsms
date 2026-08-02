@@ -30,6 +30,8 @@ import packs from './routes/packs';
 import migrations from './routes/migrations';
 import timeMachine from './routes/timeMachine';
 import transparency from './routes/transparency';
+import passkeys from './routes/passkeys';
+import pairings from './routes/pairings';
 import { requireAuth } from './middleware/auth';
 import { sendPush } from './lib/fcm';
 import { sendWebPush, webPushTargets } from './lib/webpush';
@@ -99,6 +101,7 @@ app.get('/.well-known/pigeon', (c) => {
       'local-first-sync', 'message-branches', 'pigeon-packs',
       'space-migration', 'universal-bridges', 'e2ee-bots',
       'nest-time-machine', 'networkless-mode', 'key-transparency',
+      'auth.passkeys', 'auth.device-pairing', 'security.trust-center',
     ],
     limits: { message_length: 8000, upload_bytes: 524_288_000 },
   });
@@ -114,6 +117,8 @@ app.get('/health', async (c) => {
 
 app.route('/auth', auth);
 app.route('/auth', security);
+app.route('/auth', passkeys);
+app.route('/auth', pairings);
 app.route('/friends', friends);
 app.route('/dms', dms);
 app.route('/', messagesRoutes);

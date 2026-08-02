@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@simplewebauthn/server": "^13.3.2",
     "hono": "^4.8.0"
   },
   "devDependencies": {

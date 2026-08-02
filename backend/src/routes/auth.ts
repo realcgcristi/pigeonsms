@@ -52,7 +52,7 @@ function getDummyHash(pepper: string): Promise<string> {
   return dummyHash;
 }
 
-function publicUser(u: {
+export function publicUser(u: {
   id: string;
   username: string;
   email: string;
@@ -79,7 +79,7 @@ function publicUser(u: {
   };
 }
 
-async function createSession(
+export async function createSession(
   c: Context<AppEnv>,
   userId: string,
   deviceName: string | null,
@@ -106,7 +106,7 @@ async function createSession(
   return { token, sessionId };
 }
 
-function recordLogin(
+export function recordLogin(
   c: Context<AppEnv>,
   userId: string,
   deviceName: string | null,

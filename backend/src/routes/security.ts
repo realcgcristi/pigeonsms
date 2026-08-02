@@ -9,6 +9,7 @@ import type { AppEnv, AuthedUser } from '../types';
 import { readJsonBody } from '../lib/validate';
 import { purgeUserData } from '../lib/purge';
 import { setSessionCookie } from './auth';
+import { ensureTransparencyEntries, transparencyCheckpoint } from '../lib/keyTransparency';
 
 const security = new Hono<AppEnv>();
 security.use(requireAuth);
@@ -100,6 +101,96 @@ security.post('/totp/disable', async (c) => {
     c.env.DB.prepare('DELETE FROM recovery_codes WHERE user_id = ?').bind(user.id),
   ]);
   return c.json({ ok: true });
+});
+
+security.get('/trust', async (c) => {
+  const user = c.get('user') as AuthedUser;
+  const session = c.get('session')!;
+  const now = Date.now();
+  const entriesPromise = ensureTransparencyEntries(c.env, user.id);
+  const [profile, sessions, devices, passkeys, backup, pairings, failedLogins, conflicts, entries] = await Promise.all([
+    c.env.DB.prepare('SELECT totp_enabled FROM users WHERE id = ?').bind(user.id).first<{ totp_enabled: number }>(),
+    c.env.DB.prepare(
+      `SELECT id, device_name, user_agent, ip, created_at, last_seen, expires_at
+       FROM sessions WHERE user_id = ? AND revoked_at IS NULL AND expires_at > ? ORDER BY last_seen DESC`,
+    ).bind(user.id, now).all(),
+    c.env.DB.prepare(
+      `SELECT id, name, created_at, last_seen FROM user_devices WHERE user_id = ? ORDER BY created_at DESC`,
+    ).bind(user.id).all(),
+    c.env.DB.prepare(
+      `SELECT id, rp_id, transports, device_type, backed_up, name, created_at, last_used
+       FROM passkey_credentials WHERE user_id = ? AND revoked_at IS NULL ORDER BY created_at DESC`,
+    ).bind(user.id).all(),
+    c.env.DB.prepare('SELECT updated_at FROM key_backups WHERE user_id = ?')
+      .bind(user.id).first<{ updated_at: number }>(),
+    c.env.DB.prepare(
+      `SELECT id, status, requested_device_name, requested_user_agent, verification_code, created_at,
+              expires_at, requested_at, approved_at, claimed_at, denied_at, cancelled_at
+       FROM device_pairings WHERE user_id = ? ORDER BY created_at DESC LIMIT 20`,
+    ).bind(user.id).all(),
+    c.env.DB.prepare(
+      `SELECT ip, user_agent, device_name, created_at FROM login_history
+       WHERE user_id = ? AND success = 0 AND created_at >= ? ORDER BY created_at DESC LIMIT 20`,
+    ).bind(user.id, now - 7 * 86_400_000).all(),
+    c.env.DB.prepare(
+      `SELECT COUNT(*) AS count FROM (
+         SELECT tree_size FROM key_transparency_observations WHERE user_id = ?
+         GROUP BY tree_size HAVING COUNT(DISTINCT root_hash) > 1
+       )`,
+    ).bind(user.id).first<{ count: number }>(),
+    entriesPromise,
+  ]);
+  const checkpoint = await transparencyCheckpoint(entries);
+  const activePairings = pairings.results.filter((item) =>
+    Number(item['expires_at']) >= now && ['created', 'requested', 'approved'].includes(String(item['status'])),
+  );
+  const warnings: { code: string; severity: 'info' | 'warning' | 'critical'; message: string }[] = [];
+  if (Number(conflicts?.count ?? 0) > 0) {
+    warnings.push({ code: 'key_transparency_conflict', severity: 'critical', message: 'conflicting device-key checkpoints were observed' });
+  }
+  if (passkeys.results.length === 0) {
+    warnings.push({ code: 'no_passkey', severity: 'warning', message: 'no passkey protects this account' });
+  }
+  if (profile?.totp_enabled !== 1) {
+    warnings.push({ code: 'no_totp', severity: 'warning', message: 'two-factor authentication is off' });
+  }
+  if (devices.results.length > 0 && !backup) {
+    warnings.push({ code: 'no_key_backup', severity: 'warning', message: 'encrypted device-key backup is missing' });
+  }
+  if (activePairings.some((item) => item['status'] === 'requested')) {
+    warnings.push({ code: 'pairing_waiting', severity: 'warning', message: 'a new device is waiting for approval' });
+  }
+  if (failedLogins.results.length > 0) {
+    warnings.push({ code: 'failed_logins', severity: 'info', message: `${failedLogins.results.length} failed login attempt${failedLogins.results.length === 1 ? '' : 's'} in the last 7 days` });
+  }
+  const risk = warnings.some((item) => item.severity === 'critical')
+    ? 'critical'
+    : warnings.some((item) => item.severity === 'warning')
+      ? 'warning'
+      : 'good';
+  return c.json({
+    risk,
+    warnings,
+    totp_enabled: profile?.totp_enabled === 1,
+    key_backup: backup ? { ready: true, updated_at: backup.updated_at } : { ready: false, updated_at: null },
+    transparency: { checkpoint, conflicts: Number(conflicts?.count ?? 0) },
+    sessions: sessions.results.map((item) => ({ ...item, current: item['id'] === session.id })),
+    devices: devices.results,
+    passkeys: passkeys.results.map((item) => ({
+      ...item,
+      backed_up: item['backed_up'] === 1,
+      transports: (() => {
+        try {
+          const parsed: unknown = JSON.parse(String(item['transports'] ?? '[]'));
+          return Array.isArray(parsed) ? parsed : [];
+        } catch {
+          return [];
+        }
+      })(),
+    })),
+    pairings: pairings.results,
+    failed_logins: failedLogins.results,
+  });
 });
 
 /** GET /auth/export — everything we hold about you (GDPR-shaped). */

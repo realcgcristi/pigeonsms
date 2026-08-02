@@ -6,6 +6,12 @@ account_id = "b612cdaca9aaf283558726408f40b6c8"
 compatibility_date = "2026-07-01"
 workers_dev = true
 
+[vars]
+PUBLIC_BASE_URL = "https://api.pigeonsms.aldi.best"
+WEB_ORIGIN = "https://pigeonsms.aldi.best"
+WEBAUTHN_RP_ID = "pigeonsms.aldi.best"
+WEBAUTHN_ANDROID_ORIGINS = "android:apk-key-hash:UPxXmg4olRpH62FZyyUGc2uQ5C9XB6eqcPfRuWUS_r8"
+
 # Exact-host route beats imperial-embed-worker's *.aldi.best/* wildcard by
 # specificity (imperial keeps every other hostname — owner's rule respected).
 # The custom-domain binding stays for DNS record + TLS cert issuance.

@@ -23,6 +23,8 @@ export interface Env {
   SESSION_COOKIE_DOMAIN?: string;
   SERVER_NAME?: string;
   SERVER_VERSION?: string;
+  WEBAUTHN_RP_ID?: string;
+  WEBAUTHN_ANDROID_ORIGINS?: string;
   /** VAPID keypair for browser push; absent = web push simply off. */
   VAPID_PUBLIC_KEY?: string;
   VAPID_PRIVATE_JWK?: string;

@@ -56,6 +56,9 @@ export async function purgeUserData(env: Env, userId: string): Promise<void> {
     { table: 'push_tokens', sql: 'DELETE FROM push_tokens WHERE user_id = ?' },
     { table: 'recovery_codes', sql: 'DELETE FROM recovery_codes WHERE user_id = ?' },
     { table: 'login_history', sql: 'DELETE FROM login_history WHERE user_id = ?' },
+    { table: 'webauthn_challenges', sql: 'DELETE FROM webauthn_challenges WHERE user_id = ?' },
+    { table: 'device_pairings', sql: 'DELETE FROM device_pairings WHERE user_id = ?' },
+    { table: 'passkey_credentials', sql: 'DELETE FROM passkey_credentials WHERE user_id = ?' },
 
     // E2EE identity: without these, peers keep wrapping DM keys to devices that
     // will never come back. Envelopes first — they reference the device rows.
@@ -140,5 +143,12 @@ export async function sweepLingeringRows(env: Env): Promise<void> {
     env.DB.prepare(
       'DELETE FROM bridge_dedup WHERE rowid IN (SELECT rowid FROM bridge_dedup WHERE created_at < ? LIMIT ?)',
     ).bind(cutoff, SWEEP_LIMIT),
+    env.DB.prepare(
+      'DELETE FROM webauthn_challenges WHERE rowid IN (SELECT rowid FROM webauthn_challenges WHERE expires_at < ? LIMIT ?)',
+    ).bind(Date.now() - 86_400_000, SWEEP_LIMIT),
+    env.DB.prepare(
+      `UPDATE device_pairings SET status = 'expired'
+       WHERE id IN (SELECT id FROM device_pairings WHERE status IN ('created', 'requested', 'approved') AND expires_at < ? LIMIT ?)`,
+    ).bind(Date.now(), SWEEP_LIMIT),
   ]);
 }
