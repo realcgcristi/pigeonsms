@@ -760,33 +760,72 @@ spaces.get('/:id/members', async (c) => {
   const spaceId = c.req.param('id');
   await requireRole(c, spaceId, user.id, ['owner', 'admin', 'member']);
   const activeSince = Date.now() - 2 * 60_000;
-  const { results } = await c.env.DB.prepare(
+  const limitValue = c.req.query('limit');
+  const paged = limitValue !== undefined;
+  const parsedLimit = Number(limitValue);
+  const limit = paged && Number.isInteger(parsedLimit) ? Math.max(20, Math.min(parsedLimit, 200)) : 100;
+  const parsedCursor = Number(c.req.query('cursor') ?? 0);
+  const cursor = Number.isSafeInteger(parsedCursor) && parsedCursor >= 0 ? parsedCursor : 0;
+  const search = (c.req.query('q') ?? '')
+    .trim()
+    .toLocaleLowerCase()
+    .replaceAll('%', '')
+    .replaceAll('_', '')
+    .replaceAll('\\', '')
+    .slice(0, 64);
+  const pattern = `%${search}%`;
+  const memberSql =
     `SELECT u.id, u.username, u.display_name, u.avatar_key, u.avatar_square_key,
             u.accent, u.last_online, u.flags, sm.role, sm.joined_at,
             CASE WHEN u.last_online >= ? THEN 1 ELSE 0 END AS active
      FROM space_members sm JOIN users u ON u.id = sm.user_id
      WHERE sm.space_id = ? AND u.deleted_at IS NULL
-     ORDER BY CASE sm.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, u.username`,
-  )
-    .bind(activeSince, spaceId)
-    .all();
+       AND (? = '' OR LOWER(COALESCE(NULLIF(u.display_name, ''), u.username)) LIKE ? ESCAPE '\\')
+     ORDER BY CASE sm.role WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END,
+              LOWER(COALESCE(NULLIF(u.display_name, ''), u.username)), u.id` +
+    (paged ? ' LIMIT ? OFFSET ?' : '');
+  const memberStatement = c.env.DB.prepare(memberSql);
+  const { results } = paged
+    ? await memberStatement.bind(activeSince, spaceId, search, pattern, limit, cursor).all()
+    : await memberStatement.bind(activeSince, spaceId, search, pattern).all();
 
-  // Custom role assignments ride along: the role-assign dialog has to know what
-  // a member already has, and without this it opened every checkbox unchecked
-  // and wiped their roles on save.
   const assignments = new Map<string, string[]>();
-  const assigned = await c.env.DB.prepare(
-    `SELECT smr.user_id, smr.role_id
-     FROM space_member_roles smr JOIN space_roles r ON r.id = smr.role_id
-     WHERE smr.space_id = ? ORDER BY r.position DESC, r.created_at`,
-  )
-    .bind(spaceId)
-    .all<{ user_id: string; role_id: string }>();
-  for (const row of assigned.results) {
-    const list = assignments.get(row.user_id) ?? [];
-    list.push(row.role_id);
-    assignments.set(row.user_id, list);
+  const memberIds = results.map((member) => String(member['id']));
+  if (memberIds.length > 0) {
+    const assigned = paged
+      ? await c.env.DB.prepare(
+          `SELECT smr.user_id, smr.role_id
+           FROM space_member_roles smr JOIN space_roles r ON r.id = smr.role_id
+           WHERE smr.space_id = ? AND smr.user_id IN (${memberIds.map(() => '?').join(',')})
+           ORDER BY r.position DESC, r.created_at`,
+        )
+          .bind(spaceId, ...memberIds)
+          .all<{ user_id: string; role_id: string }>()
+      : await c.env.DB.prepare(
+          `SELECT smr.user_id, smr.role_id
+           FROM space_member_roles smr JOIN space_roles r ON r.id = smr.role_id
+           WHERE smr.space_id = ? ORDER BY r.position DESC, r.created_at`,
+        )
+          .bind(spaceId)
+          .all<{ user_id: string; role_id: string }>();
+    for (const row of assigned.results) {
+      const list = assignments.get(row.user_id) ?? [];
+      list.push(row.role_id);
+      assignments.set(row.user_id, list);
+    }
   }
+
+  const pageActive = results.filter((member) => Number(member['active']) === 1).length;
+  const counts = paged
+    ? await c.env.DB.prepare(
+        `SELECT COUNT(*) AS total_count,
+                COALESCE(SUM(CASE WHEN u.last_online >= ? THEN 1 ELSE 0 END), 0) AS active_count
+         FROM space_members sm JOIN users u ON u.id = sm.user_id
+         WHERE sm.space_id = ? AND u.deleted_at IS NULL
+           AND (? = '' OR LOWER(COALESCE(NULLIF(u.display_name, ''), u.username)) LIKE ? ESCAPE '\\')`,
+      ).bind(activeSince, spaceId, search, pattern).first<{ total_count: number; active_count: number }>()
+    : null;
+  const total = Number(counts?.total_count ?? results.length);
 
   return c.json({
     members: results.map((member) => ({
@@ -796,7 +835,9 @@ spaces.get('/:id/members', async (c) => {
       role_ids: assignments.get(String(member['id'])) ?? [],
       active: Number(member['active']) === 1,
     })),
-    active_count: results.filter((member) => Number(member['active']) === 1).length,
+    active_count: Number(counts?.active_count ?? pageActive),
+    total_count: total,
+    next_cursor: paged && cursor + results.length < total ? String(cursor + results.length) : null,
   });
 });
 

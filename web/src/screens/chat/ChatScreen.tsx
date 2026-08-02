@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
 import { api } from '@/api/client'
 import type { ChannelCommandDto, InvitePreviewResponse, MessageDto, SpaceEmojiDto } from '@/api/dto'
 import {
@@ -516,7 +517,9 @@ const Composer = memo(function Composer({
   )
 })
 
-const MessageList = memo(function MessageList({
+const MessageItem = memo(function MessageItem({
+  message,
+  previous,
   messages,
   meId,
   emoji,
@@ -535,6 +538,8 @@ const MessageList = memo(function MessageList({
   canReport,
   read,
 }: {
+  message: ChatMessage
+  previous?: ChatMessage
   messages: ChatMessage[]
   meId: string | undefined
   emoji: SpaceEmojiDto[]
@@ -553,50 +558,44 @@ const MessageList = memo(function MessageList({
   canReport: boolean
   read: Record<string, number>
 }) {
+  const showDay = !previous || !sameDay(previous.created_at ?? 0, message.created_at ?? 0)
+  const showAuthor = !previous || previous.author?.id !== message.author?.id || showDay
   return (
-    <>
-      {messages.map((message, index) => {
-        const previous = messages[index - 1]
-        const showDay = !previous || !sameDay(previous.created_at ?? 0, message.created_at ?? 0)
-        const showAuthor = !previous || previous.author?.id !== message.author?.id || showDay
-        return (
-          <div
-            key={message.id}
-            id={`message-${message.id}`}
-            className="chat__message-anchor"
-          >
-            {showDay ? <div className="chat__day">{daySeparator(message.created_at ?? 0)}</div> : null}
-            <MessageRow
-              message={message}
-              mine={message.author?.id === meId}
-              showAuthor={showAuthor}
-              emoji={emoji}
-              replyTo={messages.find((m) => m.id === message.reply_to)}
-              onReply={() => onReply(message.id)}
-              onEdit={() => onEdit(message.id, message.content ?? '')}
-              onDelete={() => onDelete(message.id)}
-              onRetry={() => onRetry(message.id)}
-              onReact={(value, active) => onReact(message.id, value, active)}
-              onOpenProfile={onOpenProfile}
-              onInvite={onInvite}
-              onVote={(optionId) => onVote(message.id, optionId)}
-              onPin={() => onPin(message)}
-              onSuperPin={() => onSuperPin(message)}
-              onThread={() => onThread(message)}
-              onOpenMedia={() => onOpenMedia(message)}
-              canReport={canReport}
-              seenCount={
-                message.seq
-                  ? Object.entries(read).filter(([userId, seq]) => userId !== meId && seq >= (message.seq ?? 0)).length
-                  : 0
-              }
-            />
-          </div>
-        )
-      })}
-    </>
+    <div id={`message-${message.id}`} className="chat__message-anchor">
+      {showDay ? <div className="chat__day">{daySeparator(message.created_at ?? 0)}</div> : null}
+      <MessageRow
+        message={message}
+        mine={message.author?.id === meId}
+        showAuthor={showAuthor}
+        emoji={emoji}
+        replyTo={messages.find((item) => item.id === message.reply_to)}
+        onReply={() => onReply(message.id)}
+        onEdit={() => onEdit(message.id, message.content ?? '')}
+        onDelete={() => onDelete(message.id)}
+        onRetry={() => onRetry(message.id)}
+        onReact={(value, active) => onReact(message.id, value, active)}
+        onOpenProfile={onOpenProfile}
+        onInvite={onInvite}
+        onVote={(optionId) => onVote(message.id, optionId)}
+        onPin={() => onPin(message)}
+        onSuperPin={() => onSuperPin(message)}
+        onThread={() => onThread(message)}
+        onOpenMedia={() => onOpenMedia(message)}
+        canReport={canReport}
+        seenCount={
+          message.seq
+            ? Object.entries(read).filter(([userId, seq]) => userId !== meId && seq >= (message.seq ?? 0)).length
+            : 0
+        }
+      />
+    </div>
   )
 })
+
+const messageListComponents = {
+  Header: () => <div className="chat__list-pad chat__list-pad--top" />,
+  Footer: () => <div className="chat__list-pad chat__list-pad--bottom" />,
+}
 
 export default function ChatScreen() {
   const { channelId = '' } = useParams()
@@ -632,7 +631,8 @@ export default function ChatScreen() {
   const loadEmoji = useChat((s) => s.loadEmoji)
   const subscribe = useChat((s) => s.subscribe)
 
-  const listRef = useRef<HTMLDivElement>(null)
+  const listRef = useRef<VirtuosoHandle>(null)
+  const positionedRef = useRef('')
   const [replyTo, setReplyTo] = useState<string | null>(null)
   const [editing, setEditing] = useState<{ id: string; content: string } | null>(null)
   const [pollOpen, setPollOpen] = useState(false)
@@ -671,6 +671,7 @@ export default function ChatScreen() {
     dm?.peer.username ??
     'chat'
   const list = messages ?? []
+  const targetMessageId = params.get('message')
 
   useEffect(() => {
     if (isSpace) void loadSpaces()
@@ -687,40 +688,47 @@ export default function ChatScreen() {
     if (!list.length) return
     markRead(channelId)
     clearUnread(channelId)
-    const targetMessage = params.get('message')
-    const scrollToEnd = () => {
-      const node = listRef.current
-      if (!node) return
-      const unreadMessage = unreadStart === undefined
-        ? null
-        : list.find((message) => (message.seq ?? 0) > unreadStart)
-      const target = targetMessage
-        ? document.getElementById(`message-${targetMessage}`)
-        : unreadMessage
-          ? document.getElementById(`message-${unreadMessage.id}`)
-          : null
-      if (target) {
-        target.scrollIntoView({ block: 'center' })
+    const key = `${channelId}:${targetMessageId ?? ''}`
+    if (positionedRef.current === key) return
+    const directIndex = targetMessageId ? list.findIndex((message) => message.id === targetMessageId) : -1
+    const unreadIndex = unreadStart === undefined
+      ? -1
+      : list.findIndex((message) => (message.seq ?? 0) > unreadStart)
+    const index = directIndex >= 0 ? directIndex : unreadIndex >= 0 ? unreadIndex : list.length - 1
+    let retry = 0
+    let highlight = 0
+    let attempts = 0
+    const position = () => {
+      const handle = listRef.current
+      if (!handle && attempts < 5) {
+        attempts += 1
+        retry = window.setTimeout(position, 40)
+        return
+      }
+      if (!handle) return
+      handle.scrollToIndex({ index, align: index === list.length - 1 ? 'end' : 'center' })
+      positionedRef.current = key
+      highlight = window.setTimeout(() => {
+        const id = list[index]?.id
+        const target = id ? document.getElementById(`message-${id}`) : null
+        if (!target || index === list.length - 1) return
         target.classList.add('chat__message-anchor--highlight')
         window.setTimeout(() => target.classList.remove('chat__message-anchor--highlight'), 2200)
-      } else {
-        node.scrollTop = node.scrollHeight
-      }
+      }, 160)
     }
-    scrollToEnd()
-    const frame = requestAnimationFrame(scrollToEnd)
-    const timeout = window.setTimeout(scrollToEnd, 80)
+    const frame = requestAnimationFrame(position)
     return () => {
       cancelAnimationFrame(frame)
-      window.clearTimeout(timeout)
+      window.clearTimeout(retry)
+      window.clearTimeout(highlight)
     }
-  }, [list.length, channelId, markRead, clearUnread, params, unreadStart])
+  }, [channelId, clearUnread, list, markRead, targetMessageId, unreadStart])
 
   const jumpToUnread = useCallback(() => {
     if (unreadStart === undefined) return
-    const message = list.find((item) => (item.seq ?? 0) > unreadStart)
-    if (!message) return
-    document.getElementById(`message-${message.id}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    const index = list.findIndex((item) => (item.seq ?? 0) > unreadStart)
+    if (index < 0) return
+    listRef.current?.scrollToIndex({ index, align: 'center', behavior: 'smooth' })
   }, [list, unreadStart])
 
   const submit = useCallback(
@@ -790,16 +798,19 @@ export default function ChatScreen() {
   )
 
   const jumpToMessage = useCallback((id: string) => {
-    const target = document.getElementById(`message-${id}`)
-    if (!target) {
+    const index = list.findIndex((message) => message.id === id)
+    if (index < 0) {
       toast.error('load older messages to jump to this one')
       return
     }
-    target.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    target.classList.add('chat__message-anchor--highlight')
-    window.setTimeout(() => target.classList.remove('chat__message-anchor--highlight'), 2200)
+    listRef.current?.scrollToIndex({ index, align: 'center', behavior: 'smooth' })
+    window.setTimeout(() => {
+      const target = document.getElementById(`message-${id}`)
+      target?.classList.add('chat__message-anchor--highlight')
+      if (target) window.setTimeout(() => target.classList.remove('chat__message-anchor--highlight'), 2200)
+    }, 180)
     setDetailsOpen(false)
-  }, [toast])
+  }, [list, toast])
 
   const onPin = useCallback(
     async (message: ChatMessage) => {
@@ -1020,38 +1031,52 @@ export default function ChatScreen() {
         </div>
       ) : null}
 
-      <div
-        className="chat__list"
-        ref={listRef}
-        onScroll={(e) => {
-          if (e.currentTarget.scrollTop < 60) void loadMore(channelId)
-        }}
-          >
-          {unreadStart !== undefined && list.some((message) => (message.seq ?? 0) > unreadStart) ? (
-            <button type="button" className="chat__unread-jump" onClick={jumpToUnread}>
-              jump to unread
-            </button>
-          ) : null}
-          <MessageList
-          messages={list}
-          meId={me?.id}
-          emoji={emoji}
-          onReply={setReplyTo}
-          onEdit={onEdit}
-          onDelete={onDelete}
-          onRetry={onRetry}
-          onReact={onReact}
-          onOpenProfile={onOpenProfile}
-          onInvite={(code) => void openInvite(code)}
-          onVote={onVote}
-          onPin={(message) => void onPin(message)}
-          onSuperPin={(message) => void onSuperPin(message)}
-          onThread={(message) => void onThread(message)}
-          onOpenMedia={setMediaMessage}
-          canReport={isSpace}
-          read={read ?? {}}
+      <div className="chat__list-shell">
+        {unreadStart !== undefined && list.some((message) => (message.seq ?? 0) > unreadStart) ? (
+          <button type="button" className="chat__unread-jump" onClick={jumpToUnread}>
+            jump to unread
+          </button>
+        ) : null}
+        {list.length > 0 ? (
+          <Virtuoso
+            key={channelId}
+            ref={listRef}
+            className="chat__list chat__list--virtual"
+            data={list}
+            computeItemKey={(_, message) => message.id}
+            components={messageListComponents}
+            initialTopMostItemIndex={list.length - 1}
+            increaseViewportBy={{ top: 900, bottom: 600 }}
+            followOutput={(atBottom) => atBottom ? 'smooth' : false}
+            startReached={() => void loadMore(channelId)}
+            itemContent={(index, message) => (
+              <MessageItem
+                message={message}
+                previous={list[index - 1]}
+                messages={list}
+                meId={me?.id}
+                emoji={emoji}
+                onReply={setReplyTo}
+                onEdit={onEdit}
+                onDelete={onDelete}
+                onRetry={onRetry}
+                onReact={onReact}
+                onOpenProfile={onOpenProfile}
+                onInvite={(code) => void openInvite(code)}
+                onVote={onVote}
+                onPin={(item) => void onPin(item)}
+                onSuperPin={(item) => void onSuperPin(item)}
+                onThread={(item) => void onThread(item)}
+                onOpenMedia={setMediaMessage}
+                canReport={isSpace}
+                read={read ?? {}}
+              />
+            )}
           />
-        </div>
+        ) : (
+          <div className="chat__list-empty">no messages yet</div>
+        )}
+      </div>
 
       {replyTo ? (
         <div className="composer__reply">
