@@ -25,11 +25,36 @@
         android:theme="@style/Theme.Pigeon"
         android:supportsRtl="true">
 
+        <meta-data
+            android:name="asset_statements"
+            android:resource="@string/asset_statements" />
+        <meta-data
+            android:name="com.google.mlkit.vision.DEPENDENCIES"
+            android:value="barcode_ui" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize|density"
-            android:windowSoftInputMode="adjustResize" />
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="https"
+                    android:host="pigeonsms.aldi.best"
+                    android:pathPrefix="/pair" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="pigeonsms"
+                    android:host="pair" />
+            </intent-filter>
+        </activity>
 
         <!-- switchable launcher icons: exactly one alias is enabled at a time -->
                 <activity-alias android:name=".Icon_photorealistic" android:targetActivity=".MainActivity" android:icon="@mipmap/ic_photorealistic" android:enabled="false" android:exported="true">

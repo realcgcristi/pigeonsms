@@ -19,6 +19,58 @@ data class ApiUser(
 data class AuthResponse(val token: String, val user: ApiUser)
 
 @Serializable
+data class PasskeyOptionsResponse(
+    val challenge_id: String,
+    val options: JsonObject,
+)
+
+@Serializable
+data class PasskeyDto(
+    val id: String,
+    val name: String,
+    val rp_id: String,
+    val transports: List<String> = emptyList(),
+    val device_type: String = "singleDevice",
+    val backed_up: Boolean = false,
+    val created_at: Long = 0,
+    val last_used: Long? = null,
+)
+
+@Serializable data class PasskeyResponse(val passkey: PasskeyDto)
+@Serializable data class PasskeysResponse(val passkeys: List<PasskeyDto> = emptyList())
+
+@Serializable
+data class PairingDto(
+    val id: String,
+    val status: String,
+    val requested_device_name: String? = null,
+    val requested_user_agent: String? = null,
+    val verification_code: String? = null,
+    val created_at: Long = 0,
+    val expires_at: Long = 0,
+    val requested_at: Long? = null,
+    val approved_at: Long? = null,
+    val claimed_at: Long? = null,
+    val denied_at: Long? = null,
+    val cancelled_at: Long? = null,
+)
+
+@Serializable
+data class PairingInviteDto(
+    val id: String,
+    val secret: String,
+    val uri: String,
+    val deep_link: String? = null,
+    val status: String,
+    val created_at: Long,
+    val expires_at: Long,
+)
+
+@Serializable data class PairingResponse(val pairing: PairingDto)
+@Serializable data class PairingInviteResponse(val pairing: PairingInviteDto)
+@Serializable data class PairingsResponse(val pairings: List<PairingDto> = emptyList())
+
+@Serializable
 data class MeResponse(val user: ApiUser)
 
 @Serializable

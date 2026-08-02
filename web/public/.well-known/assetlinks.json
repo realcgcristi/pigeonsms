@@ -1,0 +1,15 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls",
+      "delegate_permission/common.get_login_creds"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "app.pigeonsms",
+      "sha256_cert_fingerprints": [
+        "50:FC:57:9A:0E:28:95:1A:47:EB:61:59:CB:25:06:73:6B:90:E4:2F:57:07:A7:AA:70:F7:D1:B9:65:12:FE:BF"
+      ]
+    }
+  }
+]

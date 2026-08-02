@@ -51,13 +51,16 @@ jobs:
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
-          if [ -n "$KEYSTORE_BASE64" ]; then
-            echo "$KEYSTORE_BASE64" | base64 -d > pigeon-debug.keystore
-          else
-            keytool -genkey -v -keystore pigeon-debug.keystore \
-              -storepass android -keypass android -alias androiddebugkey \
-              -keyalg RSA -keysize 2048 -validity 10000 \
-              -dname "CN=Android Debug,O=Android,C=US"
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "KEYSTORE_BASE64 is required for an official rc build"
+            exit 1
+          fi
+          echo "$KEYSTORE_BASE64" | base64 -d > pigeon-debug.keystore
+          actual=$(keytool -exportcert -keystore pigeon-debug.keystore -storepass android -alias androiddebugkey | openssl dgst -sha256 -r | cut -d' ' -f1 | tr '[:lower:]' '[:upper:]' | sed 's/../&:/g;s/:$//')
+          expected="50:FC:57:9A:0E:28:95:1A:47:EB:61:59:CB:25:06:73:6B:90:E4:2F:57:07:A7:AA:70:F7:D1:B9:65:12:FE:BF"
+          if [ "$actual" != "$expected" ]; then
+            echo "android signing certificate does not match assetlinks.json"
+            exit 1
           fi
       - name: firebase config
         working-directory: android

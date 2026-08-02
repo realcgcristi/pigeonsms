@@ -78,6 +78,10 @@ dependencies {
     implementation(libs.paging.compose)
     implementation(libs.work.runtime)
     implementation(libs.firebase.messaging)
+    implementation(libs.androidx.credentials)
+    implementation(libs.androidx.credentials.play.services.auth)
+    implementation(libs.google.code.scanner)
+    implementation(libs.zxing.core)
     // Native WebRTC (org.webrtc.*) — replaces the WebView getUserMedia path,
     // which fails with NotReadableError on some devices' mic capture.
     implementation(libs.webrtc)
@@ -87,6 +91,7 @@ dependencies {
     implementation(libs.ktor.client.websockets)
     implementation(libs.compose.ui.tooling.preview)
     debugImplementation(libs.compose.ui.tooling)
+    testImplementation(kotlin("test"))
 }
 
 // Push goes live only when the Firebase config is present — the build (and the

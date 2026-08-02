@@ -1,16 +1,21 @@
 package app.pigeonsms.ui.onboarding
 
+import android.app.Activity
 import android.os.Build
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.pigeonsms.data.AuthRepository
 import app.pigeonsms.network.PigeonApiException
+import app.pigeonsms.pairing.PairingLinks
+import app.pigeonsms.security.AndroidPasskeys
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-enum class OnboardingStep { Welcome, Invite, Details, Login }
+enum class OnboardingStep { Welcome, Invite, Details, Login, Pairing }
 
 data class OnboardingUiState(
     val step: OnboardingStep = OnboardingStep.Welcome,
@@ -22,6 +27,8 @@ data class OnboardingUiState(
     val loginPassword: String = "",
     val totp: String = "",
     val needsTotp: Boolean = false,
+    val pairingStatus: String? = null,
+    val pairingCode: String? = null,
     val loading: Boolean = false,
     val error: String? = null,
 )
@@ -31,8 +38,22 @@ class OnboardingViewModel(private val repo: AuthRepository) : ViewModel() {
     val state: StateFlow<OnboardingUiState> = _state
 
     private val deviceName: String = "${Build.MANUFACTURER} ${Build.MODEL}".trim().ifBlank { "android" }
+    private var pairingJob: Job? = null
 
-    fun goTo(step: OnboardingStep) = _state.update { it.copy(step = step, error = null, needsTotp = false, totp = "") }
+    fun goTo(step: OnboardingStep) {
+        if (step != OnboardingStep.Pairing) pairingJob?.cancel()
+        _state.update {
+            it.copy(
+                step = step,
+                error = null,
+                needsTotp = false,
+                totp = "",
+                pairingStatus = null,
+                pairingCode = null,
+                loading = false,
+            )
+        }
+    }
     fun setInvite(v: String) = _state.update { it.copy(invite = v.uppercase(), error = null) }
     fun setUsername(v: String) = _state.update { it.copy(username = v.lowercase().trim(), error = null) }
     fun setEmail(v: String) = _state.update { it.copy(email = v.trim(), error = null) }
@@ -74,6 +95,66 @@ class OnboardingViewModel(private val repo: AuthRepository) : ViewModel() {
             }
         }
     }
+
+    fun submitPasskey(activity: Activity) {
+        _state.update { it.copy(loading = true, error = null) }
+        viewModelScope.launch {
+            try {
+                AndroidPasskeys.signIn(activity, repo, _state.value.loginField, deviceName)
+                _state.update { it.copy(loading = false) }
+            } catch (error: Throwable) {
+                _state.update { it.copy(loading = false, error = AndroidPasskeys.message(error)) }
+            }
+        }
+    }
+
+    fun startPairing(value: String) {
+        val invite = PairingLinks.parse(value) ?: return fail("that pairing qr is invalid or belongs to another server")
+        pairingJob?.cancel()
+        pairingJob = viewModelScope.launch {
+            val claimSecret = PairingLinks.claimSecret()
+            _state.update {
+                it.copy(
+                    step = OnboardingStep.Pairing,
+                    pairingStatus = "requesting",
+                    pairingCode = null,
+                    loading = true,
+                    error = null,
+                )
+            }
+            try {
+                var pairing = repo.requestPairing(invite.id, invite.secret, claimSecret, deviceName)
+                while (true) {
+                    _state.update {
+                        it.copy(
+                            pairingStatus = pairing.status,
+                            pairingCode = pairing.verification_code,
+                            loading = pairing.status == "requested" || pairing.status == "approved",
+                        )
+                    }
+                    when (pairing.status) {
+                        "approved" -> {
+                            repo.claimPairing(invite.id, invite.secret, claimSecret)
+                            _state.update { it.copy(loading = false, pairingStatus = "claimed") }
+                            return@launch
+                        }
+                        "denied", "cancelled", "expired" -> {
+                            fail("pairing was ${pairing.status}")
+                            return@launch
+                        }
+                    }
+                    delay(1_400)
+                    pairing = repo.pairingStatus(invite.id, invite.secret, claimSecret)
+                }
+            } catch (e: PigeonApiException) {
+                fail(e.message)
+            } catch (_: Exception) {
+                fail("pairing connection was lost")
+            }
+        }
+    }
+
+    fun showError(message: String) = fail(message)
 
     private fun fail(m: String) = _state.update { it.copy(loading = false, error = m) }
 

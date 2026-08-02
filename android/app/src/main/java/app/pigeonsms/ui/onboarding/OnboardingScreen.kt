@@ -1,5 +1,8 @@
 package app.pigeonsms.ui.onboarding
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Spring
@@ -20,6 +23,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -39,11 +43,13 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -55,6 +61,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -77,22 +84,61 @@ import app.pigeonsms.design.theme.novaAuroraBackground
 import app.pigeonsms.design.theme.novaHalo
 import app.pigeonsms.design.theme.rememberNovaPulse
 import app.pigeonsms.ui.pigeonVm
+import com.google.mlkit.vision.barcode.common.Barcode
+import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 
 @Composable
-fun OnboardingScreen() {
+fun OnboardingScreen(
+    pairingLink: String? = null,
+    onPairingConsumed: (String?) -> Unit = {},
+) {
+    val vm: OnboardingViewModel = pigeonVm { c, _ -> OnboardingViewModel(c.authRepository) }
+    val context = LocalContext.current
+    val activity = remember(context) { context.findActivity() }
+    val scanner = remember(context) {
+        val options = GmsBarcodeScannerOptions.Builder()
+            .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
+            .enableAutoZoom()
+            .build()
+        GmsBarcodeScanning.getClient(context, options)
+    }
+    val scanPairing = {
+        scanner.startScan()
+            .addOnSuccessListener { result ->
+                result.rawValue?.let(vm::startPairing) ?: vm.showError("that qr code is empty")
+            }
+            .addOnFailureListener { error ->
+                vm.showError(error.message ?: "could not open the qr scanner")
+            }
+        Unit
+    }
+    val passkeyLogin = {
+        if (activity == null) vm.showError("passkeys are unavailable in this window")
+        else vm.submitPasskey(activity)
+    }
+    LaunchedEffect(pairingLink) {
+        if (pairingLink != null) {
+            vm.startPairing(pairingLink)
+            onPairingConsumed(pairingLink)
+        }
+    }
     // 3-way skin dispatch, listed explicitly so Classic isn't misrouted through a
     // catch-all `else`. Nova and Classic both render the neutral flat body via
     // ExOnboardingScreen; only Galaxy gets the deep aurora/halo treatment.
     when (LocalUiSkin.current) {
-        UiSkin.Nova -> ExOnboardingScreen()
-        UiSkin.Classic -> ExOnboardingScreen()
-        UiSkin.Galaxy -> GalaxyOnboardingScreen()
+        UiSkin.Nova -> ExOnboardingScreen(vm, scanPairing, passkeyLogin)
+        UiSkin.Classic -> ExOnboardingScreen(vm, scanPairing, passkeyLogin)
+        UiSkin.Galaxy -> GalaxyOnboardingScreen(vm, scanPairing, passkeyLogin)
     }
 }
 
 @Composable
-private fun GalaxyOnboardingScreen() {
-    val vm: OnboardingViewModel = pigeonVm { c, _ -> OnboardingViewModel(c.authRepository) }
+private fun GalaxyOnboardingScreen(
+    vm: OnboardingViewModel,
+    onScanPairing: () -> Unit,
+    onPasskeyLogin: () -> Unit,
+) {
     val state by vm.state.collectAsState()
 
     BackHandler(enabled = state.step != OnboardingStep.Welcome) { vm.goTo(OnboardingStep.Welcome) }
@@ -187,10 +233,11 @@ private fun GalaxyOnboardingScreen() {
             label = "step",
         ) { step ->
             when (step) {
-                OnboardingStep.Welcome -> Welcome(vm)
+                OnboardingStep.Welcome -> Welcome(vm, state, onScanPairing)
                 OnboardingStep.Invite -> Invite(vm, state)
                 OnboardingStep.Details -> Details(vm, state)
-                OnboardingStep.Login -> Login(vm, state)
+                OnboardingStep.Login -> Login(vm, state, onPasskeyLogin)
+                OnboardingStep.Pairing -> Pairing(vm, state)
             }
         }
     }
@@ -202,7 +249,7 @@ private fun Step(content: @Composable ColumnScope.() -> Unit) {
 }
 
 @Composable
-private fun Welcome(vm: OnboardingViewModel) = Step {
+private fun Welcome(vm: OnboardingViewModel, state: OnboardingUiState, onScanPairing: () -> Unit) = Step {
     val accent = MaterialTheme.colorScheme.primary
     val cyan = MaterialTheme.colorScheme.secondary
     val nova = LocalExperimentalRedesign.current
@@ -267,6 +314,10 @@ private fun Welcome(vm: OnboardingViewModel) = Step {
     TextButton(onClick = { vm.goTo(OnboardingStep.Login) }, modifier = Modifier.fillMaxWidth().padding(top = Spacing.s)) {
         Text("i already have an account", color = MaterialTheme.colorScheme.secondary)
     }
+    TextButton(onClick = onScanPairing, modifier = Modifier.fillMaxWidth()) {
+        Text("scan a device pairing qr", color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+    Err(state.error)
 }
 
 @Composable
@@ -286,12 +337,46 @@ private fun Details(vm: OnboardingViewModel, s: OnboardingUiState) = Step {
 }
 
 @Composable
-private fun Login(vm: OnboardingViewModel, s: OnboardingUiState) = Step {
+private fun Login(vm: OnboardingViewModel, s: OnboardingUiState, onPasskeyLogin: () -> Unit) = Step {
     Head("welcome back", "")
     Field(s.loginField, vm::setLoginField, "username or email"); Spacer(Modifier.height(Spacing.m))
     Field(s.loginPassword, vm::setLoginPassword, "password", isPassword = true)
     if (s.needsTotp) { Spacer(Modifier.height(Spacing.m)); Field(s.totp, vm::setTotp, "2fa code", KeyboardType.Number) }
     Err(s.error); Spacer(Modifier.height(Spacing.l)); Primary("sign in", s.loading, vm::submitLogin)
+    Spacer(Modifier.height(Spacing.s))
+    OutlinedButton(onClick = onPasskeyLogin, enabled = !s.loading, modifier = Modifier.fillMaxWidth().height(Dimens.ctaHeight), shape = Corners.button) {
+        Text("use a passkey")
+    }
+}
+
+@Composable
+private fun Pairing(vm: OnboardingViewModel, s: OnboardingUiState) = Step {
+    Head("check both screens", "make sure this code matches the device that already has your account.")
+    Text(
+        s.pairingCode ?: "------",
+        style = MaterialTheme.typography.displayMedium,
+        color = MaterialTheme.colorScheme.primary,
+        letterSpacing = 8.sp,
+    )
+    Spacer(Modifier.height(Spacing.m))
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        if (s.loading) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+        Text(
+            when (s.pairingStatus) {
+                "requesting" -> "requesting access"
+                "approved" -> "finishing sign in"
+                else -> "waiting for approval"
+            },
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = if (s.loading) Spacing.m else 0.dp),
+        )
+    }
+    Err(s.error)
+    Spacer(Modifier.height(Spacing.l))
+    TextButton(onClick = { vm.goTo(OnboardingStep.Welcome) }, modifier = Modifier.fillMaxWidth()) {
+        Text("cancel")
+    }
 }
 
 @Composable
@@ -385,8 +470,11 @@ private fun Err(error: String?) {
 // ---------------------------------------------------------------------------
 
 @Composable
-private fun ExOnboardingScreen() {
-    val vm: OnboardingViewModel = pigeonVm { c, _ -> OnboardingViewModel(c.authRepository) }
+private fun ExOnboardingScreen(
+    vm: OnboardingViewModel,
+    onScanPairing: () -> Unit,
+    onPasskeyLogin: () -> Unit,
+) {
     val state by vm.state.collectAsState()
 
     BackHandler(enabled = state.step != OnboardingStep.Welcome) { vm.goTo(OnboardingStep.Welcome) }
@@ -445,10 +533,11 @@ private fun ExOnboardingScreen() {
             label = "step",
         ) { step ->
             when (step) {
-                OnboardingStep.Welcome -> ExWelcome(vm)
+                OnboardingStep.Welcome -> ExWelcome(vm, state, onScanPairing)
                 OnboardingStep.Invite -> ExInvite(vm, state)
                 OnboardingStep.Details -> ExDetails(vm, state)
-                OnboardingStep.Login -> ExLogin(vm, state)
+                OnboardingStep.Login -> ExLogin(vm, state, onPasskeyLogin)
+                OnboardingStep.Pairing -> Pairing(vm, state)
             }
         }
     }
@@ -460,7 +549,7 @@ private fun ExStep(content: @Composable ColumnScope.() -> Unit) {
 }
 
 @Composable
-private fun ExWelcome(vm: OnboardingViewModel) = ExStep {
+private fun ExWelcome(vm: OnboardingViewModel, state: OnboardingUiState, onScanPairing: () -> Unit) = ExStep {
     val accent = MaterialTheme.colorScheme.primary
     val glyphSize = 140.dp
     Box(
@@ -498,6 +587,10 @@ private fun ExWelcome(vm: OnboardingViewModel) = ExStep {
     TextButton(onClick = { vm.goTo(OnboardingStep.Login) }, modifier = Modifier.fillMaxWidth().padding(top = Spacing.s)) {
         Text("i already have an account", color = MaterialTheme.colorScheme.secondary)
     }
+    TextButton(onClick = onScanPairing, modifier = Modifier.fillMaxWidth()) {
+        Text("scan a device pairing qr", color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+    Err(state.error)
 }
 
 @Composable
@@ -517,12 +610,16 @@ private fun ExDetails(vm: OnboardingViewModel, s: OnboardingUiState) = ExStep {
 }
 
 @Composable
-private fun ExLogin(vm: OnboardingViewModel, s: OnboardingUiState) = ExStep {
+private fun ExLogin(vm: OnboardingViewModel, s: OnboardingUiState, onPasskeyLogin: () -> Unit) = ExStep {
     ExHead("welcome back", "")
     ExField(s.loginField, vm::setLoginField, "username or email"); Spacer(Modifier.height(Spacing.m))
     ExField(s.loginPassword, vm::setLoginPassword, "password", isPassword = true)
     if (s.needsTotp) { Spacer(Modifier.height(Spacing.m)); ExField(s.totp, vm::setTotp, "2fa code", KeyboardType.Number) }
     Err(s.error); Spacer(Modifier.height(Spacing.l)); ExPrimary("sign in", s.loading, vm::submitLogin)
+    Spacer(Modifier.height(Spacing.s))
+    OutlinedButton(onClick = onPasskeyLogin, enabled = !s.loading, modifier = Modifier.fillMaxWidth().height(Dimens.ctaHeight), shape = NovaCorners.button) {
+        Text("use a passkey")
+    }
 }
 
 @Composable
@@ -574,4 +671,10 @@ private fun ExPrimary(text: String, loading: Boolean, onClick: () -> Unit) {
         if (loading) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
         else Text(text, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onPrimary)
     }
+}
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }

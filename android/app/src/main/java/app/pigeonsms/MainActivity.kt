@@ -57,11 +57,12 @@ private sealed interface AuthState {
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        publishNotificationIntent(intent)
+        publishIntent(intent)
         enableEdgeToEdge()
         requestHighRefreshRate()
         window.setBackgroundDrawable(null) // one fewer opaque layer under the window → less overdraw
-        val container = (application as PigeonApp).container
+        val pigeonApp = application as PigeonApp
+        val container = pigeonApp.container
         val startupCrash = CrashReporter.consume(this)
         setContent {
             val theme by container.themeStore.prefs.collectAsState(initial = ThemePrefs())
@@ -109,13 +110,22 @@ class MainActivity : ComponentActivity() {
                         val auth by container.sessionStore.session
                             .map<LocalSession?, AuthState> { if (it == null) AuthState.LoggedOut else AuthState.LoggedIn(it) }
                             .collectAsState(initial = AuthState.Loading)
+                        val pairingLink by pigeonApp.pendingPairingLink.collectAsState()
 
                         when (val a = auth) {
                             AuthState.Loading -> Splash()
                             // key on the auth state so the onboarding graph is fresh each logout —
                             // fixes the retained-VM bug (landed on signup step + stale fields)
-                            AuthState.LoggedOut -> OnboardingScreen()
-                            is AuthState.LoggedIn -> AppShell(session = a.session)
+                            AuthState.LoggedOut -> OnboardingScreen(
+                                pairingLink = pairingLink,
+                                onPairingConsumed = pigeonApp::consumePairingLink,
+                            )
+                            is AuthState.LoggedIn -> {
+                                androidx.compose.runtime.LaunchedEffect(pairingLink) {
+                                    if (pairingLink != null) pigeonApp.consumePairingLink(pairingLink)
+                                }
+                                AppShell(session = a.session)
+                            }
                         }
                     }
                 }
@@ -126,11 +136,11 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        publishNotificationIntent(intent)
+        publishIntent(intent)
     }
 
-    private fun publishNotificationIntent(intent: Intent?) {
-        (application as? PigeonApp)?.publishNotificationIntent(intent)
+    private fun publishIntent(intent: Intent?) {
+        (application as? PigeonApp)?.publishIntent(intent)
     }
 
     /** Ask the platform for the highest available refresh rate (120Hz where present). */

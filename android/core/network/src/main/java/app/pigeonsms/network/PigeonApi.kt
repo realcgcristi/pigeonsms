@@ -81,6 +81,95 @@ class PigeonApi(
             })
         }.unwrap<AuthResponse>()
 
+    suspend fun passkeyRegistrationOptions() = client.post("$baseUrl/auth/passkeys/register/options") {
+        auth(); contentType(ContentType.Application.Json)
+        setBody(buildJsonObject { put("platform", "android") })
+    }.unwrap<PasskeyOptionsResponse>()
+
+    suspend fun verifyPasskeyRegistration(challengeId: String, response: JsonObject, name: String) =
+        client.post("$baseUrl/auth/passkeys/register/verify") {
+            auth(); contentType(ContentType.Application.Json)
+            setBody(buildJsonObject {
+                put("challenge_id", challengeId)
+                put("response", response)
+                put("name", name)
+            })
+        }.unwrap<PasskeyResponse>().passkey
+
+    suspend fun passkeyAuthenticationOptions(login: String? = null) =
+        client.post("$baseUrl/auth/passkeys/authenticate/options") {
+            contentType(ContentType.Application.Json)
+            setBody(buildJsonObject {
+                put("platform", "android")
+                if (!login.isNullOrBlank()) put("login", login.trim())
+            })
+        }.unwrap<PasskeyOptionsResponse>()
+
+    suspend fun verifyPasskeyAuthentication(challengeId: String, response: JsonObject, deviceName: String) =
+        client.post("$baseUrl/auth/passkeys/authenticate/verify") {
+            contentType(ContentType.Application.Json)
+            setBody(buildJsonObject {
+                put("challenge_id", challengeId)
+                put("response", response)
+                put("device_name", deviceName)
+            })
+        }.unwrap<AuthResponse>()
+
+    suspend fun passkeys() = client.get("$baseUrl/auth/passkeys") { auth() }.unwrap<PasskeysResponse>().passkeys
+
+    suspend fun revokePasskey(id: String) {
+        client.delete("$baseUrl/auth/passkeys/$id") { auth() }.unwrap<OkResponse>()
+    }
+
+    suspend fun createPairing() = client.post("$baseUrl/auth/pairings") { auth() }
+        .unwrap<PairingInviteResponse>().pairing
+
+    suspend fun pairings() = client.get("$baseUrl/auth/pairings") { auth() }
+        .unwrap<PairingsResponse>().pairings
+
+    suspend fun pairing(id: String) = client.get("$baseUrl/auth/pairings/$id") { auth() }
+        .unwrap<PairingResponse>().pairing
+
+    suspend fun requestPairing(id: String, secret: String, claimSecret: String, deviceName: String) =
+        client.post("$baseUrl/auth/pairings/$id/request") {
+            contentType(ContentType.Application.Json)
+            setBody(buildJsonObject {
+                put("secret", secret)
+                put("claim_secret", claimSecret)
+                put("device_name", deviceName)
+            })
+        }.unwrap<PairingResponse>().pairing
+
+    suspend fun pairingStatus(id: String, secret: String, claimSecret: String) =
+        client.post("$baseUrl/auth/pairings/$id/status") {
+            contentType(ContentType.Application.Json)
+            setBody(buildJsonObject {
+                put("secret", secret)
+                put("claim_secret", claimSecret)
+            })
+        }.unwrap<PairingResponse>().pairing
+
+    suspend fun approvePairing(id: String) {
+        client.post("$baseUrl/auth/pairings/$id/approve") { auth() }.unwrap<OkResponse>()
+    }
+
+    suspend fun denyPairing(id: String) {
+        client.post("$baseUrl/auth/pairings/$id/deny") { auth() }.unwrap<OkResponse>()
+    }
+
+    suspend fun cancelPairing(id: String) {
+        client.delete("$baseUrl/auth/pairings/$id") { auth() }.unwrap<OkResponse>()
+    }
+
+    suspend fun claimPairing(id: String, secret: String, claimSecret: String) =
+        client.post("$baseUrl/auth/pairings/$id/claim") {
+            contentType(ContentType.Application.Json)
+            setBody(buildJsonObject {
+                put("secret", secret)
+                put("claim_secret", claimSecret)
+            })
+        }.unwrap<AuthResponse>()
+
     suspend fun me() = client.get("$baseUrl/auth/me") { auth() }.unwrap<MeResponse>().user
     suspend fun logout() { client.post("$baseUrl/auth/logout") { auth() }.unwrap<OkResponse>() }
     suspend fun sessions() = client.get("$baseUrl/auth/sessions") { auth() }.unwrap<SessionsResponse>().sessions

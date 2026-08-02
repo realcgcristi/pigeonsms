@@ -17,6 +17,8 @@ class PigeonApp : Application(), ImageLoaderFactory {
     // logged-in AppShell consumes it.
     private val _pendingNotificationTarget = MutableStateFlow<NotificationTarget?>(null)
     val pendingNotificationTarget: StateFlow<NotificationTarget?> = _pendingNotificationTarget.asStateFlow()
+    private val _pendingPairingLink = MutableStateFlow<String?>(null)
+    val pendingPairingLink: StateFlow<String?> = _pendingPairingLink.asStateFlow()
 
     override fun onCreate() {
         super.onCreate()
@@ -29,13 +31,22 @@ class PigeonApp : Application(), ImageLoaderFactory {
         .crossfade(true)
         .build()
 
-    fun publishNotificationIntent(intent: Intent?) {
+    fun publishIntent(intent: Intent?) {
         intent?.notificationTargetOrNull()?.let { _pendingNotificationTarget.value = it }
+        intent?.dataString
+            ?.takeIf { app.pigeonsms.pairing.PairingLinks.parse(it) != null }
+            ?.let { _pendingPairingLink.value = it }
     }
 
     fun consumeNotificationTarget(target: NotificationTarget? = _pendingNotificationTarget.value) {
         if (target != null && _pendingNotificationTarget.value == target) {
             _pendingNotificationTarget.value = null
+        }
+    }
+
+    fun consumePairingLink(link: String? = _pendingPairingLink.value) {
+        if (link != null && _pendingPairingLink.value == link) {
+            _pendingPairingLink.value = null
         }
     }
 }
