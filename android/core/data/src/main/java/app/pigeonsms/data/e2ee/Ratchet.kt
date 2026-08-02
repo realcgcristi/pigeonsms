@@ -1,99 +1,208 @@
 package app.pigeonsms.data.e2ee
 
+import org.json.JSONObject
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
-/**
- * A compact, symmetric-key Double Ratchet over the per-DM key (EXPERIMENTAL, flag-OFF).
- *
- * SCOPE / SIMPLIFICATION: this is the *symmetric* ratchet only — root + sending +
- * receiving chains keyed off a shared DM key delivered via sealed-box [KeyEnvelopeDto].
- * It gives forward secrecy across messages within an established key. It intentionally
- * does NOT (yet) do the DH ratchet step (fresh ephemeral X25519 per round-trip) that
- * gives break-in recovery — both sides derive their initial root from the SAME shared
- * key, so we skip the header-key DH exchange for v1.
- *
- * TODO(e2ee): add the DH ratchet (ephemeral keys in the message header, root-chain KDF
- * on each received new ratchet key) for post-compromise security. Requires on-device
- * testing of out-of-order delivery + the skipped-message-key cache below.
- * TODO(e2ee): bound [skipped] and persist/evict it; right now MAX_SKIP caps a single
- * gap but the map is unbounded across gaps.
- *
- * Wire format of one ciphertext (before base64): header(counter as 8-byte BE) then the
- * AEAD box from [Sodium.aeadSeal] with the header as associated data.
- */
-internal class Ratchet(private var state: RatchetState) {
+data class RatchetHeader(
+    val v: Int = 1,
+    val d: String,
+    val k: String,
+    val p: Long,
+    val n: Long,
+)
 
+data class RatchetPacket(
+    val header: RatchetHeader,
+    val iv: String,
+    val ciphertext: String,
+)
+
+data class RatchetState(
+    val channelId: String,
+    val localDeviceId: String,
+    val remoteDeviceId: String,
+    val rootKey: ByteArray,
+    val selfPublicKey: ByteArray,
+    val selfSecretKey: ByteArray,
+    val remoteIdentity: ByteArray,
+    val remoteKey: ByteArray,
+    val sendChainKey: ByteArray,
+    val receiveChainKey: ByteArray,
+    val sendCount: Long,
+    val receiveCount: Long,
+    val previousSendCount: Long,
+    val rotateBeforeSend: Boolean,
+    val skipped: Map<String, ByteArray>,
+    val skippedOrder: List<String>,
+) {
+    override fun equals(other: Any?): Boolean = this === other
+    override fun hashCode(): Int = "$channelId:$remoteDeviceId".hashCode()
+}
+
+internal class Ratchet(private var state: RatchetState) {
     val snapshot: RatchetState get() = state
 
-    /** Encrypt with the next sending message key, then advance the sending chain. */
-    fun encrypt(plaintext: ByteArray): ByteArray {
-        val (chain, mk) = kdfChain(state.sendChainKey)
-        val n = state.sendCount
-        state = state.copy(sendChainKey = chain, sendCount = n + 1)
-        val header = counterHeader(n)
-        val box = Sodium.aeadSeal(mk, plaintext, header)
-        return header + box
+    fun encrypt(plaintext: String): RatchetPacket {
+        if (state.rotateBeforeSend) rotateSending()
+        val header = RatchetHeader(
+            d = state.localDeviceId,
+            k = Sodium.b64(state.selfPublicKey),
+            p = state.previousSendCount,
+            n = state.sendCount,
+        )
+        val (next, messageKey) = chainStep(state.sendChainKey)
+        val sealed = Sodium.aesGcmSeal(messageKey, plaintext.toByteArray(Charsets.UTF_8), context(header))
+        state = state.copy(sendChainKey = next, sendCount = state.sendCount + 1)
+        return RatchetPacket(header, Sodium.b64(sealed.iv), Sodium.b64(sealed.ciphertext))
     }
 
-    /** Decrypt; tolerates skipped/out-of-order counters up to [MAX_SKIP] within a gap. */
-    fun decrypt(ciphertext: ByteArray): ByteArray {
-        require(ciphertext.size > HEADER_LEN) { "ciphertext too short" }
-        val header = ciphertext.copyOfRange(0, HEADER_LEN)
-        val box = ciphertext.copyOfRange(HEADER_LEN, ciphertext.size)
-        val n = readCounter(header)
-
-        // 1) A previously-skipped message key?
-        state.skipped[n]?.let { mk ->
-            val pt = Sodium.aeadOpen(mk, box, header)
-            val remaining = state.skipped.toMutableMap().apply { remove(n) }
-            state = state.copy(skipped = remaining)
-            return pt
+    fun decrypt(packet: RatchetPacket): String {
+        require(packet.header.v == 1 && packet.header.d == state.remoteDeviceId) { "encrypted message has the wrong sender" }
+        val id = skippedId(Sodium.unb64(packet.header.k), packet.header.n)
+        state.skipped[id]?.let { key ->
+            val plain = open(key, packet)
+            state = state.copy(
+                skipped = state.skipped - id,
+                skippedOrder = state.skippedOrder.filterNot { it == id },
+            )
+            return String(plain, Charsets.UTF_8)
         }
+        if (!Sodium.unb64(packet.header.k).contentEquals(state.remoteKey)) rotateReceiving(packet.header)
+        require(packet.header.n >= state.receiveCount) { "encrypted message was already consumed" }
+        skipTo(packet.header.n)
+        val (next, messageKey) = chainStep(state.receiveChainKey)
+        val plain = open(messageKey, packet)
+        state = state.copy(receiveChainKey = next, receiveCount = state.receiveCount + 1)
+        return String(plain, Charsets.UTF_8)
+    }
 
-        require(n >= state.recvCount) { "stale/replayed counter $n < ${state.recvCount}" }
+    private fun open(key: ByteArray, packet: RatchetPacket): ByteArray = Sodium.aesGcmOpen(
+        key,
+        Sodium.unb64(packet.iv),
+        Sodium.unb64(packet.ciphertext),
+        context(packet.header),
+    )
 
-        // 2) Advance the receiving chain to n, caching intermediate message keys.
-        var chain = state.recvChainKey
+    private fun context(header: RatchetHeader): ByteArray {
+        val recipient = if (header.d == state.localDeviceId) state.remoteDeviceId else state.localDeviceId
+        return ("open-pigeon-message-v1:${state.channelId}:${header.d}:$recipient:" + headerJson(header))
+            .toByteArray(Charsets.UTF_8)
+    }
+
+    private fun rotateSending() {
+        val next = Sodium.newBoxKeyPair()
+        val (root, send) = rootStep(state.rootKey, Sodium.scalarMult(next.secretKey, state.remoteKey))
+        state = state.copy(
+            rootKey = root,
+            selfPublicKey = next.publicKey,
+            selfSecretKey = next.secretKey,
+            sendChainKey = send,
+            previousSendCount = state.sendCount,
+            sendCount = 0,
+            rotateBeforeSend = false,
+        )
+    }
+
+    private fun rotateReceiving(header: RatchetHeader) {
+        skipTo(header.p)
+        val remote = Sodium.unb64(header.k)
+        val (receiveRoot, receive) = rootStep(state.rootKey, Sodium.scalarMult(state.selfSecretKey, remote))
+        val next = Sodium.newBoxKeyPair()
+        val (sendRoot, send) = rootStep(receiveRoot, Sodium.scalarMult(next.secretKey, remote))
+        state = state.copy(
+            rootKey = sendRoot,
+            selfPublicKey = next.publicKey,
+            selfSecretKey = next.secretKey,
+            remoteKey = remote,
+            receiveChainKey = receive,
+            sendChainKey = send,
+            previousSendCount = state.sendCount,
+            sendCount = 0,
+            receiveCount = 0,
+            rotateBeforeSend = false,
+        )
+    }
+
+    private fun skipTo(target: Long) {
+        require(target - state.receiveCount <= MAX_SKIP) { "too many skipped encrypted messages" }
+        var chain = state.receiveChainKey
+        var count = state.receiveCount
         val skipped = state.skipped.toMutableMap()
-        var i = state.recvCount
-        require(n - i <= MAX_SKIP) { "skip gap too large ($i..$n)" }
-        while (i < n) {
-            val (next, mk) = kdfChain(chain)
-            skipped[i] = mk
+        val order = state.skippedOrder.toMutableList()
+        while (count < target) {
+            val (next, messageKey) = chainStep(chain)
+            val id = skippedId(state.remoteKey, count)
+            skipped[id] = messageKey
+            order += id
+            while (order.size > MAX_SKIP) skipped.remove(order.removeAt(0))
             chain = next
-            i++
+            count += 1
         }
-        val (finalChain, msgKey) = kdfChain(chain)
-        val pt = Sodium.aeadOpen(msgKey, box, header)
-        state = state.copy(recvChainKey = finalChain, recvCount = n + 1, skipped = skipped)
-        return pt
+        state = state.copy(receiveChainKey = chain, receiveCount = count, skipped = skipped, skippedOrder = order)
     }
 
     companion object {
-        const val MAX_SKIP = 1000
-        const val HEADER_LEN = 8
+        const val MAX_SKIP = 2_000
+        private val zero = ByteArray(32)
 
-        fun counterHeader(n: Long): ByteArray {
-            val b = ByteArray(HEADER_LEN)
-            for (i in 0 until HEADER_LEN) b[HEADER_LEN - 1 - i] = (n ushr (8 * i)).toByte()
-            return b
+        fun initialize(
+            channelId: String,
+            masterKey: ByteArray,
+            localDeviceId: String,
+            remoteDeviceId: String,
+            localIdentity: Sodium.KeyPairBytes,
+            remoteIdentity: ByteArray,
+        ): Ratchet {
+            val pair = listOf(localDeviceId, remoteDeviceId).sorted()
+            val root = hkdf(masterKey, zero, "open-pigeon-pair-v1:$channelId:${pair[0]}:${pair[1]}", 32)
+            val lowerToHigher = hkdf(root, zero, "open-pigeon-initial-lower-to-higher-v1", 32)
+            val higherToLower = hkdf(root, zero, "open-pigeon-initial-higher-to-lower-v1", 32)
+            val lower = localDeviceId < remoteDeviceId
+            return Ratchet(
+                RatchetState(
+                    channelId = channelId,
+                    localDeviceId = localDeviceId,
+                    remoteDeviceId = remoteDeviceId,
+                    rootKey = root,
+                    selfPublicKey = localIdentity.publicKey,
+                    selfSecretKey = localIdentity.secretKey,
+                    remoteIdentity = remoteIdentity,
+                    remoteKey = remoteIdentity,
+                    sendChainKey = if (lower) lowerToHigher else higherToLower,
+                    receiveChainKey = if (lower) higherToLower else lowerToHigher,
+                    sendCount = 0,
+                    receiveCount = 0,
+                    previousSendCount = 0,
+                    rotateBeforeSend = lower,
+                    skipped = emptyMap(),
+                    skippedOrder = emptyList(),
+                ),
+            )
         }
 
-        fun readCounter(h: ByteArray): Long {
-            var v = 0L
-            for (i in 0 until HEADER_LEN) v = (v shl 8) or (h[i].toLong() and 0xFF)
-            return v
+        fun headerJson(header: RatchetHeader): String =
+            "{\"v\":1,\"d\":${JSONObject.quote(header.d)},\"k\":${JSONObject.quote(header.k)},\"p\":${header.p},\"n\":${header.n}}"
+
+        fun chainStep(chainKey: ByteArray): Pair<ByteArray, ByteArray> =
+            hmac(chainKey, byteArrayOf(2)) to hmac(chainKey, byteArrayOf(1)).copyOf(32)
+
+        fun rootStep(root: ByteArray, shared: ByteArray): Pair<ByteArray, ByteArray> {
+            val output = hkdf(shared, root, "open-pigeon-double-ratchet-root-v1", 64)
+            return output.copyOfRange(0, 32) to output.copyOfRange(32, 64)
         }
 
-        /**
-         * Symmetric-key ratchet step (Signal spec 5.2): from a chain key derive the
-         * next chain key (HMAC over 0x02) and this message key (HMAC over 0x01).
-         */
-        fun kdfChain(chainKey: ByteArray): Pair<ByteArray, ByteArray> {
-            val next = hmac(chainKey, byteArrayOf(0x02))
-            val messageKey = hmac(chainKey, byteArrayOf(0x01)).copyOf(Sodium.AEAD_KEYBYTES)
-            return next to messageKey
+        fun hkdf(input: ByteArray, salt: ByteArray, info: String, length: Int): ByteArray {
+            val prk = hmac(salt, input)
+            val output = ArrayList<Byte>(length)
+            var previous = ByteArray(0)
+            var counter = 1
+            while (output.size < length) {
+                previous = hmac(prk, previous + info.toByteArray(Charsets.UTF_8) + byteArrayOf(counter.toByte()))
+                output.addAll(previous.toList())
+                counter += 1
+            }
+            return output.take(length).toByteArray()
         }
 
         fun hmac(key: ByteArray, data: ByteArray): ByteArray {
@@ -102,66 +211,6 @@ internal class Ratchet(private var state: RatchetState) {
             return mac.doFinal(data)
         }
 
-        /**
-         * Initialise both peers deterministically from the shared DM key so no DH
-         * exchange is needed for v1. [initiator] picks which HKDF label seeds the
-         * sending vs receiving chain, so the two sides mirror each other.
-         */
-        fun fromSharedKey(channelId: String, sharedKey: ByteArray, initiator: Boolean): Ratchet {
-            val root = hkdf(sharedKey, "pigeon-e2ee-root".toByteArray(), 32)
-            val a = hkdf(root, "chain-A".toByteArray(), 32)
-            val b = hkdf(root, "chain-B".toByteArray(), 32)
-            val send = if (initiator) a else b
-            val recv = if (initiator) b else a
-            return Ratchet(
-                RatchetState(
-                    channelId = channelId,
-                    sendChainKey = send,
-                    recvChainKey = recv,
-                    sendCount = 0,
-                    recvCount = 0,
-                    skipped = emptyMap(),
-                ),
-            )
-        }
-
-        /** HKDF-SHA256 (RFC 5869) — extract with a fixed salt, then expand once. */
-        fun hkdf(ikm: ByteArray, info: ByteArray, len: Int): ByteArray {
-            val salt = ByteArray(32) // all-zero salt is RFC-compliant
-            val prk = hmac(salt, ikm)
-            val out = ArrayList<Byte>(len)
-            var t = ByteArray(0)
-            var counter = 1
-            while (out.size < len) {
-                val mac = Mac.getInstance("HmacSHA256")
-                mac.init(SecretKeySpec(prk, "HmacSHA256"))
-                mac.update(t); mac.update(info); mac.update(counter.toByte())
-                t = mac.doFinal()
-                out.addAll(t.toList())
-                counter++
-            }
-            return out.take(len).toByteArray()
-        }
+        private fun skippedId(publicKey: ByteArray, number: Long) = "${Sodium.b64(publicKey)}:$number"
     }
-}
-
-
-/**
- * In-memory ratchet state, one instance per channel. Persisted by
- * [RatchetStateStore], which handles its own base64/JSON encoding (the [skipped]
- * map has a Long key, which the default kotlinx-json object encoder can't express,
- * so we serialize it explicitly there rather than annotating this class).
- */
-data class RatchetState(
-    val channelId: String,
-    val sendChainKey: ByteArray,
-    val recvChainKey: ByteArray,
-    val sendCount: Long,
-    val recvCount: Long,
-    val skipped: Map<Long, ByteArray>,
-) {
-    // ByteArray in a data class gives by-reference equals/hashCode; we never
-    // compare states for equality, so override to something stable + harmless.
-    override fun equals(other: Any?): Boolean = this === other
-    override fun hashCode(): Int = channelId.hashCode()
 }

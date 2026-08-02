@@ -145,6 +145,7 @@ export const useSession = create<SessionState>((set, get) => ({
       }
       set({ auth: stored.auth, user: stored.user, restored: true });
       gateway.start();
+      void import('@/lib/e2ee/manager').then(({ bootstrapE2ee }) => bootstrapE2ee(stored.user.id)).catch(() => undefined);
       void get().refresh();
     } catch {
       set({ auth: null, user: null, restored: true });
@@ -156,6 +157,7 @@ export const useSession = create<SessionState>((set, get) => ({
     await write({ auth: session, user: auth.user });
     set({ auth: session, user: auth.user, loading: false, error: null, totpRequired: false });
     gateway.start();
+    void import('@/lib/e2ee/manager').then(({ bootstrapE2ee }) => bootstrapE2ee(auth.user.id)).catch(() => undefined);
   },
 
   login: async (login, password, totp) => {

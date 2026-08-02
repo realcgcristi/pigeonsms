@@ -175,6 +175,18 @@
   white-space: nowrap;
 }
 .msg__attachment { max-width: 240px; border-radius: var(--r-chip); display: block; }
+.msg__attachment-loading {
+  width: min(240px, 60vw);
+  aspect-ratio: 4 / 3;
+  border-radius: var(--r-chip);
+  background: linear-gradient(110deg, var(--surface-high) 25%, var(--surface-highest) 45%, var(--surface-high) 65%);
+  background-size: 220% 100%;
+  animation: attachment-loading 1.4s linear infinite;
+}
+
+@keyframes attachment-loading {
+  to { background-position-x: -220%; }
+}
 .msg__media-button {
   display: block;
   overflow: hidden;
@@ -638,6 +650,14 @@
   background: var(--surface-high);
   color: var(--text-primary);
   text-decoration: none;
+}
+
+.media-viewer__loading,
+.media-viewer__error {
+  padding: 20px 28px;
+  border-radius: 16px;
+  background: var(--surface-high);
+  color: var(--text-primary);
 }
 
 .image-editor {

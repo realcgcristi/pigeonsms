@@ -9,6 +9,7 @@ import type { MenuItem } from '@/components/ui/Overlay'
 import { bytes, timeOfDay } from '@/lib/format'
 import { isEmojiOnly, renderMarkdown } from '@/lib/markdown'
 import type { ChatMessage } from '@/store/chat'
+import { useAttachmentUrl } from './useAttachmentUrl'
 import './chat.css'
 
 const QUICK = ['❤️', '😂', '👍', '🔥', '😮', '😢']
@@ -54,6 +55,7 @@ function MessageRowBase({
 }) {
   const navigate = useNavigate()
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
+  const attachmentMedia = useAttachmentUrl(message)
 
   const author = message.author
   const name = author?.display_name || author?.username || 'someone'
@@ -69,7 +71,7 @@ function MessageRowBase({
       onSelect: () => void navigator.clipboard.writeText(message.content ?? ''),
     },
   ]
-  if (mine && message.state === 'sent') items.push({ key: 'edit', label: 'edit', onSelect: onEdit })
+  if (mine && message.state === 'sent' && !message.metadata?.['e2ee']) items.push({ key: 'edit', label: 'edit', onSelect: onEdit })
   if (message.state === 'failed' || message.state === 'queued' || (mine && message.state === 'nearby')) items.push({ key: 'retry', label: 'send now', onSelect: onRetry })
   if (message.state === 'sent') {
     items.push({ key: 'pin', label: message.pinned ? 'unpin' : 'pin message', onSelect: onPin })
@@ -137,27 +139,32 @@ function MessageRowBase({
         ) : null}
 
         {message.attachment ? (
-          (message.attachment.type ?? '').startsWith('image/') ? (
+          attachmentMedia.error ? (
+            <div className="msg__file"><Description size={20} /><span>could not decrypt attachment</span></div>
+          ) : attachmentMedia.loading ? (
+            <div className="msg__attachment-loading" aria-label="decrypting attachment" />
+          ) : (message.attachment.type ?? '').startsWith('image/') ? (
             <button type="button" className="msg__media-button" onClick={onOpenMedia}>
             <img
               className="msg__attachment"
-              src={api.mediaUrl(message.attachment.key)}
+              src={attachmentMedia.url ?? undefined}
               alt={message.attachment.name ?? 'image'}
               loading="lazy"
             />
             </button>
           ) : (message.attachment.type ?? '').startsWith('video/') ? (
             <button type="button" className="msg__media-button" onClick={onOpenMedia}>
-              <video className="msg__attachment" src={api.mediaUrl(message.attachment.key)} preload="metadata" />
+              <video className="msg__attachment" src={attachmentMedia.url ?? undefined} preload="metadata" />
             </button>
           ) : (message.attachment.type ?? '').startsWith('audio/') ? (
-            <audio src={api.mediaUrl(message.attachment.key)} controls />
+            <audio src={attachmentMedia.url ?? undefined} controls />
           ) : (
             <a
               className="msg__file"
-              href={api.mediaUrl(message.attachment.key)}
-              target="_blank"
-              rel="noreferrer noopener"
+              href={attachmentMedia.url ?? undefined}
+              download={attachmentMedia.encrypted ? message.attachment.name ?? 'attachment' : undefined}
+              target={attachmentMedia.encrypted ? undefined : '_blank'}
+              rel={attachmentMedia.encrypted ? undefined : 'noreferrer noopener'}
             >
               <Description size={20} />
               <span>

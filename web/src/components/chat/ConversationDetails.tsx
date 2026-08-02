@@ -1,13 +1,29 @@
 import { useEffect, useMemo, useState } from 'react'
-import { api } from '@/api/client'
 import type { MessageDto, ScheduledMessageDto, SpaceMemberDto, SuperPinDto } from '@/api/dto'
 import { Close, DeleteOutline, Forum, Image, PushPin, Schedule, Search } from '@/components/icons'
 import { Avatar } from '@/components/ui/Avatar'
 import { Button } from '@/components/ui/Button'
 import { EmptyState, Tabs } from '@/components/ui/Layout'
 import { relativeTime } from '@/lib/format'
+import { api } from '@/api/client'
+import { useAttachmentUrl } from './useAttachmentUrl'
 
 type DetailsTab = 'about' | 'media' | 'pins' | 'scheduled'
+
+function MediaItem({ message, onOpen }: { message: MessageDto; onOpen: () => void }) {
+  const media = useAttachmentUrl(message)
+  return (
+    <button type="button" onClick={onOpen} disabled={!media.url}>
+      {media.error ? (
+        <span>locked</span>
+      ) : message.attachment?.type?.startsWith('video/') ? (
+        <video src={media.url ?? undefined} preload="metadata" />
+      ) : (
+        <img src={media.url ?? undefined} alt={message.attachment?.name ?? 'shared image'} loading="lazy" />
+      )}
+    </button>
+  )
+}
 
 export function ConversationDetails({
   channelId,
@@ -150,13 +166,7 @@ export function ConversationDetails({
           media.length ? (
             <div className="chat-details__media">
               {media.map((message) => (
-                <button key={message.id} type="button" onClick={() => onMedia(message)}>
-                  {message.attachment?.type?.startsWith('video/') ? (
-                    <video src={api.mediaUrl(message.attachment.key)} preload="metadata" />
-                  ) : (
-                    <img src={api.mediaUrl(message.attachment?.key ?? '')} alt={message.attachment?.name ?? 'shared image'} />
-                  )}
-                </button>
+                <MediaItem key={message.id} message={message} onOpen={() => onMedia(message)} />
               ))}
             </div>
           ) : (

@@ -567,6 +567,7 @@ class PigeonApi(
         client.post("$baseUrl/channels/$channelId/key-envelopes") {
             auth(); contentType(ContentType.Application.Json)
             setBody(buildJsonObject {
+                list.firstOrNull()?.key_id?.let { put("key_id", it) }
                 putJsonArray("envelopes") {
                     list.forEach { add(buildJsonObject { put("to_device", it.to_device); put("wrapped_key", it.wrapped_key) }) }
                 }

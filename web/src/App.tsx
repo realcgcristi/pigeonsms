@@ -7,6 +7,8 @@ import { LoadingState } from '@/components/ui/Spinner';
 import { ToastProvider } from '@/components/ui/Toast';
 import { useSession } from '@/store/session';
 import { useChat } from '@/store/chat';
+import { gateway } from '@/api/gateway';
+import { syncPendingDeviceKeys } from '@/lib/e2ee/manager';
 
 const OnboardingScreen = lazy(() => import('@/screens/onboarding/OnboardingScreen'));
 const PairingScreen = lazy(() => import('@/screens/onboarding/PairingScreen'));
@@ -56,6 +58,7 @@ export default function App() {
   const restore = useSession((s) => s.restore);
   const restored = useSession((s) => s.restored);
   const auth = useSession((s) => s.auth);
+  const user = useSession((s) => s.user);
   const syncOutbox = useChat((s) => s.syncOutbox);
 
   useEffect(() => {
@@ -69,6 +72,18 @@ export default function App() {
     sync();
     return () => window.removeEventListener('online', sync);
   }, [syncOutbox, auth]);
+
+  useEffect(() => {
+    if (!auth || !user) return;
+    const sync = () => void syncPendingDeviceKeys(user.id).catch(() => undefined);
+    sync();
+    const offDevice = gateway.on('device.key_registered', sync);
+    const offResume = gateway.on('gateway.resume', sync);
+    return () => {
+      offDevice();
+      offResume();
+    };
+  }, [auth, user]);
 
   if (!restored) return <LoadingState label="opening pigeonsms" />;
 

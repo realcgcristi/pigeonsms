@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
+import QRCode from 'qrcode'
 import type { TransparencyResponse } from '@/api/dto'
-import { api } from '@/api/client'
+import { api, ApiError } from '@/api/client'
 import { CheckCircle, Key, Warning } from '@/components/icons'
 import { LoadingState } from '@/components/ui/Spinner'
+import { Button } from '@/components/ui/Button'
 import { Screen, ScreenBody, SettingsGroup, TopBar } from '@/components/ui/Layout'
 import { useSession } from '@/store/session'
 import {
@@ -13,6 +15,7 @@ import {
   pinnedCheckpoint,
   verifyTransparency,
 } from '@/lib/keyTransparency'
+import { safetyNumber } from '@/lib/e2ee/manager'
 import './Settings.css'
 
 type Audit = 'checking' | 'verified' | 'warning'
@@ -25,6 +28,8 @@ export default function KeyTransparencyScreen() {
   const [data, setData] = useState<TransparencyResponse | null>(null)
   const [audit, setAudit] = useState<Audit>('checking')
   const [message, setMessage] = useState('checking the public device-key history')
+  const [safety, setSafety] = useState<{ number: string; qr: string } | null>(null)
+  const [reload, setReload] = useState(0)
 
   useEffect(() => {
     if (!userId) return
@@ -40,6 +45,20 @@ export default function KeyTransparencyScreen() {
         ])
         if (!active) return
         setData(response)
+        if (requestedUserId && user?.id && requestedUserId !== user.id) {
+          try {
+            const fingerprint = await safetyNumber(user.id, requestedUserId)
+            const qr = await QRCode.toDataURL(fingerprint.qr, {
+              width: 260,
+              margin: 2,
+              color: { dark: '#17131c', light: '#ffffff' },
+              errorCorrectionLevel: 'M',
+            })
+            if (active) setSafety({ number: fingerprint.number, qr })
+          } catch {
+            setSafety(null)
+          }
+        }
         if (!valid || !consistent || checkpointChanged(previous, response.checkpoint) || gossip.conflict) {
           setAudit('warning')
           setMessage('the key history changed unexpectedly — verify this account on another trusted device')
@@ -51,14 +70,16 @@ export default function KeyTransparencyScreen() {
       } catch (error) {
         if (!active) return
         setAudit('warning')
-        setMessage(error instanceof Error ? error.message : 'could not verify the key history')
+        setMessage(error instanceof ApiError && error.code === 'not_found'
+          ? 'key transparency is not available on this server yet'
+          : error instanceof Error ? error.message : 'could not verify the key history')
       }
     }
     void load()
     return () => {
       active = false
     }
-  }, [userId])
+  }, [reload, requestedUserId, user?.id, userId])
 
   return (
     <Screen className="settings-screen">
@@ -74,8 +95,26 @@ export default function KeyTransparencyScreen() {
           </div>
         )}
 
+        {audit === 'warning' && !data ? <Button variant="tonal" onClick={() => {
+          setAudit('checking')
+          setMessage('checking the public device-key history')
+          setReload((value) => value + 1)
+        }}>try again</Button> : null}
+
         {data ? (
           <>
+            {safety ? (
+              <SettingsGroup label="safety number">
+                <div className="transparency__safety">
+                  <img src={safety.qr} alt="safety number QR code" />
+                  <div>
+                    <p>Compare this on a trusted call or scan it from the other person&apos;s device.</p>
+                    <code>{safety.number.match(/.{1,5}/g)?.join(' ')}</code>
+                    <Button variant="tonal" onClick={() => void navigator.clipboard.writeText(safety.number)}>copy number</Button>
+                  </div>
+                </div>
+              </SettingsGroup>
+            ) : null}
             <SettingsGroup label="checkpoint">
               <div className="transparency__checkpoint">
                 <Key size={22} />

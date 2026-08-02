@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { ApiError } from '../middleware/errors';
 import { requireAuth } from '../middleware/auth';
-import { assertChannelAccess } from '../lib/channels';
+import { assertChannelAccess, fanout } from '../lib/channels';
 import { snowflake } from '../lib/ids';
 import type { AppEnv, AuthedUser } from '../types';
 import { readJsonBody } from '../lib/validate';
@@ -34,8 +34,20 @@ devices.post('/auth/devices', requireAuth, async (c) => {
     ? null
     : String(body['name']).slice(0, 80);
 
-  const id = snowflake();
   const now = Date.now();
+  const existing = await c.env.DB.prepare(
+    'SELECT id FROM user_devices WHERE user_id = ? AND pub_key = ? ORDER BY created_at ASC LIMIT 1',
+  ).bind(user.id, pubKey).first<{ id: string }>();
+  if (existing) {
+    await c.env.DB.prepare(
+      'UPDATE user_devices SET name = COALESCE(?, name), last_seen = ? WHERE id = ? AND user_id = ?',
+    ).bind(name, now, existing.id, user.id).run();
+    return c.json({ id: existing.id });
+  }
+  const id = snowflake();
+  const existingCount = await c.env.DB.prepare(
+    'SELECT COUNT(*) AS count FROM user_devices WHERE user_id = ?',
+  ).bind(user.id).first<{ count: number }>();
   await ensureTransparencyEntries(c.env, user.id);
   await c.env.DB.prepare(
     'INSERT INTO user_devices (id, user_id, pub_key, name, created_at, last_seen) VALUES (?, ?, ?, ?, ?, ?)',
@@ -47,6 +59,12 @@ devices.post('/auth/devices', requireAuth, async (c) => {
   } catch (error) {
     await c.env.DB.prepare('DELETE FROM user_devices WHERE id = ? AND user_id = ?').bind(id, user.id).run();
     throw error;
+  }
+  if (Number(existingCount?.count ?? 0) > 0) {
+    await c.env.DB.prepare(
+      'INSERT OR REPLACE INTO device_sync_requests (device_id, user_id, created_at) VALUES (?, ?, ?)',
+    ).bind(id, user.id, now).run();
+    fanout(c, [user.id], { t: 'device.key_registered', d: { id, pub_key: pubKey } });
   }
   return c.json({ id }, 201);
 });
@@ -62,6 +80,7 @@ devices.delete('/auth/devices/:id', requireAuth, async (c) => {
   await appendTransparencyEntry(c.env, user.id, id, 'revoke', device.pub_key);
   await c.env.DB.batch([
     c.env.DB.prepare('DELETE FROM key_envelopes WHERE to_device = ?').bind(id),
+    c.env.DB.prepare('DELETE FROM device_sync_requests WHERE device_id = ? AND user_id = ?').bind(id, user.id),
     c.env.DB.prepare('DELETE FROM user_devices WHERE id = ? AND user_id = ?').bind(id, user.id),
   ]);
   return c.json({ ok: true });
@@ -85,6 +104,24 @@ devices.get('/auth/devices', requireAuth, async (c) => {
       last_seen: r['last_seen'],
     })),
   });
+});
+
+devices.get('/auth/device-sync', requireAuth, async (c) => {
+  const user = c.get('user') as AuthedUser;
+  const rows = await c.env.DB.prepare(
+    `SELECT d.id, d.pub_key, r.created_at FROM device_sync_requests r
+     JOIN user_devices d ON d.id = r.device_id AND d.user_id = r.user_id
+     WHERE r.user_id = ? AND r.created_at > ? ORDER BY r.created_at ASC`,
+  ).bind(user.id, Date.now() - 30 * 86_400_000).all<{ id: string; pub_key: string; created_at: number }>();
+  return c.json({ devices: rows.results });
+});
+
+devices.delete('/auth/device-sync/:id', requireAuth, async (c) => {
+  const user = c.get('user') as AuthedUser;
+  await c.env.DB.prepare(
+    'DELETE FROM device_sync_requests WHERE device_id = ? AND user_id = ?',
+  ).bind(c.req.param('id'), user.id).run();
+  return c.json({ ok: true });
 });
 
 /**
@@ -193,24 +230,64 @@ devices.post('/channels/:id/key-envelopes', requireAuth, async (c) => {
 
   const body = await readJsonBody(c);
   const raw = Array.isArray(body['envelopes']) ? (body['envelopes'] as unknown[]) : [];
+  const keyId = String(body['key_id'] ?? '').trim();
   if (raw.length === 0) throw new ApiError(400, 'bad_request', 'envelopes required');
   if (raw.length > 500) throw new ApiError(400, 'bad_request', 'too many envelopes');
+  if (keyId && !/^[a-zA-Z0-9._:-]{1,128}$/.test(keyId)) {
+    throw new ApiError(400, 'bad_key_id', 'key_id is invalid');
+  }
 
   const now = Date.now();
-  const stmts = raw.map((e) => {
+  const parsed = raw.map((e) => {
     const env = (e ?? {}) as Record<string, unknown>;
     const toDevice = String(env['to_device'] ?? '').trim();
     const wrappedKey = String(env['wrapped_key'] ?? '');
     if (!toDevice || !wrappedKey) {
       throw new ApiError(400, 'bad_request', 'each envelope needs to_device and wrapped_key');
     }
-    return c.env.DB.prepare(
-      `INSERT INTO key_envelopes (id, channel_id, to_device, from_user, wrapped_key, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-    ).bind(snowflake(), channelId, toDevice, user.id, wrappedKey, now);
+    if (toDevice.length > 128 || wrappedKey.length > 32_768) {
+      throw new ApiError(400, 'bad_request', 'key envelope is too large');
+    }
+    return { toDevice, wrappedKey };
   });
+  const targetIds = [...new Set(parsed.map((item) => item.toDevice))];
+  const placeholders = targetIds.map(() => '?').join(', ');
+  const allowed = await c.env.DB.prepare(
+    `SELECT DISTINCT d.id FROM user_devices d
+     JOIN channels ch ON ch.id = ?
+     LEFT JOIN channel_members cm ON cm.channel_id = ch.id AND cm.user_id = d.user_id
+     LEFT JOIN space_members sm ON sm.space_id = ch.space_id AND sm.user_id = d.user_id
+     WHERE d.id IN (${placeholders}) AND (cm.user_id IS NOT NULL OR sm.user_id IS NOT NULL)`,
+  ).bind(channelId, ...targetIds).all<{ id: string }>();
+  const allowedIds = new Set(allowed.results.map((row) => row.id));
+  if (targetIds.some((id) => !allowedIds.has(id))) {
+    throw new ApiError(403, 'invalid_key_recipient', 'every key recipient must belong to this channel');
+  }
+  if (keyId) {
+    await c.env.DB.prepare(
+      `INSERT OR IGNORE INTO channel_key_sets (channel_id, key_id, created_by, created_at)
+       VALUES (?, ?, ?, ?)`,
+    ).bind(channelId, keyId, user.id, now).run();
+    const active = await c.env.DB.prepare(
+      'SELECT key_id FROM channel_key_sets WHERE channel_id = ?',
+    ).bind(channelId).first<{ key_id: string }>();
+    if (active?.key_id !== keyId) {
+      throw new ApiError(409, 'key_generation_exists', 'this channel already has an encryption key generation');
+    }
+  }
+  const stmts = parsed.map(({ toDevice, wrappedKey }) => c.env.DB.prepare(
+    keyId
+      ? `INSERT OR IGNORE INTO key_envelopes
+         (id, channel_id, to_device, from_user, wrapped_key, created_at, key_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      : `INSERT INTO key_envelopes
+         (id, channel_id, to_device, from_user, wrapped_key, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+  ).bind(...(keyId
+    ? [snowflake(), channelId, toDevice, user.id, wrappedKey, now, keyId]
+    : [snowflake(), channelId, toDevice, user.id, wrappedKey, now])));
   await c.env.DB.batch(stmts);
-  return c.json({ ok: true });
+  return c.json({ ok: true, key_id: keyId || null });
 });
 
 /**
@@ -223,11 +300,13 @@ devices.get('/channels/:id/key-envelopes', requireAuth, async (c) => {
   await assertChannelAccess(c.env, user.id, channelId);
 
   const { results } = await c.env.DB.prepare(
-    `SELECT ke.id, ke.to_device, ke.from_user, ke.wrapped_key, ke.created_at
+    `SELECT ke.id, ke.to_device, ke.from_user, ke.wrapped_key, ke.created_at, ke.key_id
      FROM key_envelopes ke
      JOIN user_devices d ON d.id = ke.to_device AND d.user_id = ?
+     LEFT JOIN channel_key_sets cks ON cks.channel_id = ke.channel_id
      WHERE ke.channel_id = ?
-     ORDER BY ke.created_at ASC`,
+       AND (cks.key_id IS NULL OR ke.key_id = cks.key_id)
+     ORDER BY ke.created_at DESC`,
   )
     .bind(user.id, channelId)
     .all();
@@ -238,6 +317,7 @@ devices.get('/channels/:id/key-envelopes', requireAuth, async (c) => {
       from_user: r['from_user'],
       wrapped_key: r['wrapped_key'],
       created_at: r['created_at'],
+      key_id: r['key_id'],
     })),
   });
 });

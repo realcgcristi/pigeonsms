@@ -75,6 +75,11 @@ export interface GatewayResumeEventDto {
   backfill: string[];
 }
 
+export interface DeviceKeyRegisteredEventDto {
+  id: string;
+  pub_key: string;
+}
+
 export type GatewayEvent =
   | { t: 'message.new'; d: MessageDto }
   | { t: 'message.edit'; d: MessageDto }
@@ -99,6 +104,7 @@ export type GatewayEvent =
   | { t: 'channel.update'; d: ChannelUpdateEventDto }
   | { t: 'channel.delete'; d: ChannelDeleteEventDto }
   | { t: 'space.update'; d: SpaceUpdateEventDto }
+  | { t: 'device.key_registered'; d: DeviceKeyRegisteredEventDto }
   | { t: 'gateway.resume'; d: GatewayResumeEventDto };
 
 export type GatewayEventName = GatewayEvent['t'];
@@ -134,6 +140,7 @@ const KNOWN_EVENTS: ReadonlySet<string> = new Set<GatewayEventName>([
   'channel.update',
   'channel.delete',
   'space.update',
+  'device.key_registered',
   'gateway.resume',
 ]);
 

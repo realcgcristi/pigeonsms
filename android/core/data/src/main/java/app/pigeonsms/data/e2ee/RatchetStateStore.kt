@@ -2,108 +2,118 @@ package app.pigeonsms.data.e2ee
 
 import app.pigeonsms.db.RatchetStateDao
 import app.pigeonsms.db.RatchetStateEntity
+import org.json.JSONArray
 import org.json.JSONObject
 
-/**
- * Persistence seam for per-channel [RatchetState] + the raw per-DM key and the
- * initiator flag (EXPERIMENTAL, flag-OFF).
- *
- * Backed by core/db's [RatchetStateDao] (A10) per the 2.8.0 contract. The
- * [RatchetStateEntity] carries only (channelId, stateBlob, updatedAt), so the DM
- * key and initiator flag are folded INTO [stateBlob] alongside the ratchet chains
- * rather than needing extra columns. stateBlob is opaque JSON with base64 fields.
- *
- * TODO(e2ee): the DM key living in the same at-rest blob as the ratchet state is
- * fine for v1 (the whole DB is app-private + can be encrypted via SQLCipher later),
- * but real-device review should confirm we never want to evict the DM key
- * independently of the ratchet.
- */
+data class ChannelMaster(
+    val keyId: String,
+    val key: ByteArray,
+    val devices: List<DevicePub> = emptyList(),
+)
+
 interface RatchetStateStore {
-    suspend fun load(channelId: String): RatchetState?
+    suspend fun load(channelId: String, remoteDeviceId: String): RatchetState?
     suspend fun save(state: RatchetState)
-    suspend fun loadDmKey(channelId: String): ByteArray?
-    suspend fun saveDmKey(channelId: String, key: ByteArray)
-    suspend fun isInitiator(channelId: String): Boolean?
-    suspend fun setInitiator(channelId: String, initiator: Boolean)
+    suspend fun loadMaster(channelId: String): ChannelMaster?
+    suspend fun saveMaster(channelId: String, master: ChannelMaster)
     suspend fun delete(channelId: String)
 }
 
-/**
- * Room-DAO-backed store. All three of {ratchet chains, DM key, initiator flag} for
- * a channel live in one [RatchetStateEntity.stateBlob] row keyed by channelId, so a
- * partial write (e.g. DM key known but ratchet not yet initialised) merges into the
- * existing row instead of clobbering it.
- */
 internal class DaoRatchetStateStore(
     private val dao: RatchetStateDao,
     private val nowMs: () -> Long = System::currentTimeMillis,
 ) : RatchetStateStore {
-
-    override suspend fun load(channelId: String): RatchetState? {
-        val o = readBlob(channelId) ?: return null
-        val ratchet = o.optJSONObject("ratchet") ?: return null
-        return decodeRatchet(channelId, ratchet)
-    }
+    override suspend fun load(channelId: String, remoteDeviceId: String): RatchetState? =
+        dao.get(ratchetId(channelId, remoteDeviceId))?.stateBlob?.let { value ->
+            runCatching { decodeRatchet(JSONObject(value)) }.getOrNull()
+        }
 
     override suspend fun save(state: RatchetState) {
-        val o = readBlob(state.channelId) ?: JSONObject()
-        o.put("ratchet", encodeRatchet(state))
-        writeBlob(state.channelId, o)
-    }
-
-    override suspend fun loadDmKey(channelId: String): ByteArray? {
-        val raw = readBlob(channelId)?.optString("dmKey")?.takeIf { it.isNotEmpty() } ?: return null
-        return runCatching { Sodium.unb64(raw) }.getOrNull()
-    }
-
-    override suspend fun saveDmKey(channelId: String, key: ByteArray) {
-        val o = readBlob(channelId) ?: JSONObject()
-        o.put("dmKey", Sodium.b64(key))
-        writeBlob(channelId, o)
-    }
-
-    override suspend fun isInitiator(channelId: String): Boolean? {
-        val o = readBlob(channelId) ?: return null
-        return if (o.has("initiator")) o.getBoolean("initiator") else null
-    }
-
-    override suspend fun setInitiator(channelId: String, initiator: Boolean) {
-        val o = readBlob(channelId) ?: JSONObject()
-        o.put("initiator", initiator)
-        writeBlob(channelId, o)
-    }
-
-    override suspend fun delete(channelId: String) = dao.delete(channelId)
-
-    private suspend fun readBlob(channelId: String): JSONObject? =
-        dao.get(channelId)?.let { runCatching { JSONObject(it.stateBlob) }.getOrNull() }
-
-    private suspend fun writeBlob(channelId: String, o: JSONObject) {
-        dao.put(RatchetStateEntity(channelId = channelId, stateBlob = o.toString(), updatedAt = nowMs()))
-    }
-
-    private fun encodeRatchet(s: RatchetState): JSONObject {
-        val skipped = JSONObject()
-        s.skipped.forEach { (n, mk) -> skipped.put(n.toString(), Sodium.b64(mk)) }
-        return JSONObject()
-            .put("sendChainKey", Sodium.b64(s.sendChainKey))
-            .put("recvChainKey", Sodium.b64(s.recvChainKey))
-            .put("sendCount", s.sendCount)
-            .put("recvCount", s.recvCount)
-            .put("skipped", skipped)
-    }
-
-    private fun decodeRatchet(channelId: String, o: JSONObject): RatchetState {
-        val skippedObj = o.optJSONObject("skipped") ?: JSONObject()
-        val skipped = HashMap<Long, ByteArray>()
-        skippedObj.keys().forEach { k -> skipped[k.toLong()] = Sodium.unb64(skippedObj.getString(k)) }
-        return RatchetState(
-            channelId = channelId,
-            sendChainKey = Sodium.unb64(o.getString("sendChainKey")),
-            recvChainKey = Sodium.unb64(o.getString("recvChainKey")),
-            sendCount = o.getLong("sendCount"),
-            recvCount = o.getLong("recvCount"),
-            skipped = skipped,
+        dao.put(
+            RatchetStateEntity(
+                channelId = ratchetId(state.channelId, state.remoteDeviceId),
+                stateBlob = encodeRatchet(state).toString(),
+                updatedAt = nowMs(),
+            ),
         )
     }
+
+    override suspend fun loadMaster(channelId: String): ChannelMaster? =
+        dao.get(masterId(channelId))?.stateBlob?.let { value ->
+            runCatching {
+                val json = JSONObject(value)
+                val list = json.optJSONArray("devices") ?: JSONArray()
+                val devices = (0 until list.length()).map { index ->
+                    val item = list.getJSONObject(index)
+                    DevicePub(item.getString("id"), item.getString("key"))
+                }
+                ChannelMaster(json.getString("keyId"), Sodium.unb64(json.getString("key")), devices)
+            }.getOrNull()
+        }
+
+    override suspend fun saveMaster(channelId: String, master: ChannelMaster) {
+        val devices = JSONArray()
+        master.devices.forEach { devices.put(JSONObject().put("id", it.deviceId).put("key", it.pubKeyBase64)) }
+        val json = JSONObject()
+            .put("keyId", master.keyId)
+            .put("key", Sodium.b64(master.key))
+            .put("devices", devices)
+        dao.put(RatchetStateEntity(masterId(channelId), json.toString(), nowMs()))
+    }
+
+    override suspend fun delete(channelId: String) {
+        dao.delete(masterId(channelId))
+    }
+
+    private fun encodeRatchet(state: RatchetState): JSONObject {
+        val skipped = JSONObject()
+        state.skipped.forEach { (id, key) -> skipped.put(id, Sodium.b64(key)) }
+        return JSONObject()
+            .put("channelId", state.channelId)
+            .put("localDeviceId", state.localDeviceId)
+            .put("remoteDeviceId", state.remoteDeviceId)
+            .put("rootKey", Sodium.b64(state.rootKey))
+            .put("selfPublicKey", Sodium.b64(state.selfPublicKey))
+            .put("selfSecretKey", Sodium.b64(state.selfSecretKey))
+            .put("remoteIdentity", Sodium.b64(state.remoteIdentity))
+            .put("remoteKey", Sodium.b64(state.remoteKey))
+            .put("sendChainKey", Sodium.b64(state.sendChainKey))
+            .put("receiveChainKey", Sodium.b64(state.receiveChainKey))
+            .put("sendCount", state.sendCount)
+            .put("receiveCount", state.receiveCount)
+            .put("previousSendCount", state.previousSendCount)
+            .put("rotateBeforeSend", state.rotateBeforeSend)
+            .put("skipped", skipped)
+            .put("skippedOrder", JSONArray(state.skippedOrder))
+    }
+
+    private fun decodeRatchet(json: JSONObject): RatchetState {
+        val skippedJson = json.optJSONObject("skipped") ?: JSONObject()
+        val skipped = buildMap {
+            skippedJson.keys().forEach { id -> put(id, Sodium.unb64(skippedJson.getString(id))) }
+        }
+        val orderJson = json.optJSONArray("skippedOrder") ?: JSONArray()
+        val order = (0 until orderJson.length()).map { orderJson.getString(it) }
+        return RatchetState(
+            channelId = json.getString("channelId"),
+            localDeviceId = json.getString("localDeviceId"),
+            remoteDeviceId = json.getString("remoteDeviceId"),
+            rootKey = Sodium.unb64(json.getString("rootKey")),
+            selfPublicKey = Sodium.unb64(json.getString("selfPublicKey")),
+            selfSecretKey = Sodium.unb64(json.getString("selfSecretKey")),
+            remoteIdentity = Sodium.unb64(json.getString("remoteIdentity")),
+            remoteKey = Sodium.unb64(json.getString("remoteKey")),
+            sendChainKey = Sodium.unb64(json.getString("sendChainKey")),
+            receiveChainKey = Sodium.unb64(json.getString("receiveChainKey")),
+            sendCount = json.getLong("sendCount"),
+            receiveCount = json.getLong("receiveCount"),
+            previousSendCount = json.getLong("previousSendCount"),
+            rotateBeforeSend = json.getBoolean("rotateBeforeSend"),
+            skipped = skipped,
+            skippedOrder = order,
+        )
+    }
+
+    private fun masterId(channelId: String) = "master:$channelId"
+    private fun ratchetId(channelId: String, remoteDeviceId: String) = "ratchet:$channelId:$remoteDeviceId"
 }

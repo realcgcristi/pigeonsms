@@ -1,0 +1,13 @@
+{
+  "$schema": "../../schemas/e2ee-message.schema.json",
+  "v": 1,
+  "k": "87cda5b3-f62c-4f74-b994-78ae51de8a62",
+  "s": "web-device-a",
+  "e": {
+    "android-device-b": {
+      "h": { "v": 1, "d": "web-device-a", "k": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=", "p": 0, "n": 0 },
+      "i": "AAECAwQFBgcICQoL",
+      "c": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    }
+  }
+}

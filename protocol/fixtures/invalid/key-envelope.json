@@ -1,0 +1,6 @@
+{
+  "$schema": "../../schemas/key-envelope.schema.json",
+  "key_id": "",
+  "to_device": "",
+  "wrapped_key": "plain-key"
+}

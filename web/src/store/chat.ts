@@ -1,11 +1,12 @@
 import { create } from 'zustand';
 import { ApiError, api, nonce } from '@/api/client';
 import { gateway } from '@/api/gateway';
-import type { AttachmentDto, MessageDto, MessagesResponse, SpaceEmojiDto, SuperPinDto } from '@/api/dto';
+import type { AttachmentDto, JsonObject, MessageDto, MessagesResponse, SpaceEmojiDto, SuperPinDto } from '@/api/dto';
 import { usePrefs } from '@/store/prefs';
 import { useSocial } from '@/store/social';
 import { cacheMessages, cachedMessages, queueMessage, queuedMessages, removeQueuedMessage, type QueuedMessage } from '@/lib/localFirst';
 import type { NearbyMessage } from '@/lib/networkless';
+import { decryptMessage, encryptMessage, type AttachmentSecret } from '@/lib/e2ee/manager';
 import {
   LOCAL_MESSAGE_SEQUENCE,
   NEARBY_MESSAGE_SEQUENCE,
@@ -56,7 +57,7 @@ export interface ChatState {
   send: (
     channelId: string,
     content: string,
-    opts?: { replyTo?: string | null; attachment?: AttachmentDto | null; ttl?: number | null; sendAt?: number | null },
+    opts?: { replyTo?: string | null; attachment?: AttachmentDto | null; ttl?: number | null; sendAt?: number | null; attachmentSecret?: AttachmentSecret },
   ) => Promise<void>;
   sendSticker: (channelId: string, stickerId: string) => Promise<void>;
   retry: (channelId: string, id: string) => Promise<void>;
@@ -93,7 +94,10 @@ async function persist(channelId: string, messages: ChatMessage[]) {
 }
 
 async function fetchMessages(channelId: string, afterSeq?: number): Promise<MessagesResponse> {
-  if (!afterSeq || afterSeq <= 0) return api.messagesPage(channelId);
+  if (!afterSeq || afterSeq <= 0) {
+    const page = await api.messagesPage(channelId);
+    return { ...page, messages: await decryptRemoteMessages(page.messages) };
+  }
   let cursor = afterSeq;
   let read: Record<string, number> | null | undefined;
   let last: MessagesResponse['cursor'];
@@ -107,7 +111,31 @@ async function fetchMessages(channelId: string, afterSeq?: number): Promise<Mess
     if (!page.cursor?.has_more_after || next <= cursor) break;
     cursor = next;
   }
-  return { messages, read, cursor: last };
+  return { messages: await decryptRemoteMessages(messages), read, cursor: last };
+}
+
+async function decryptRemoteMessages(messages: MessageDto[]): Promise<MessageDto[]> {
+  const session = (await import('@/store/session')).useSession.getState();
+  if (!session.user) return messages;
+  const dms = useSocial.getState().dms;
+  const output: MessageDto[] = [];
+  for (const message of messages.slice().sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0))) {
+    if (!message.encrypted) {
+      output.push(message);
+      continue;
+    }
+    const peer = dms.find((item) => item.channel_id === message.channel_id)?.peer;
+    if (!peer) {
+      output.push({ ...message, content: '🔒 encrypted message' });
+      continue;
+    }
+    try {
+      output.push(await decryptMessage({ owner: session.user.id, peerId: peer.id, message }));
+    } catch {
+      output.push({ ...message, content: '🔒 encrypted message', metadata: { ...(message.metadata ?? {}), e2ee: true, e2ee_locked: true } });
+    }
+  }
+  return output;
 }
 
 export const useChat = create<ChatState>((set, get) => ({
@@ -163,7 +191,7 @@ export const useChat = create<ChatState>((set, get) => ({
     const oldest = current.messages[0];
     set((s) => patchChannel(s, channelId, (c) => ({ ...c, loadingMore: true })));
     try {
-      const older = await api.messages(channelId, oldest.seq ?? 0);
+      const older = await decryptRemoteMessages(await api.messages(channelId, oldest.seq ?? 0));
       set((s) =>
         patchChannel(s, channelId, (c) => ({
           ...c,
@@ -186,7 +214,11 @@ export const useChat = create<ChatState>((set, get) => ({
 
   loadDetails: async (channelId) => {
     try {
-      const [pins, superPin] = await Promise.all([api.pins(channelId), api.superPin(channelId)]);
+      const [rawPins, rawSuperPin] = await Promise.all([api.pins(channelId), api.superPin(channelId)]);
+      const pins = await decryptRemoteMessages(rawPins);
+      const superPin = rawSuperPin
+        ? { ...rawSuperPin, message: (await decryptRemoteMessages([rawSuperPin.message]))[0] ?? rawSuperPin.message }
+        : null;
       set((s) => patchChannel(s, channelId, (c) => ({ ...c, pins, superPin, error: null })));
     } catch (err) {
       set((s) =>
@@ -213,18 +245,50 @@ export const useChat = create<ChatState>((set, get) => ({
       attachment: opts?.attachment ?? null,
       reply_to: opts?.replyTo ?? null,
       reactions: [],
+      metadata: opts?.attachmentSecret
+        ? { e2ee: true, e2ee_attachment: opts.attachmentSecret as unknown as JsonObject }
+        : null,
       state: 'pending',
     };
     set((s) => patchChannel(s, channelId, (c) => ({ ...c, messages: reconcileMessages(c.messages, [optimistic]) })));
+    const dm = useSocial.getState().dms.find((item) => item.channel_id === channelId);
+    let wireContent = content;
+    let encrypted = false;
+    if (dm && usePrefs.getState().e2ee) {
+      try {
+        wireContent = await encryptMessage({
+          owner: me.id,
+          peerId: dm.peer.id,
+          channelId,
+          text: content,
+          attachment: opts?.attachmentSecret,
+        });
+        encrypted = true;
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : 'encrypted messaging is unavailable';
+        set((s) => patchChannel(s, channelId, (c) => ({
+          ...c,
+          error: detail,
+          messages: c.messages.map((message) => message.nonce === n ? { ...message, state: 'failed' } : message),
+        })));
+        return;
+      }
+    }
     const queued: QueuedMessage = {
       id: `outbox:${n}`,
       owner: me.id,
       channelId,
-      content,
+      content: wireContent,
       nonce: n,
       createdAt: optimistic.created_at,
       attempts: 0,
-      options: opts ?? {},
+      options: {
+        replyTo: opts?.replyTo ?? null,
+        attachment: opts?.attachment ?? null,
+        ttl: opts?.ttl ?? null,
+        sendAt: opts?.sendAt ?? null,
+        encrypted,
+      },
     };
     if (!navigator.onLine) {
       await queueMessage(queued);
@@ -237,15 +301,16 @@ export const useChat = create<ChatState>((set, get) => ({
     }
     try {
       const res = await api.sendMessage(channelId, {
-        content,
+        content: wireContent,
         nonce: n,
         reply_to: opts?.replyTo ?? null,
         attachment: opts?.attachment ?? null,
         ttl: opts?.ttl ?? null,
         send_at: opts?.sendAt ?? null,
+        encrypted,
       });
       if (res.message) {
-        const sent = res.message;
+        const sent = (await decryptRemoteMessages([res.message]))[0] ?? res.message;
         set((s) =>
           patchChannel(s, channelId, (c) => ({
             ...c,
@@ -306,6 +371,7 @@ export const useChat = create<ChatState>((set, get) => ({
     await get().send(channelId, message.content, {
       replyTo: message.reply_to,
       attachment: message.attachment ?? null,
+      attachmentSecret: message.metadata?.['e2ee_attachment'] as unknown as AttachmentSecret | undefined,
     });
   },
 
@@ -315,6 +381,11 @@ export const useChat = create<ChatState>((set, get) => ({
     ),
 
   edit: async (channelId, id, content) => {
+    const current = get().channel(channelId).messages.find((message) => message.id === id);
+    if (current?.metadata?.['e2ee']) {
+      set((s) => patchChannel(s, channelId, (c) => ({ ...c, error: 'encrypted messages cannot be edited yet' })));
+      return;
+    }
     const updated = await api.editMessage(id, content);
     set((s) =>
       patchChannel(s, channelId, (c) => ({
@@ -411,13 +482,16 @@ export const useChat = create<ChatState>((set, get) => ({
           attachment: item.options.attachment ?? null,
           ttl: item.options.ttl ?? null,
           send_at: item.options.sendAt ?? null,
+          encrypted: item.options.encrypted,
         });
         if (response.message) {
+          const sent = (await decryptRemoteMessages([response.message]))[0] ?? response.message;
+          const preview = get().channel(item.channelId).messages.find((message) => message.nonce === item.nonce)?.content ?? 'sent a message';
           set((state) => patchChannel(state, item.channelId, (channel) => ({
             ...channel,
-            messages: mergeRemoteMessages(channel.messages, [response.message!]),
+            messages: mergeRemoteMessages(channel.messages, [sent]),
           })));
-          useSocial.getState().bump(item.channelId, item.content, response.message.created_at, true);
+          useSocial.getState().bump(item.channelId, preview, sent.created_at, true);
           void persist(item.channelId, get().channel(item.channelId).messages);
         }
         await removeQueuedMessage(item.id);
@@ -460,19 +534,25 @@ export const useChat = create<ChatState>((set, get) => ({
 
   subscribe: () => {
     const offNew = gateway.on('message.new', (message) => {
-      set((s) =>
-        patchChannel(s, message.channel_id, (c) => ({ ...c, messages: mergeRemoteMessages(c.messages, [message]) })),
-      );
-      void persist(message.channel_id, get().channel(message.channel_id).messages);
+      void decryptRemoteMessages([message]).then(([decoded]) => {
+        if (!decoded) return;
+        set((s) =>
+          patchChannel(s, decoded.channel_id, (c) => ({ ...c, messages: mergeRemoteMessages(c.messages, [decoded]) })),
+        );
+        void persist(decoded.channel_id, get().channel(decoded.channel_id).messages);
+      });
     });
     const offEdit = gateway.on('message.edit', (message) => {
-      set((s) =>
-        patchChannel(s, message.channel_id, (c) => ({
-          ...c,
-          messages: mergeRemoteMessages(c.messages, [message]),
-        })),
-      );
-      void persist(message.channel_id, get().channel(message.channel_id).messages);
+      void decryptRemoteMessages([message]).then(([decoded]) => {
+        if (!decoded) return;
+        set((s) =>
+          patchChannel(s, decoded.channel_id, (c) => ({
+            ...c,
+            messages: mergeRemoteMessages(c.messages, [decoded]),
+          })),
+        );
+        void persist(decoded.channel_id, get().channel(decoded.channel_id).messages);
+      });
     });
     const offDelete = gateway.on('message.delete', (d) => {
       set((s) =>
@@ -568,12 +648,15 @@ export const useChat = create<ChatState>((set, get) => ({
       );
     });
     const offSuperPinSet = gateway.on('super_pin.set', (d) => {
-      set((s) =>
-        patchChannel(s, d.channel_id, (c) => ({
-          ...c,
-          superPin: { message: d.message, pinned_by: '', created_at: Date.now() },
-        })),
-      );
+      void decryptRemoteMessages([d.message]).then(([message]) => {
+        if (!message) return;
+        set((s) =>
+          patchChannel(s, d.channel_id, (c) => ({
+            ...c,
+            superPin: { message, pinned_by: '', created_at: Date.now() },
+          })),
+        );
+      });
     });
     const offSuperPinRemove = gateway.on('super_pin.remove', (d) => {
       set((s) => patchChannel(s, d.channel_id, (c) => ({ ...c, superPin: null })));

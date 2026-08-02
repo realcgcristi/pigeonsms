@@ -8,6 +8,7 @@ export interface PrefsState {
   readReceipts: boolean;
   invisible: boolean;
   shareLastSeen: boolean;
+  e2ee: boolean;
   setNickname: (userId: string, nickname: string) => void;
   clearNickname: (userId: string) => void;
   markForumSeen: (postId: string, replyCount: number) => void;
@@ -15,6 +16,7 @@ export interface PrefsState {
   setReadReceipts: (enabled: boolean) => void;
   setInvisible: (enabled: boolean) => void;
   setShareLastSeen: (enabled: boolean) => void;
+  setE2ee: (enabled: boolean) => void;
 }
 
 export const usePrefs = create<PrefsState>()(
@@ -26,6 +28,7 @@ export const usePrefs = create<PrefsState>()(
       readReceipts: true,
       invisible: false,
       shareLastSeen: true,
+      e2ee: true,
       setNickname: (userId, nickname) =>
         set((s) => ({ nicknames: { ...s.nicknames, [userId]: nickname } })),
       clearNickname: (userId) =>
@@ -46,8 +49,9 @@ export const usePrefs = create<PrefsState>()(
       setReadReceipts: (readReceipts) => set({ readReceipts }),
       setInvisible: (invisible) => set({ invisible }),
       setShareLastSeen: (shareLastSeen) => set({ shareLastSeen }),
+      setE2ee: (e2ee) => set({ e2ee }),
     }),
-    { name: 'pigeon.prefs', version: 2 },
+    { name: 'pigeon.prefs', version: 3 },
   ),
 );
 

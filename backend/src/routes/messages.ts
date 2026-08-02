@@ -568,7 +568,8 @@ messages.post('/channels/:id/messages', async (c) => {
   await enforceRateLimit(c.env.RL_GENERAL, `msg:${user.id}:${channel.id}`);
   const body = await readJsonBody(c);
 
-  let content = String(body['content'] ?? '').slice(0, MAX_CONTENT);
+  const encrypted = body['encrypted'] === 1 || body['encrypted'] === '1' || body['encrypted'] === true;
+  let content = String(body['content'] ?? '').slice(0, encrypted ? 131_072 : MAX_CONTENT);
   const kind = normalizeMessageKind(body['kind']);
   // v2.8.0 send options. ttl (seconds) -> disappearing; send_at (epoch ms in the
   // future) -> schedule instead of send now; encrypted (0/1) -> content is E2EE
@@ -577,7 +578,6 @@ messages.post('/channels/:id/messages', async (c) => {
   const ttlMs = Number.isFinite(ttl) && ttl > 0 ? Math.floor(ttl) * 1000 : null;
   const sendAtRaw = Number(body['send_at']);
   const sendAt = Number.isFinite(sendAtRaw) && sendAtRaw > 0 ? Math.floor(sendAtRaw) : null;
-  const encrypted = body['encrypted'] === 1 || body['encrypted'] === '1' || body['encrypted'] === true;
   if (channel.kind === 'forum') {
     throw new ApiError(400, 'forum_endpoint_required', 'use the forum post and reply endpoints');
   }
@@ -607,7 +607,7 @@ messages.post('/channels/:id/messages', async (c) => {
   // Binding it at send time means the reference travels with the message and any
   // viewer can draw it, which is what "works everywhere" actually requires.
   {
-    const names = [...new Set(
+    const names = encrypted ? [] : [...new Set(
       [...content.matchAll(/::?([a-z0-9_]{2,32})::?/g)].map((m) => m[1]).filter(Boolean),
     )] as string[];
     if (names.length) {
@@ -825,7 +825,7 @@ export async function deliverMessage(
   input: MessageDeliveryInput,
 ): Promise<Record<string, unknown>> {
   const { content, replyTo, threadId, nonce, attachment, kind, metadata, poll, ttlMs, encrypted } = input;
-  const mentions = await resolveMentions(env, channel, author, content);
+  const mentions = encrypted ? [] : await resolveMentions(env, channel, author, content);
 
   // 2.9.0: allocated by the channel's Durable Object, not a D1 single-row bump.
   const seq = await allocateSeq(env, channel);
@@ -938,6 +938,7 @@ messages.patch('/messages/:id', async (c) => {
   const row = await loadMessage(c, c.req.param('id'));
   if (row.author_id !== user.id) throw new ApiError(403, 'forbidden', 'not your message');
   if (row.deleted_at !== null) throw new ApiError(400, 'deleted', 'message is deleted');
+  if (row.encrypted === 1) throw new ApiError(409, 'encrypted_edit_requires_resend', 'encrypted messages cannot be edited');
   const channel = await assertChannelAccess(c.env, user.id, row.channel_id);
 
   const body = await readJsonBody(c);

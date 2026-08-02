@@ -6,6 +6,9 @@ import com.goterl.lazysodium.SodiumAndroid
 import com.goterl.lazysodium.interfaces.AEAD
 import com.goterl.lazysodium.interfaces.Box
 import java.security.SecureRandom
+import javax.crypto.Cipher
+import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.SecretKeySpec
 
 /**
  * Thin libsodium (lazysodium) facade for the E2EE stack. Ships FLAG-OFF and is
@@ -53,6 +56,29 @@ object Sodium {
         // scalarmult_base: pub = secret · basepoint
         if (!ls.cryptoScalarMultBase(pk, secret)) error("scalarmult_base failed")
         return pk
+    }
+
+    fun scalarMult(secret: ByteArray, publicKey: ByteArray): ByteArray {
+        val shared = ByteArray(Box.BEFORENMBYTES)
+        if (!ls.cryptoScalarMult(shared, secret, publicKey)) error("scalarmult failed")
+        return shared
+    }
+
+    data class AesBox(val iv: ByteArray, val ciphertext: ByteArray)
+
+    fun aesGcmSeal(key: ByteArray, plaintext: ByteArray, ad: ByteArray): AesBox {
+        val iv = randomBytes(12)
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(128, iv))
+        cipher.updateAAD(ad)
+        return AesBox(iv, cipher.doFinal(plaintext))
+    }
+
+    fun aesGcmOpen(key: ByteArray, iv: ByteArray, ciphertext: ByteArray, ad: ByteArray): ByteArray {
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(128, iv))
+        cipher.updateAAD(ad)
+        return cipher.doFinal(ciphertext)
     }
 
     // --- sealed box: wrap a symmetric key to a recipient device pub key ---

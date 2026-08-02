@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openpigeon.org/schema/key-envelope.json",
+  "type": "object",
+  "required": ["key_id", "to_device", "wrapped_key"],
+  "properties": {
+    "key_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "to_device": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "wrapped_key": { "type": "string", "pattern": "^opk1\\.[A-Za-z0-9+/=]+\\.[A-Za-z0-9+/=]+\\.[A-Za-z0-9+/=]+$", "maxLength": 32768 }
+  }
+}

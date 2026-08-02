@@ -21,6 +21,7 @@ import {
 import { ConversationDetails } from '@/components/chat/ConversationDetails'
 import { ImageEditor } from '@/components/chat/ImageEditor'
 import { MessageRow } from '@/components/chat/MessageRow'
+import { useAttachmentUrl } from '@/components/chat/useAttachmentUrl'
 import { NestIcon } from '@/components/Logo'
 import { Avatar } from '@/components/ui/Avatar'
 import { Button } from '@/components/ui/Button'
@@ -31,6 +32,7 @@ import { Screen, TopBar } from '@/components/ui/Layout'
 import { useToast } from '@/components/ui/Toast'
 import { daySeparator, relativeTime, sameDay } from '@/lib/format'
 import { emojiQueryAt } from '@/lib/markdown'
+import { protectAttachment } from '@/lib/e2ee/manager'
 import type { ChatMessage } from '@/store/chat'
 import { useChat } from '@/store/chat'
 import { usePrefs } from '@/store/prefs'
@@ -639,6 +641,7 @@ export default function ChatScreen() {
   const [wideDetails, setWideDetails] = useState(() => window.matchMedia('(min-width: 1200px)').matches)
   const [mediaMessage, setMediaMessage] = useState<MessageDto | null>(null)
   const [pendingImage, setPendingImage] = useState<{ file: File; options: SendOptions } | null>(null)
+  const mediaAsset = useAttachmentUrl(mediaMessage)
 
   useEffect(() => {
     const media = window.matchMedia('(min-width: 1200px)')
@@ -733,13 +736,19 @@ export default function ChatScreen() {
   const attach = useCallback(
     async (file: File, options: SendOptions) => {
       try {
-        const attachment = await api.uploadResumable(file)
-        await send(channelId, '', { attachment, ttl: options.ttl, sendAt: options.sendAt })
+        const protectedFile = dm && usePrefs.getState().e2ee ? await protectAttachment(file) : null
+        const attachment = await api.uploadResumable(protectedFile?.file ?? file)
+        await send(channelId, '', {
+          attachment,
+          attachmentSecret: protectedFile?.secret,
+          ttl: options.ttl,
+          sendAt: options.sendAt,
+        })
       } catch (err) {
         toast.error(err instanceof Error ? err.message : 'upload failed')
       }
     },
-    [channelId, send, toast],
+    [channelId, dm, send, toast],
   )
 
   const prepareAttachment = useCallback(
@@ -1164,25 +1173,30 @@ export default function ChatScreen() {
           <button type="button" className="media-viewer__close" aria-label="close media" onClick={() => setMediaMessage(null)}>
             <Close />
           </button>
-          {mediaMessage.attachment.type?.startsWith('video/') ? (
+          {mediaAsset.error ? (
+            <div className="media-viewer__error">could not decrypt this attachment</div>
+          ) : mediaAsset.loading ? (
+            <div className="media-viewer__loading">decrypting attachment…</div>
+          ) : mediaMessage.attachment.type?.startsWith('video/') ? (
             <video
-              src={api.mediaUrl(mediaMessage.attachment.key)}
+              src={mediaAsset.url ?? undefined}
               controls
               autoPlay
               onClick={(event) => event.stopPropagation()}
             />
           ) : (
             <img
-              src={api.mediaUrl(mediaMessage.attachment.key)}
+              src={mediaAsset.url ?? undefined}
               alt={mediaMessage.attachment.name || 'shared image'}
               onClick={(event) => event.stopPropagation()}
             />
           )}
           <a
             className="media-viewer__download"
-            href={api.mediaUrl(mediaMessage.attachment.key)}
-            target="_blank"
-            rel="noreferrer noopener"
+            href={mediaAsset.url ?? undefined}
+            download={mediaAsset.encrypted ? mediaMessage.attachment.name ?? 'attachment' : undefined}
+            target={mediaAsset.encrypted ? undefined : '_blank'}
+            rel={mediaAsset.encrypted ? undefined : 'noreferrer noopener'}
             onClick={(event) => event.stopPropagation()}
           >
             open original

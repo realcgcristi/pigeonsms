@@ -1824,8 +1824,8 @@ private fun MessageBubble(
                 // server-side for 2.8.0), so this degrades to a no-op until those
                 // fields land on the cached message. The row self-guards on defaults.
                 MessageSecurityRow(
-                    encrypted = false,
-                    expiresAt = null,
+                    encrypted = message.encrypted,
+                    expiresAt = message.expiresAt,
                     self = self,
                 )
 

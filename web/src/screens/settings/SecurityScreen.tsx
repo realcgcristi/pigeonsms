@@ -5,16 +5,20 @@ import { api } from '@/api/client'
 import { Download, Key, Shield, Verified, Warning } from '@/components/icons'
 import { Button } from '@/components/ui/Button'
 import { Dialog } from '@/components/ui/Overlay'
+import { Switch } from '@/components/ui/Switch'
 import { TextField } from '@/components/ui/TextField'
 import { Screen, ScreenBody, SettingsGroup, SettingsRow, TopBar } from '@/components/ui/Layout'
 import { useToast } from '@/components/ui/Toast'
 import { useSession } from '@/store/session'
+import { usePrefs } from '@/store/prefs'
 import './Settings.css'
 
 export default function SecurityScreen() {
   const navigate = useNavigate()
   const toast = useToast()
   const user = useSession((s) => s.user)
+  const e2ee = usePrefs((s) => s.e2ee)
+  const setE2ee = usePrefs((s) => s.setE2ee)
   const refresh = useSession((s) => s.refresh)
   const logout = useSession((s) => s.logout)
   const [setup, setSetup] = useState<{ secret: string; otpauth: string } | null>(null)
@@ -144,6 +148,12 @@ export default function SecurityScreen() {
         </SettingsGroup>
 
         <SettingsGroup label="device identity">
+          <SettingsRow
+            icon={<Shield size={18} />}
+            title="encrypted direct messages"
+            value="double-ratchet encryption across your devices"
+            trailing={<Switch checked={e2ee} onChange={setE2ee} label="encrypted direct messages" />}
+          />
           <SettingsRow
             icon={<Verified size={18} />}
             title="trust center"

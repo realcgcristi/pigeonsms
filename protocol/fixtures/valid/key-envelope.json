@@ -1,0 +1,6 @@
+{
+  "$schema": "../../schemas/key-envelope.schema.json",
+  "key_id": "87cda5b3-f62c-4f74-b994-78ae51de8a62",
+  "to_device": "android-device-b",
+  "wrapped_key": "opk1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=.AAECAwQFBgcICQoL.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+}

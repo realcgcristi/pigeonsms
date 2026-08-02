@@ -19,7 +19,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.decodeFromString
@@ -74,10 +73,6 @@ class ChatRepository(
      * a repo-owned SupervisorJob (not the caller's) means the composer coroutine returns
      * immediately and a failing exchange can't cancel or fail the send. Best-effort only.
      */
-    private val repoScope = kotlinx.coroutines.CoroutineScope(
-        kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO,
-    )
-
     /**
      * DM channels whose E2EE session (DM key exchanged + ratchet seeded) is established
      * on THIS device, so we only run the exchange once per channel per process. A
@@ -104,8 +99,6 @@ class ChatRepository(
      * A restart between enqueue and flush drops the ttl/send_at hints (the message still
      * sends, just without disappearing/scheduling) — noted for the A10 outbox-schema pass.
      */
-    private data class SendMeta(val ttl: Long?, val sendAt: Long?, val encrypted: Boolean)
-    private val pendingSendMeta = java.util.concurrent.ConcurrentHashMap<String, SendMeta>()
 
     /**
      * Process-wide monotonic seq for optimistic (pending) rows. Starts above every real
@@ -221,6 +214,7 @@ class ChatRepository(
         reactionsJson = json.encodeToString(reactions.also { rememberEmoji(custom_emoji) }),
         revisionsJson = revisions?.let { json.encodeToString(it) },
         kind = kind, metadataJson = metadata?.toString(), pollJson = poll?.let { json.encodeToString(it) },
+        encrypted = encrypted, expiresAt = expires_at,
         state = state,
     )
 
@@ -366,13 +360,8 @@ class ChatRepository(
         // E2EE. We NEVER encrypt space/forum messages (isDm gates that).
         val mgr = e2ee
         val cipher = if (e2eeEnabled && isDm && mgr != null) {
-            if (channelId in establishedSessions) {
-                runCatching { mgr.encrypt(channelId, content) }.getOrNull()
-            } else {
-                // Not established yet: don't block. Establish in the background for next time.
-                repoScope.launch { runCatching { ensureE2eeSession(channelId, mgr) } }
-                null
-            }
+            check(ensureE2eeSession(channelId, mgr)) { "encrypted messaging is not ready on the other device" }
+            mgr.encrypt(channelId, content)
         } else {
             null
         }
@@ -390,8 +379,22 @@ class ChatRepository(
                 state = "SENDING",
             )
         )
-        pendingSendMeta[nonce] = SendMeta(ttl = ttl, sendAt = sendAt, encrypted = encrypted)
-        db.outbox().add(OutboxEntity(nonce, channelId, wireContent, replyTo, attachment?.key, attachment?.name, attachment?.type, attachment?.size, now))
+        db.outbox().add(
+            OutboxEntity(
+                nonce = nonce,
+                channelId = channelId,
+                content = wireContent,
+                replyTo = replyTo,
+                attachmentKey = attachment?.key,
+                attachmentName = attachment?.name,
+                attachmentType = attachment?.type,
+                attachmentSize = attachment?.size,
+                createdAt = now,
+                ttl = ttl,
+                sendAt = sendAt,
+                encrypted = encrypted,
+            ),
+        )
         _networklessOutbox.tryEmit(NearbyOutbound(channelId, nonce, content, now, attachment != null))
     }
 
@@ -410,10 +413,9 @@ class ChatRepository(
                 // ttl/send_at/encrypted ride the in-memory SendMeta (the outbox row can't
                 // carry them until A10 extends OutboxEntity); absent meta = a plain send,
                 // which is also the correct post-restart fallback.
-                val meta = pendingSendMeta[item.nonce]
                 val response = api.sendMessage(
                     item.channelId, item.content, item.nonce, item.replyTo, att,
-                    ttl = meta?.ttl, sendAt = meta?.sendAt, encrypted = meta?.encrypted ?: false,
+                    ttl = item.ttl, sendAt = item.sendAt, encrypted = item.encrypted,
                 )
                 val sent = response.message
                 if (sent == null) {
@@ -426,15 +428,10 @@ class ChatRepository(
                         db.messages().delete("pending-${item.nonce}")
                         db.outbox().remove(item.nonce)
                     }
-                    pendingSendMeta.remove(item.nonce)
                     continue
                 }
-                db.withTransaction {
-                    db.messages().delete("pending-${item.nonce}")
-                    db.messages().upsertOne(sent.toEntity())
-                    db.outbox().remove(item.nonce)
-                }
-                pendingSendMeta.remove(item.nonce)
+                db.outbox().remove(item.nonce)
+                mergeEvent(sent)
             } catch (_: Exception) {
                 db.outbox().bumpAttempt(item.nonce)
                 db.messages().setState(item.nonce, "FAILED")
@@ -625,12 +622,12 @@ class ChatRepository(
         return e2eeSessionMutex.withLock {
             if (channelId in establishedSessions) return@withLock true
             val ok = runCatching {
+                if (manager.hasSession(channelId)) return@runCatching true
                 // 1. Receive path: is there already a key wrapped to us?
                 val envelopes = runCatching { api.getKeyEnvelopes(channelId) }.getOrDefault(emptyList())
                 val mine = envelopes.firstOrNull { it.wrapped_key.isNotEmpty() }
                 if (mine != null) {
                     manager.unwrapDmKey(channelId, mine.wrapped_key)
-                    return@runCatching true
                 }
                 // 2. Initiate path: find the DM peer and wrap the key to every device.
                 val peerId = api.dms().firstOrNull { it.channel_id == channelId }?.peer?.id
@@ -643,7 +640,7 @@ class ChatRepository(
                     .filter { it.pub_key.isNotEmpty() }
                     .map { DevicePub(it.id, it.pub_key) }
                 val targets = (peerDevices + myDevices).distinctBy { it.deviceId }
-                if (targets.isEmpty()) return@runCatching false // peer has no registered device keys
+                if (targets.isEmpty()) return@runCatching manager.hasSession(channelId)
                 val envelopesToSend = manager.wrapDmKeyFor(channelId, targets)
                 if (envelopesToSend.isNotEmpty()) api.postKeyEnvelopes(channelId, envelopesToSend)
                 true
@@ -653,7 +650,7 @@ class ChatRepository(
         }
     }
 
-    private suspend fun decryptForDisplay(channelId: String, content: String, isEncrypted: Boolean): String {
+    private suspend fun decryptForDisplay(channelId: String, content: String, isEncrypted: Boolean, authorId: String): String {
         val manager = e2ee ?: return content
         if (!isEncrypted || content.isEmpty()) return content
         // First-encrypted-message-in receive path: if we haven't established the session
@@ -662,14 +659,14 @@ class ChatRepository(
         if (channelId !in establishedSessions) {
             runCatching { ensureE2eeSession(channelId, manager) }
         }
-        return runCatching { manager.decrypt(channelId, content) }.getOrNull() ?: lockedPlaceholder
+        return runCatching { manager.decrypt(channelId, content, authorId) }.getOrNull() ?: lockedPlaceholder
     }
 
     private suspend fun mergeEvent(dto: MessageDto) {
         // Decrypt BEFORE opening the transaction: for an encrypted row this may run the
         // key exchange (network), which must not happen while holding the DB write lock.
         // The server's `encrypted` flag drives it — plaintext rows are a no-op.
-        val display = decryptForDisplay(dto.channel_id, dto.content, isEncrypted = dto.encrypted)
+        val display = decryptForDisplay(dto.channel_id, dto.content, isEncrypted = dto.encrypted, authorId = dto.author.id)
         mergeEventDecrypted(dto, display)
     }
 

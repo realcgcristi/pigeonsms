@@ -29,8 +29,10 @@ data class MessageEntity(
     val revisionsJson: String?,  // admin-only edit history
     val kind: String? = null,        // poll | event | sticker | ... — null means plain text
     val metadataJson: String? = null, // kind-specific blob (event title/starts_at/…)
-    val pollJson: String? = null,     // serialized PollDto snapshot (options, votes, me)
-    val state: String = "SENT",  // SENDING | SENT | FAILED
+    val pollJson: String? = null,
+    @ColumnInfo(defaultValue = "0") val encrypted: Boolean = false,
+    val expiresAt: Long? = null,
+    val state: String = "SENT",
 )
 
 @Entity(tableName = "outbox")
@@ -45,6 +47,9 @@ data class OutboxEntity(
     val attachmentSize: Long?,
     val createdAt: Long,
     val attempts: Int = 0,
+    val ttl: Long? = null,
+    val sendAt: Long? = null,
+    @ColumnInfo(defaultValue = "0") val encrypted: Boolean = false,
 )
 
 /** Per-channel sync cursor for the reconnect resume protocol. */
@@ -130,7 +135,8 @@ data class KeyEnvelopeEntity(
     val channelId: String,
     val toDevice: String,        // recipient device id (one of ours)
     val fromUser: String,
-    val wrappedKey: String,      // base64 sealed-box ciphertext of the channel key
+    val wrappedKey: String,
+    val keyId: String? = null,
     @ColumnInfo(defaultValue = "0") val createdAt: Long = 0,
 )
 

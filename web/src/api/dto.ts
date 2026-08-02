@@ -225,6 +225,7 @@ export interface KeyBackupResponse {
 
 export interface KeyEnvelopeDto {
   id?: string;
+  key_id?: string | null;
   to_device: string;
   from_user?: string;
   wrapped_key: string;

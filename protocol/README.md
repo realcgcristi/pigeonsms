@@ -64,6 +64,7 @@ Conformance profiles are additive:
 - [Nest Time Machine](extensions/nest-time-machine.md)
 - [Networkless mode](extensions/networkless.md)
 - [Key transparency](extensions/key-transparency.md)
+- [End-to-end encryption v1](extensions/e2ee-v1.md)
 
 Generate live compatibility reports and embeddable badges with:
 

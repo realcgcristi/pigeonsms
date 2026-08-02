@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openpigeon.org/schema/e2ee-message.json",
+  "type": "object",
+  "required": ["v", "k", "s", "e"],
+  "properties": {
+    "v": { "const": 1 },
+    "k": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "s": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "e": {
+      "type": "object",
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": ["l", "i", "c"],
+            "properties": {
+              "l": { "const": 1 },
+              "i": { "type": "string", "minLength": 16 },
+              "c": { "type": "string", "minLength": 24 }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["h", "i", "c"],
+            "properties": {
+              "h": {
+                "type": "object",
+                "required": ["v", "d", "k", "p", "n"],
+                "properties": {
+                  "v": { "const": 1 },
+                  "d": { "type": "string", "minLength": 1 },
+                  "k": { "type": "string", "minLength": 44 },
+                  "p": { "type": "integer", "minimum": 0 },
+                  "n": { "type": "integer", "minimum": 0 }
+                }
+              },
+              "i": { "type": "string", "minLength": 16 },
+              "c": { "type": "string", "minLength": 24 }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,7 +1,7 @@
 import type { AttachmentDto, BlockedUserDto, DmDto, FriendDto, MessageDto, SpaceDto } from '@/api/dto'
 
 const DB_NAME = 'pigeon.local.v1'
-const DB_VERSION = 1
+const DB_VERSION = 2
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
 
@@ -29,6 +29,7 @@ export interface QueuedMessage {
     attachment?: AttachmentDto | null
     ttl?: number | null
     sendAt?: number | null
+    encrypted?: boolean
   }
 }
 
@@ -49,6 +50,7 @@ function openDb(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains('keys')) db.createObjectStore('keys')
       if (!db.objectStoreNames.contains('records')) db.createObjectStore('records', { keyPath: 'id' })
       if (!db.objectStoreNames.contains('outbox')) db.createObjectStore('outbox', { keyPath: 'id' })
+      if (!db.objectStoreNames.contains('crypto')) db.createObjectStore('crypto', { keyPath: 'id' })
     }
     request.onsuccess = () => resolve(request.result)
     request.onerror = () => reject(request.error)
@@ -105,7 +107,7 @@ async function decrypt<T>(db: IDBDatabase, value: Ciphertext): Promise<T> {
   return JSON.parse(decoder.decode(plain)) as T
 }
 
-async function put(storeName: 'records' | 'outbox', value: StoredRecord) {
+async function put(storeName: 'records' | 'outbox' | 'crypto', value: StoredRecord) {
   const db = await openDb()
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(storeName, 'readwrite')
@@ -197,4 +199,41 @@ export async function removeQueuedMessage(id: string) {
 
 export async function queuedMessageCount(owner: string) {
   return (await queuedMessages(owner)).length
+}
+
+export async function secureWrite<T>(owner: string, id: string, value: T) {
+  const db = await openDb()
+  const encrypted = await encrypt(db, value)
+  db.close()
+  await put('crypto', { id, owner, updatedAt: Date.now(), ...encrypted })
+}
+
+export async function secureRead<T>(owner: string, id: string): Promise<T | null> {
+  const db = await openDb()
+  const stored = await requestValue(db.transaction('crypto').objectStore('crypto').get(id)) as StoredRecord | undefined
+  if (!stored || stored.owner !== owner) {
+    db.close()
+    return null
+  }
+  try {
+    return await decrypt<T>(db, stored)
+  } catch {
+    return null
+  } finally {
+    db.close()
+  }
+}
+
+export async function secureDelete(owner: string, id: string) {
+  const db = await openDb()
+  const stored = await requestValue(db.transaction('crypto').objectStore('crypto').get(id)) as StoredRecord | undefined
+  if (stored?.owner === owner) {
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction('crypto', 'readwrite')
+      tx.objectStore('crypto').delete(id)
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error)
+    })
+  }
+  db.close()
 }

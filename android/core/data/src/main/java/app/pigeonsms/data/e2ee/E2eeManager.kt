@@ -9,209 +9,253 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import java.security.MessageDigest
+import java.util.UUID
 
-/**
- * End-to-end encryption for DMs. **Ships behind the OFF `e2ee` flag and is
- * EXPERIMENTAL** — correctness over completeness. The server only ever stores
- * ciphertext (encrypted=1) and never decrypts; FTS + push previews skip encrypted
- * messages (enforced server-side).
- *
- * Pipeline:
- *  1. [publishDevice] registers this device's X25519 identity pub key (private key
- *     wrapped at rest by the Android Keystore — see [IdentityKeyStore]).
- *  2. For a DM, the initiator mints a random per-channel key, [wrapDmKeyFor]s it to
- *     every recipient device pub key via libsodium sealed box, and POSTs the
- *     envelopes. Recipients [unwrapDmKey] from their own envelope.
- *  3. Both sides seed a symmetric [Ratchet] from the shared DM key and
- *     [encrypt]/[decrypt] the message stream. Ratchet state persists per channel
- *     through core/db's [app.pigeonsms.db.RatchetStateDao] (via [RatchetStateStore]).
- *  4. [buildKeyBackup]/[restoreKeyBackup] wrap the identity secret under an
- *     Argon2id-derived key for multi-device recovery.
- *
- * TODO(e2ee): end-to-end real-device testing of the whole flow. Notably:
- *   - group (>2 device) DMs: wrapDmKeyFor already fans out, but ratchet init picks
- *     initiator/responder by a 2-party assumption. Multi-party needs sender keys.
- *   - envelope de-dup / rotation when a peer adds a device mid-conversation.
- *   - the DH ratchet step (post-compromise security) — see [Ratchet] TODO.
- */
 interface E2eeManager {
-    /** This device's X25519 identity keypair (public + wrapped-at-rest secret). */
     suspend fun deviceKeyPair(): Sodium.KeyPairBytes
-
-    /** Register/refresh this device on the server; returns the server device id. */
     suspend fun publishDevice(name: String? = null): String
-
-    /**
-     * Wrap this channel's per-DM key (minting one if absent) to every recipient
-     * device pub key via sealed box. Returns envelopes ready for POST — the caller
-     * (repository layer) is responsible for [PigeonApi.postKeyEnvelopes].
-     */
+    suspend fun hasSession(channelId: String): Boolean
     suspend fun wrapDmKeyFor(channelId: String, devicePubKeys: List<DevicePub>): List<KeyEnvelopeDto>
-
-    /**
-     * Resolve this channel's per-DM key from an envelope addressed to one of our
-     * devices, persist it, and seed the ratchet (as responder). Idempotent.
-     */
     suspend fun unwrapDmKey(channelId: String, wrappedKeyBase64: String)
-
-    /** Encrypt [plaintext] for [channelId]; returns base64 to place in message content. */
     suspend fun encrypt(channelId: String, plaintext: String): String
-
-    /** Decrypt base64 [ciphertext] for [channelId]; returns the plaintext string. */
-    suspend fun decrypt(channelId: String, ciphertext: String): String
-
-    /** Build the {blob, kdf_salt, kdf_params} backup of this device's identity secret. */
+    suspend fun decrypt(channelId: String, ciphertext: String, authorId: String): String
     suspend fun buildKeyBackup(password: String): KeyBackupBlob
-
-    /** Restore + install the identity secret from a backup; re-publishes the device. */
     suspend fun restoreKeyBackup(password: String, blob: KeyBackupBlob)
 }
 
-/** A recipient device: its server id (envelope target) + base64 X25519 pub key. */
 data class DevicePub(val deviceId: String, val pubKeyBase64: String)
-
-/** Transport shape of a key backup — mirrors [app.pigeonsms.network.KeyBackupDto]. */
 data class KeyBackupBlob(val blob: String, val kdfSalt: String, val kdfParams: String)
 
-/**
- * Default implementation. Construct via [create] so callers don't wire the internal
- * Keystore / DAO-backed stores by hand.
- */
 class DefaultE2eeManager internal constructor(
     private val api: PigeonApi,
     private val identity: IdentityKeyStore,
     private val ratchets: RatchetStateStore,
 ) : E2eeManager {
-
-    // Guards the per-channel load→mutate→save ratchet cycle (DataStore/DAO writes
-    // aren't atomic across a read-modify-write; the ratchet MUST advance serially).
     private val locks = HashMap<String, Mutex>()
-    @Synchronized private fun lockFor(channelId: String) = locks.getOrPut(channelId) { Mutex() }
+
+    @Synchronized
+    private fun lockFor(channelId: String) = locks.getOrPut(channelId) { Mutex() }
 
     override suspend fun deviceKeyPair(): Sodium.KeyPairBytes = withContext(Dispatchers.IO) {
         identity.getOrCreate()
     }
 
     override suspend fun publishDevice(name: String?): String = withContext(Dispatchers.IO) {
-        val kp = identity.getOrCreate()
-        val id = api.postDevice(Sodium.b64(kp.publicKey), name)
+        val pair = identity.getOrCreate()
+        val id = api.postDevice(Sodium.b64(pair.publicKey), name)
         if (id.isNotEmpty()) identity.setDeviceId(id)
         id
+    }
+
+    override suspend fun hasSession(channelId: String): Boolean = withContext(Dispatchers.IO) {
+        val master = ratchets.loadMaster(channelId)
+        master != null && master.devices.isNotEmpty() && identity.deviceId() != null
     }
 
     override suspend fun wrapDmKeyFor(
         channelId: String,
         devicePubKeys: List<DevicePub>,
     ): List<KeyEnvelopeDto> = withContext(Dispatchers.IO) {
-        val dmKey = ratchets.loadDmKey(channelId) ?: Sodium.randomBytes(Sodium.AEAD_KEYBYTES).also {
-            ratchets.saveDmKey(channelId, it)
-            // Whoever mints the key is the ratchet initiator.
-            ratchets.setInitiator(channelId, true)
-            ensureRatchet(channelId, it, initiator = true)
-        }
-        devicePubKeys.map { d ->
-            val sealed = Sodium.seal(dmKey, Sodium.unb64(d.pubKeyBase64))
-            // id/from_user are server-assigned on POST; empty here per the API's
-            // postKeyEnvelopes body (it only reads to_device + wrapped_key).
-            KeyEnvelopeDto(
-                id = "",
-                to_device = d.deviceId,
-                from_user = "",
-                wrapped_key = Sodium.b64(sealed),
+        lockFor(channelId).withLock {
+            val existing = ratchets.loadMaster(channelId)
+            val devices = ((existing?.devices ?: emptyList()) + devicePubKeys)
+                .filter { it.deviceId.isNotBlank() && it.pubKeyBase64.isNotBlank() }
+                .distinctBy { it.deviceId }
+            val master = existing?.copy(devices = devices) ?: ChannelMaster(
+                keyId = UUID.randomUUID().toString(),
+                key = Sodium.randomBytes(32),
+                devices = devices,
             )
+            ratchets.saveMaster(channelId, master)
+            devices.map { device ->
+                KeyEnvelopeDto(
+                    id = "",
+                    key_id = master.keyId,
+                    to_device = device.deviceId,
+                    from_user = "",
+                    wrapped_key = wrapMaster(channelId, master, device),
+                )
+            }
         }
     }
 
-    override suspend fun unwrapDmKey(channelId: String, wrappedKeyBase64: String) =
-        withContext(Dispatchers.IO) {
-            if (ratchets.loadDmKey(channelId) != null) return@withContext // already resolved
-            val kp = identity.getOrCreate()
-            val dmKey = Sodium.sealOpen(Sodium.unb64(wrappedKeyBase64), kp.publicKey, kp.secretKey)
-            ratchets.saveDmKey(channelId, dmKey)
-            ratchets.setInitiator(channelId, false)
-            ensureRatchet(channelId, dmKey, initiator = false)
+    override suspend fun unwrapDmKey(channelId: String, wrappedKeyBase64: String) = withContext(Dispatchers.IO) {
+        lockFor(channelId).withLock {
+            val deviceId = identity.deviceId() ?: error("this encryption device is not registered")
+            val opened = openMaster(channelId, deviceId, wrappedKeyBase64, identity.getOrCreate())
+            val current = ratchets.loadMaster(channelId)
+            ratchets.saveMaster(channelId, opened.copy(devices = current?.devices ?: emptyList()))
         }
+    }
 
-    override suspend fun encrypt(channelId: String, plaintext: String): String =
-        withContext(Dispatchers.IO) {
-            lockFor(channelId).withLock {
-                val ratchet = Ratchet(requireRatchetState(channelId))
-                val ct = ratchet.encrypt(plaintext.toByteArray(Charsets.UTF_8))
-                ratchets.save(ratchet.snapshot)
-                Sodium.b64(ct)
+    override suspend fun encrypt(channelId: String, plaintext: String): String = withContext(Dispatchers.IO) {
+        lockFor(channelId).withLock {
+            val master = ratchets.loadMaster(channelId) ?: error("encrypted session is not ready")
+            val ownId = identity.deviceId() ?: error("this encryption device is not registered")
+            val pair = identity.getOrCreate()
+            val payload = JSONObject().put("v", 1).put("text", plaintext).toString()
+            val entries = JSONObject()
+            master.devices.forEach { device ->
+                if (device.deviceId == ownId) {
+                    val key = Ratchet.hkdf(master.key, ByteArray(32), "open-pigeon-local-copy-v1:$ownId", 32)
+                    val ad = "open-pigeon-local-copy-v1:$ownId".toByteArray(Charsets.UTF_8)
+                    val sealed = Sodium.aesGcmSeal(key, payload.toByteArray(Charsets.UTF_8), ad)
+                    entries.put(
+                        device.deviceId,
+                        JSONObject().put("l", 1).put("i", Sodium.b64(sealed.iv)).put("c", Sodium.b64(sealed.ciphertext)),
+                    )
+                } else {
+                    val remoteKey = Sodium.unb64(device.pubKeyBase64)
+                    val stored = ratchets.load(channelId, device.deviceId)
+                    val ratchet = if (stored != null && stored.remoteIdentity.contentEquals(remoteKey)) {
+                        Ratchet(stored)
+                    } else {
+                        Ratchet.initialize(channelId, master.key, ownId, device.deviceId, pair, remoteKey)
+                    }
+                    val packet = ratchet.encrypt(payload)
+                    ratchets.save(ratchet.snapshot)
+                    entries.put(device.deviceId, packetJson(packet))
+                }
             }
-        }
-
-    override suspend fun decrypt(channelId: String, ciphertext: String): String =
-        withContext(Dispatchers.IO) {
-            lockFor(channelId).withLock {
-                val ratchet = Ratchet(requireRatchetState(channelId))
-                val pt = ratchet.decrypt(Sodium.unb64(ciphertext))
-                ratchets.save(ratchet.snapshot)
-                String(pt, Charsets.UTF_8)
-            }
-        }
-
-    override suspend fun buildKeyBackup(password: String): KeyBackupBlob =
-        withContext(Dispatchers.IO) {
-            val kp = identity.getOrCreate()
-            // Bundle = versioned JSON of the identity secret. Extendable (per-channel
-            // DM keys could be added later) without breaking older restores.
-            val bundle = JSONObject()
+            require(entries.length() > 0) { "no encrypted recipient devices are available" }
+            JSONObject()
                 .put("v", 1)
-                .put("identitySecret", Sodium.b64(kp.secretKey))
+                .put("k", master.keyId)
+                .put("s", ownId)
+                .put("e", entries)
                 .toString()
-                .toByteArray(Charsets.UTF_8)
-            val sealed = KeyBackup.seal(password, bundle)
-            KeyBackupBlob(sealed.ciphertext, sealed.salt, sealed.params)
         }
-
-    override suspend fun restoreKeyBackup(password: String, blob: KeyBackupBlob) =
-        withContext(Dispatchers.IO) {
-            val bundle = KeyBackup.open(password, KeyBackup.Blob(blob.blob, blob.kdfSalt, blob.kdfParams))
-            val o = JSONObject(String(bundle, Charsets.UTF_8))
-            val secret = Sodium.unb64(o.getString("identitySecret"))
-            identity.importSecret(secret)
-            // The restored identity is a NEW device server-side (envelopes are keyed
-            // to a device id); re-publish so peers can wrap to it.
-            val kp = identity.getOrCreate()
-            val id = api.postDevice(Sodium.b64(kp.publicKey), null)
-            if (id.isNotEmpty()) identity.setDeviceId(id)
-        }
-
-    // --- ratchet lifecycle helpers ---
-
-    /** Seed + persist a ratchet for a channel if one isn't stored yet. */
-    private suspend fun ensureRatchet(channelId: String, dmKey: ByteArray, initiator: Boolean) {
-        if (ratchets.load(channelId) != null) return
-        val r = Ratchet.fromSharedKey(channelId, dmKey, initiator)
-        ratchets.save(r.snapshot)
     }
 
-    /**
-     * Load the ratchet state, lazily seeding it from a stored DM key if the ratchet
-     * row is missing (e.g. key delivered but stream not yet started). Fails loudly
-     * if there's no key material at all — callers must gate on the e2ee flag +
-     * key-exchange completion before encrypt/decrypt.
-     */
-    private suspend fun requireRatchetState(channelId: String): RatchetState {
-        ratchets.load(channelId)?.let { return it }
-        val dmKey = ratchets.loadDmKey(channelId)
-            ?: error("no e2ee key material for channel $channelId (key exchange not done)")
-        val initiator = ratchets.isInitiator(channelId) ?: false
-        val r = Ratchet.fromSharedKey(channelId, dmKey, initiator)
-        ratchets.save(r.snapshot)
-        return r.snapshot
+    override suspend fun decrypt(channelId: String, ciphertext: String, authorId: String): String = withContext(Dispatchers.IO) {
+        lockFor(channelId).withLock {
+            val wire = JSONObject(ciphertext)
+            require(wire.getInt("v") == 1) { "unsupported encrypted message" }
+            val master = ratchets.loadMaster(channelId) ?: error("encrypted session is not ready")
+            require(wire.getString("k") == master.keyId) { "the conversation encryption key changed" }
+            val ownId = identity.deviceId() ?: error("this encryption device is not registered")
+            val entry = wire.getJSONObject("e").optJSONObject(ownId)
+                ?: error("this message was not encrypted to this device")
+            val payload = if (entry.optInt("l") == 1) {
+                val key = Ratchet.hkdf(master.key, ByteArray(32), "open-pigeon-local-copy-v1:$ownId", 32)
+                val ad = "open-pigeon-local-copy-v1:$ownId".toByteArray(Charsets.UTF_8)
+                String(
+                    Sodium.aesGcmOpen(key, Sodium.unb64(entry.getString("i")), Sodium.unb64(entry.getString("c")), ad),
+                    Charsets.UTF_8,
+                )
+            } else {
+                val senderDevice = wire.getString("s")
+                val remote = master.devices.firstOrNull { it.deviceId == senderDevice }
+                    ?: (api.myDevices() + api.userDevices(authorId))
+                        .firstOrNull { it.id == senderDevice }
+                        ?.let { DevicePub(it.id, it.pub_key) }
+                    ?: error("the sending device was revoked")
+                val remoteKey = Sodium.unb64(remote.pubKeyBase64)
+                val pair = identity.getOrCreate()
+                val stored = ratchets.load(channelId, remote.deviceId)
+                val ratchet = if (stored != null && stored.remoteIdentity.contentEquals(remoteKey)) {
+                    Ratchet(stored)
+                } else {
+                    Ratchet.initialize(channelId, master.key, ownId, remote.deviceId, pair, remoteKey)
+                }
+                val plaintext = ratchet.decrypt(parsePacket(entry))
+                ratchets.save(ratchet.snapshot)
+                plaintext
+            }
+            val protectedPayload = JSONObject(payload)
+            require(protectedPayload.getInt("v") == 1) { "invalid encrypted message" }
+            protectedPayload.getString("text")
+        }
+    }
+
+    override suspend fun buildKeyBackup(password: String): KeyBackupBlob = withContext(Dispatchers.IO) {
+        val pair = identity.getOrCreate()
+        val bundle = JSONObject()
+            .put("v", 1)
+            .put("identitySecret", Sodium.b64(pair.secretKey))
+            .toString()
+            .toByteArray(Charsets.UTF_8)
+        val sealed = KeyBackup.seal(password, bundle)
+        KeyBackupBlob(sealed.ciphertext, sealed.salt, sealed.params)
+    }
+
+    override suspend fun restoreKeyBackup(password: String, blob: KeyBackupBlob) = withContext(Dispatchers.IO) {
+        val bundle = KeyBackup.open(password, KeyBackup.Blob(blob.blob, blob.kdfSalt, blob.kdfParams))
+        val secret = Sodium.unb64(JSONObject(String(bundle, Charsets.UTF_8)).getString("identitySecret"))
+        identity.importSecret(secret)
+        val pair = identity.getOrCreate()
+        val id = api.postDevice(Sodium.b64(pair.publicKey), null)
+        if (id.isNotEmpty()) identity.setDeviceId(id)
+    }
+
+    private fun wrapMaster(channelId: String, master: ChannelMaster, device: DevicePub): String {
+        val ephemeral = Sodium.newBoxKeyPair()
+        val shared = Sodium.scalarMult(ephemeral.secretKey, Sodium.unb64(device.pubKeyBase64))
+        val salt = MessageDigest.getInstance("SHA-256")
+            .digest("open-pigeon-key-salt-v1:$channelId:${device.deviceId}".toByteArray(Charsets.UTF_8))
+        val key = Ratchet.hkdf(shared, salt, "open-pigeon-key-envelope-v1", 32)
+        val ad = "open-pigeon-key-envelope-v1:$channelId:${device.deviceId}".toByteArray(Charsets.UTF_8)
+        val payload = JSONObject()
+            .put("v", 1)
+            .put("channelId", channelId)
+            .put("keyId", master.keyId)
+            .put("key", Sodium.b64(master.key))
+            .toString()
+            .toByteArray(Charsets.UTF_8)
+        val sealed = Sodium.aesGcmSeal(key, payload, ad)
+        return "opk1.${Sodium.b64(ephemeral.publicKey)}.${Sodium.b64(sealed.iv)}.${Sodium.b64(sealed.ciphertext)}"
+    }
+
+    private fun openMaster(
+        channelId: String,
+        deviceId: String,
+        envelope: String,
+        pair: Sodium.KeyPairBytes,
+    ): ChannelMaster {
+        val parts = envelope.split('.')
+        require(parts.size == 4 && parts[0] == "opk1") { "unsupported key envelope" }
+        val shared = Sodium.scalarMult(pair.secretKey, Sodium.unb64(parts[1]))
+        val salt = MessageDigest.getInstance("SHA-256")
+            .digest("open-pigeon-key-salt-v1:$channelId:$deviceId".toByteArray(Charsets.UTF_8))
+        val key = Ratchet.hkdf(shared, salt, "open-pigeon-key-envelope-v1", 32)
+        val ad = "open-pigeon-key-envelope-v1:$channelId:$deviceId".toByteArray(Charsets.UTF_8)
+        val payload = JSONObject(
+            String(Sodium.aesGcmOpen(key, Sodium.unb64(parts[2]), Sodium.unb64(parts[3]), ad), Charsets.UTF_8),
+        )
+        require(payload.getInt("v") == 1 && payload.getString("channelId") == channelId)
+        return ChannelMaster(payload.getString("keyId"), Sodium.unb64(payload.getString("key")))
+    }
+
+    private fun packetJson(packet: RatchetPacket): JSONObject = JSONObject()
+        .put(
+            "h",
+            JSONObject()
+                .put("v", 1)
+                .put("d", packet.header.d)
+                .put("k", packet.header.k)
+                .put("p", packet.header.p)
+                .put("n", packet.header.n),
+        )
+        .put("i", packet.iv)
+        .put("c", packet.ciphertext)
+
+    private fun parsePacket(json: JSONObject): RatchetPacket {
+        val header = json.getJSONObject("h")
+        return RatchetPacket(
+            RatchetHeader(
+                v = header.getInt("v"),
+                d = header.getString("d"),
+                k = header.getString("k"),
+                p = header.getLong("p"),
+                n = header.getLong("n"),
+            ),
+            json.getString("i"),
+            json.getString("c"),
+        )
     }
 
     companion object {
-        /**
-         * Wire up the manager against the app database + API. E2EE ships flag-OFF;
-         * only construct/use this when the `e2ee` flag is enabled.
-         *
-         * TODO(e2ee): the `e2ee` client flag belongs on ThemePrefs (Stores.kt, owned
-         * by another agent this cycle) — default FALSE. Gate all callers on it.
-         */
         fun create(context: Context, api: PigeonApi, db: PigeonDatabase): E2eeManager =
             DefaultE2eeManager(
                 api = api,

@@ -1111,6 +1111,14 @@ class PigeonApi {
     return requestVoid(`/auth/devices/${seg(id)}`, { method: 'DELETE' });
   }
 
+  pendingDeviceSync() {
+    return request<DevicesResponse>('/auth/device-sync').then((r) => r.devices);
+  }
+
+  completeDeviceSync(id: string) {
+    return requestVoid(`/auth/device-sync/${seg(id)}`, { method: 'DELETE' });
+  }
+
   getKeyBackup() {
     return request<KeyBackupResponse>('/auth/key-backup').then((r) => r.backup);
   }
@@ -1125,10 +1133,10 @@ class PigeonApi {
     );
   }
 
-  postKeyEnvelopes(channelId: string, envelopes: KeyEnvelopeInput[]) {
+  postKeyEnvelopes(channelId: string, envelopes: KeyEnvelopeInput[], keyId?: string) {
     return requestVoid(`/channels/${seg(channelId)}/key-envelopes`, {
       method: 'POST',
-      json: { envelopes },
+      json: { envelopes, ...(keyId ? { key_id: keyId } : {}) },
     });
   }
 

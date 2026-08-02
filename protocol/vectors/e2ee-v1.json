@@ -1,0 +1,16 @@
+{
+  "channel_id": "72351096507367426",
+  "lower_device_id": "android-device-b",
+  "higher_device_id": "web-device-a",
+  "master_b64": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+  "root_b64": "WRjkfHJyNEpN69bdoRL48xc8qMRDb03gF3L2uU5zT9g=",
+  "lower_to_higher_b64": "KTEnUMJMVFu9JvIfUlMAjsQyLwYw6mqI1uaKfuJ7rsY=",
+  "higher_to_lower_b64": "v2gVUnKaQiArzrGQ19ikFmoFYuUWl849WEc2KxE5qso=",
+  "next_chain_b64": "9XHB3ft2cBhof7AfEGYCkPWZy2Xe66spd4J49qnWzqQ=",
+  "message_key_b64": "TkYmoKyKSDkEOMfA8zMdR4bdin4HcoBXV2KOR/ZF9yI=",
+  "safety_values": [
+    "u1:d1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+    "u2:d2:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
+  ],
+  "safety_number": "915622431126292830983016258451764864551994300008387924149880"
+}

@@ -214,6 +214,7 @@ data class MessageDto(
     val attachment: AttachmentDto? = null,
     val created_at: Long = 0,
     val edited_at: Long? = null,
+    val expires_at: Long? = null,
     val deleted: Boolean = false,
     val reactions: List<ReactionDto> = emptyList(),
     /**
@@ -597,9 +598,10 @@ data class KeyBackupDto(
 /** A per-DM symmetric key wrapped (sealed box) to a recipient device. /channels/:id/key-envelopes. */
 @Serializable
 data class KeyEnvelopeDto(
-    val id: String,
+    val id: String = "",
+    val key_id: String? = null,
     val to_device: String,
-    val from_user: String,
+    val from_user: String = "",
     val wrapped_key: String,
     val created_at: Long = 0,
 )
