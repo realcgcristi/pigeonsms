@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "test": "vitest run",
+    "test:sync": "vitest run src/lib/messageSync.test.ts",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
     "deploy": "npm run build && wrangler pages deploy dist --project-name pigeonsms-web --commit-dirty=true"

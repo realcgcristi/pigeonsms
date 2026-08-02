@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { api, onUnauthorized, setTokenProvider } from '@/api/client';
 import { gateway } from '@/api/gateway';
+import { latestServerSequence } from '@/lib/messageSync';
 import {
   clearDesktopSessionToken,
   isDesktopApp,
@@ -112,8 +113,8 @@ export const useSession = create<SessionState>((set, get) => ({
         const { useChat } = await import('@/store/chat');
         const cursors: Record<string, number> = {};
         for (const [channelId, channel] of Object.entries(useChat.getState().channels)) {
-          const latest = channel.messages.reduce((max, message) => Math.max(max, message.seq ?? 0), 0);
-          if (latest > 0 && latest < Number.MAX_SAFE_INTEGER) cursors[channelId] = latest;
+          const latest = latestServerSequence(channel.messages);
+          if (latest > 0) cursors[channelId] = latest;
         }
         return cursors;
       });

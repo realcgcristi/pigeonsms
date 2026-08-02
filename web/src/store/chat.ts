@@ -1,17 +1,25 @@
 import { create } from 'zustand';
 import { ApiError, api, nonce } from '@/api/client';
 import { gateway } from '@/api/gateway';
-import type { AttachmentDto, MessageDto, SpaceEmojiDto, SuperPinDto } from '@/api/dto';
+import type { AttachmentDto, MessageDto, MessagesResponse, SpaceEmojiDto, SuperPinDto } from '@/api/dto';
 import { usePrefs } from '@/store/prefs';
 import { useSocial } from '@/store/social';
 import { cacheMessages, cachedMessages, queueMessage, queuedMessages, removeQueuedMessage, type QueuedMessage } from '@/lib/localFirst';
 import type { NearbyMessage } from '@/lib/networkless';
+import {
+  LOCAL_MESSAGE_SEQUENCE,
+  NEARBY_MESSAGE_SEQUENCE,
+  latestServerSequence,
+  markMessageDeleted,
+  mergeRemoteMessages,
+  reconcileMessages,
+  restoreCachedMessages,
+  type MessageDeliveryState,
+  type SyncedMessage,
+} from '@/lib/messageSync';
 
-export type SendState = 'sent' | 'pending' | 'queued' | 'nearby' | 'failed';
-
-export interface ChatMessage extends MessageDto {
-  state: SendState;
-}
+export type SendState = MessageDeliveryState;
+export type ChatMessage = SyncedMessage;
 
 interface ChannelState {
   messages: ChatMessage[];
@@ -75,23 +83,6 @@ function patchChannel(
   return { channels: { ...state.channels, [channelId]: patch(current) } };
 }
 
-function insert(messages: ChatMessage[], message: MessageDto): ChatMessage[] {
-  const byNonce = message.nonce
-    ? messages.findIndex((m) => m.nonce && m.nonce === message.nonce)
-    : -1;
-  if (byNonce >= 0) {
-    const next = messages.slice();
-    next[byNonce] = { ...message, state: 'sent' };
-    return next;
-  }
-  if (messages.some((m) => m.id === message.id)) {
-    return messages.map((m) => (m.id === message.id ? { ...m, ...message } : m));
-  }
-  const next: ChatMessage[] = messages.concat({ ...message, state: 'sent' });
-  next.sort((a, b) => a.created_at - b.created_at || (a.seq ?? 0) - (b.seq ?? 0));
-  return next;
-}
-
 async function ownerId() {
   return (await import('@/store/session')).useSession.getState().user?.id ?? null;
 }
@@ -99,6 +90,24 @@ async function ownerId() {
 async function persist(channelId: string, messages: ChatMessage[]) {
   const owner = await ownerId();
   if (owner) await cacheMessages(owner, channelId, messages);
+}
+
+async function fetchMessages(channelId: string, afterSeq?: number): Promise<MessagesResponse> {
+  if (!afterSeq || afterSeq <= 0) return api.messagesPage(channelId);
+  let cursor = afterSeq;
+  let read: Record<string, number> | null | undefined;
+  let last: MessagesResponse['cursor'];
+  const messages: MessagesResponse['messages'] = [];
+  while (true) {
+    const page = await api.messagesAfter(channelId, cursor, 100);
+    messages.push(...page.messages);
+    read = page.read ?? read;
+    last = page.cursor;
+    const next = page.cursor?.last_seq ?? page.messages.at(-1)?.seq ?? cursor;
+    if (!page.cursor?.has_more_after || next <= cursor) break;
+    cursor = next;
+  }
+  return { messages, read, cursor: last };
 }
 
 export const useChat = create<ChatState>((set, get) => ({
@@ -119,30 +128,20 @@ export const useChat = create<ChatState>((set, get) => ({
       if (local.length) {
         set((s) => patchChannel(s, channelId, (c) => ({
           ...c,
-          messages: local.map((message) => ({
-            ...message,
-            state: (message.metadata as { networkless?: boolean } | null)?.networkless ? 'nearby' : 'sent',
-          } as ChatMessage)),
+          messages: restoreCachedMessages(local),
         })));
       }
     }
     try {
-      const page = afterSeq && afterSeq > 0
-        ? await api.messagesAfter(channelId, afterSeq)
-        : await api.messagesPage(channelId);
+      const page = await fetchMessages(channelId, afterSeq);
       set((s) =>
         patchChannel(s, channelId, (c) => ({
           ...c,
           loading: false,
           error: null,
-          messages: page.messages
-            .map((m) => ({ ...m, state: 'sent' as SendState }))
-            .concat(c.messages.filter((local) =>
-              local.state !== 'sent' && !page.messages.some((remote) => !!local.nonce && remote.nonce === local.nonce),
-            ))
-            .sort((a, b) => a.created_at - b.created_at || (a.seq ?? 0) - (b.seq ?? 0)),
+          messages: mergeRemoteMessages(c.messages, page.messages),
           read: page.read ?? c.read,
-          hasMore: page.messages.length >= 40,
+          hasMore: afterSeq ? c.hasMore : page.messages.length >= 40,
         })),
       );
       void persist(channelId, get().channel(channelId).messages);
@@ -170,10 +169,7 @@ export const useChat = create<ChatState>((set, get) => ({
           ...c,
           loadingMore: false,
           hasMore: older.length > 0,
-          messages: older
-            .map((m) => ({ ...m, state: 'sent' as SendState }))
-            .concat(c.messages)
-            .sort((a, b) => a.created_at - b.created_at || (a.seq ?? 0) - (b.seq ?? 0)),
+          messages: mergeRemoteMessages(c.messages, older),
         })),
       );
       void persist(channelId, get().channel(channelId).messages);
@@ -209,7 +205,7 @@ export const useChat = create<ChatState>((set, get) => ({
     const optimistic: ChatMessage = {
       id: `local-${n}`,
       channel_id: channelId,
-      seq: Number.MAX_SAFE_INTEGER,
+      seq: LOCAL_MESSAGE_SEQUENCE,
       author: me,
       content,
       created_at: Date.now(),
@@ -219,7 +215,7 @@ export const useChat = create<ChatState>((set, get) => ({
       reactions: [],
       state: 'pending',
     };
-    set((s) => patchChannel(s, channelId, (c) => ({ ...c, messages: c.messages.concat(optimistic) })));
+    set((s) => patchChannel(s, channelId, (c) => ({ ...c, messages: reconcileMessages(c.messages, [optimistic]) })));
     const queued: QueuedMessage = {
       id: `outbox:${n}`,
       owner: me.id,
@@ -253,7 +249,7 @@ export const useChat = create<ChatState>((set, get) => ({
         set((s) =>
           patchChannel(s, channelId, (c) => ({
             ...c,
-            messages: insert(c.messages, sent),
+            messages: mergeRemoteMessages(c.messages, [sent]),
           })),
         );
         useSocial.getState().bump(channelId, content, sent.created_at, true);
@@ -292,7 +288,7 @@ export const useChat = create<ChatState>((set, get) => ({
       if (res.message) {
         const sent = res.message;
         set((s) =>
-          patchChannel(s, channelId, (c) => ({ ...c, messages: insert(c.messages, sent) })),
+          patchChannel(s, channelId, (c) => ({ ...c, messages: mergeRemoteMessages(c.messages, [sent]) })),
         );
       }
     } catch {
@@ -323,7 +319,7 @@ export const useChat = create<ChatState>((set, get) => ({
     set((s) =>
       patchChannel(s, channelId, (c) => ({
         ...c,
-        messages: c.messages.map((m) => (m.id === id ? { ...m, ...updated, state: 'sent' } : m)),
+        messages: mergeRemoteMessages(c.messages, [updated]),
       })),
     );
   },
@@ -340,7 +336,7 @@ export const useChat = create<ChatState>((set, get) => ({
     set((s) =>
       patchChannel(s, channelId, (c) => ({
         ...c,
-        messages: c.messages.map((m) => (m.id === id ? { ...m, deleted: true, content: '' } : m)),
+        messages: markMessageDeleted(c.messages, id),
       })),
     );
   },
@@ -419,7 +415,7 @@ export const useChat = create<ChatState>((set, get) => ({
         if (response.message) {
           set((state) => patchChannel(state, item.channelId, (channel) => ({
             ...channel,
-            messages: insert(channel.messages, response.message!),
+            messages: mergeRemoteMessages(channel.messages, [response.message!]),
           })));
           useSocial.getState().bump(item.channelId, item.content, response.message.created_at, true);
           void persist(item.channelId, get().channel(item.channelId).messages);
@@ -444,7 +440,7 @@ export const useChat = create<ChatState>((set, get) => ({
     const message: ChatMessage = {
       id: current?.id ?? `nearby-${nearby.nonce}`,
       channel_id: nearby.channelId,
-      seq: current?.seq ?? Number.MAX_SAFE_INTEGER - 1,
+      seq: current?.seq ?? NEARBY_MESSAGE_SEQUENCE,
       author: nearby.author,
       content: nearby.content,
       created_at: nearby.createdAt,
@@ -457,10 +453,7 @@ export const useChat = create<ChatState>((set, get) => ({
     }
     set((state) => patchChannel(state, nearby.channelId, (channel) => ({
       ...channel,
-      messages: channel.messages
-        .filter((item) => item.nonce !== nearby.nonce)
-        .concat(message)
-        .sort((a, b) => a.created_at - b.created_at || (a.seq ?? 0) - (b.seq ?? 0)),
+      messages: reconcileMessages(channel.messages, [message]),
     })))
     void persist(nearby.channelId, get().channel(nearby.channelId).messages)
   },
@@ -468,7 +461,7 @@ export const useChat = create<ChatState>((set, get) => ({
   subscribe: () => {
     const offNew = gateway.on('message.new', (message) => {
       set((s) =>
-        patchChannel(s, message.channel_id, (c) => ({ ...c, messages: insert(c.messages, message) })),
+        patchChannel(s, message.channel_id, (c) => ({ ...c, messages: mergeRemoteMessages(c.messages, [message]) })),
       );
       void persist(message.channel_id, get().channel(message.channel_id).messages);
     });
@@ -476,7 +469,7 @@ export const useChat = create<ChatState>((set, get) => ({
       set((s) =>
         patchChannel(s, message.channel_id, (c) => ({
           ...c,
-          messages: c.messages.map((m) => (m.id === message.id ? { ...m, ...message } : m)),
+          messages: mergeRemoteMessages(c.messages, [message]),
         })),
       );
       void persist(message.channel_id, get().channel(message.channel_id).messages);
@@ -485,7 +478,7 @@ export const useChat = create<ChatState>((set, get) => ({
       set((s) =>
         patchChannel(s, d.channel_id, (c) => ({
           ...c,
-          messages: c.messages.map((m) => (m.id === d.id ? { ...m, deleted: true, content: '' } : m)),
+          messages: markMessageDeleted(c.messages, d.id),
         })),
       );
       void persist(d.channel_id, get().channel(d.channel_id).messages);
@@ -586,9 +579,16 @@ export const useChat = create<ChatState>((set, get) => ({
       set((s) => patchChannel(s, d.channel_id, (c) => ({ ...c, superPin: null })));
     });
     const offResume = gateway.on('gateway.resume', (d) => {
-      for (const channelId of d.backfill ?? []) void get().load(channelId, true);
+      for (const channelId of d.backfill ?? []) {
+        const after = latestServerSequence(get().channel(channelId).messages);
+        void get().load(channelId, true, after);
+      }
       if (d.incomplete) {
-        for (const channelId of Object.keys(get().channels)) void get().load(channelId, true);
+        for (const channelId of Object.keys(get().channels)) {
+          if (d.backfill?.includes(channelId)) continue;
+          const after = latestServerSequence(get().channel(channelId).messages);
+          void get().load(channelId, true, after);
+        }
       }
     });
     return () => {
