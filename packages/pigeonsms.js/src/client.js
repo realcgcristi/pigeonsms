@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
 import { PigeonError } from './errors.js';
-import { REST, DEFAULT_API } from './rest.js';
+import { REST, DEFAULT_API, normalizeApiBase } from './rest.js';
 import { normalizeCommand, commandKey, diffCommands, OptionBuilder } from './commands.js';
 import { Interaction } from './interaction.js';
 import { Gateway } from './gateway.js';
@@ -35,7 +35,7 @@ export class Client {
       });
     }
 
-    this.api = String(api).replace(/\/+$/, '');
+    this.api = normalizeApiBase(api);
     this.mode = options.mode === 'webhook' ? 'webhook' : 'poll';
     this.pollWait = clamp(options.pollWait ?? 25, 0, 25);
     this.autoSync = options.autoSync !== false;

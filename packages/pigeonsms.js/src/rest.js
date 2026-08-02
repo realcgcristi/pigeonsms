@@ -3,6 +3,13 @@ import { RateLimiter, bucketFor } from './ratelimit.js';
 
 export const DEFAULT_API = 'https://api.pigeonsms.aldi.best';
 
+export function normalizeApiBase(value) {
+  const text = String(value);
+  let end = text.length;
+  while (end > 0 && text.charCodeAt(end - 1) === 47) end -= 1;
+  return text.slice(0, end);
+}
+
 const RETRY_STATUSES = new Set([429, 500, 502, 503, 504]);
 const DEFAULT_RETRIES = 2;
 const BASE_BACKOFF_MS = 500;
@@ -29,7 +36,7 @@ export class REST {
   } = {}) {
     if (!token) throw new PigeonError('a bot token is required (PGB.<bot_id>.<secret>)', { code: 'no_token' });
     this.#token = String(token);
-    this.api = String(api).replace(/\/+$/, '');
+    this.api = normalizeApiBase(api);
     this.timeout = timeout;
     this.retries = retries;
     this.debug = typeof debug === 'function' ? debug : null;

@@ -16,14 +16,18 @@ spaces.use(requireAuth);
 
 const CODE_ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
 
-function inviteCode(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(8));
-  let out = '';
-  for (let i = 0; i < 8; i++) {
-    if (i === 4) out += '-';
-    out += CODE_ALPHABET[(bytes[i] ?? 0) % CODE_ALPHABET.length];
+export function inviteCode(): string {
+  const limit = Math.floor(256 / CODE_ALPHABET.length) * CODE_ALPHABET.length;
+  const chars: string[] = [];
+  while (chars.length < 8) {
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    for (const byte of bytes) {
+      if (byte >= limit) continue;
+      chars.push(CODE_ALPHABET[byte % CODE_ALPHABET.length] ?? '');
+      if (chars.length === 8) break;
+    }
   }
-  return `SPC-${out}`;
+  return `SPC-${chars.slice(0, 4).join('')}-${chars.slice(4).join('')}`;
 }
 
 async function requireRole(

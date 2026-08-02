@@ -25,7 +25,7 @@
   },
   "sideEffects": false,
   "scripts": {
-    "test": "node --check src/index.js && node --check src/client.js && node --check src/rest.js && node --check src/commands.js && node --check src/interaction.js && node --check src/gateway.js && node --check src/errors.js"
+    "test": "node --check src/index.js && node --check src/client.js && node --check src/rest.js && node --check src/commands.js && node --check src/interaction.js && node --check src/gateway.js && node --check src/errors.js && node --test test/*.test.mjs"
   },
   "keywords": [
     "pigeonsms",
