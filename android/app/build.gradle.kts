@@ -13,8 +13,8 @@ android {
         applicationId = "app.pigeonsms"
         minSdk = 26
         targetSdk = 36
-        versionCode = 48
-        versionName = "3.0.0-rc.2"
+        versionCode = 49
+        versionName = "3.0.0-rc.3"
         // Native WebRTC ships .so for every ABI; ship only the common phone ABIs
         // to keep the APK from ballooning (~47MB → ~20MB).
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }

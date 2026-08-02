@@ -74,11 +74,11 @@ jobs:
         working-directory: android
         run: ./gradlew :app:testReleaseUnitTest :app:assembleRelease --no-daemon --stacktrace
       - name: prepare apk
-        run: cp android/app/build/outputs/apk/release/app-release.apk PigeonSMS_3.0.0-rc.2_android.apk
+        run: cp android/app/build/outputs/apk/release/app-release.apk PigeonSMS_3.0.0-rc.3_android.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: pigeonsms-v3-rc2-android
-          path: PigeonSMS_3.0.0-rc.2_android.apk
+          name: pigeonsms-v3-rc3-android
+          path: PigeonSMS_3.0.0-rc.3_android.apk
           if-no-files-found: error
 
   windows:
@@ -129,7 +129,7 @@ jobs:
           $manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath latest.json -Encoding utf8
       - uses: actions/upload-artifact@v4
         with:
-          name: pigeonsms-v3-rc2-windows
+          name: pigeonsms-v3-rc3-windows
           path: |
             PigeonSMS_*.exe
             PigeonSMS_*.exe.sig
@@ -150,11 +150,11 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          name: PigeonSMS v3-rc2
+          name: PigeonSMS v3-rc3
           prerelease: true
           generate_release_notes: true
           body: |
-            v3-rc2 adds passkeys and trusted device pairing, resilient calls, deterministic offline sync and signed desktop updates across Android, web and Windows.
+            v3-rc3 adds full ratcheted e2ee, nest shield moderation, a native Windows experience and scale hardening across Android, web and Windows.
 
             included:
             - Android release APK

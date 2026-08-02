@@ -68,7 +68,7 @@ export default function AboutScreen() {
           <Logo size={96} />
           <h2>pigeonsms</h2>
           <div className="settings__about-version">
-            {desktop ? `windows ${desktopVersion ?? '3.0.0-rc.2'}` : 'web 3.0.0-rc.2'}
+            {desktop ? `windows ${desktopVersion ?? '3.0.0-rc.3'}` : 'web 3.0.0-rc.3'}
           </div>
         </div>
         <SettingsGroup label="app">

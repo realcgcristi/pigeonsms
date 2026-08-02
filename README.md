@@ -86,7 +86,8 @@ it started as a "i bet i can build a messenger in a weekend" kind of idea and uh
 - three whole UI skins you can flip between in settings: **classic** (the original), **nova** (a flatter, cleaner redesign), and **galaxy** (nova cranked up — deep space-indigo, aurora backgrounds, glow, spring physics everywhere). same app, three vibes
 - the web client works from phone to ultrawide desktop, with encrypted offline cache, queued sends, jump-to-unread, channel categories, branches, packs, migration, and bridge management
 - nest time machine, networkless nearby messaging, and key transparency work on android and web, with the same public Open Pigeon contracts
-- a native windows client lives in `desktop/` through tauri and shares the same api
+- nest shield adds anti-raid, automod, slow mode, timeouts, reports and evidence capture on android and web
+- the native windows client adds credential manager storage, notifications, launch at login, tray mode, unread status, deep links and signed updates
 - open pigeon discovery, schemas, fixtures, compatibility checks, and official TypeScript, Kotlin, and Rust sdks live in `protocol/` and `packages/`
 
 ## the one thing that doesn't work: calls

@@ -20,7 +20,7 @@ jobs:
         run: npm test --prefix protocol/conformance
       - name: TypeScript SDK
         working-directory: packages/sdk-typescript
-        run: npm install --ignore-scripts && npm test
+        run: npm ci --ignore-scripts && npm test
       - name: Bridge kit
         working-directory: packages/bridge-kit
         run: npm test

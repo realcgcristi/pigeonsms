@@ -85,7 +85,7 @@ app.get('/.well-known/pigeon', (c) => {
     protocol: { name: 'open-pigeon', versions: ['1.0'], preferred: '1.0' },
     server: {
       name: c.env.SERVER_NAME ?? 'pigeonsms',
-      version: c.env.SERVER_VERSION ?? '3.0.0-rc.2',
+      version: c.env.SERVER_VERSION ?? '3.0.0-rc.3',
       source: 'https://github.com/realcgcristi/pigeonsms',
     },
     endpoints: {
@@ -103,6 +103,7 @@ app.get('/.well-known/pigeon', (c) => {
       'space-migration', 'universal-bridges', 'e2ee-bots',
       'nest-time-machine', 'networkless-mode', 'key-transparency',
       'auth.passkeys', 'auth.device-pairing', 'security.trust-center',
+      'e2ee.ratchet-v1', 'nest-shield',
     ],
     limits: { message_length: 8000, upload_bytes: 524_288_000 },
   });

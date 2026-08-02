@@ -1,5 +1,13 @@
 # changelog
 
+## v3-rc3
+
+- completes ratcheted end-to-end encrypted messaging and recovery across web and android
+- adds nest shield with anti-raid, automod, slow mode, timeouts, reports and tamper-evident evidence
+- makes the windows client native with notifications, launch at login, tray mode, unread status and a global shortcut
+- hardens auth recovery, gateway traffic and busy database paths
+- fixes key transparency and networkless error states and dark-theme text
+
 ## v3-rc2
 
 - adds passkeys and trusted qr device pairing across web and android

@@ -68,7 +68,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: pigeonsms-v3-rc2-apk
+          name: pigeonsms-v3-rc3-apk
           path: android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
 
