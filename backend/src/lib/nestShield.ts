@@ -86,6 +86,7 @@ export async function enforceNestShield(
     throw new ApiError(403, 'missing_permission', 'you cannot attach files in this channel')
   }
   const settings = await settingsFor(env, channel.space_id)
+  if (!settings) return
   const moderator = member.isOwner || has(member.permissions, Permission.MANAGE_MESSAGES)
   const timeout = await env.DB.prepare(
     'SELECT until_at, reason FROM space_member_timeouts WHERE space_id = ? AND user_id = ? AND until_at > ?',
