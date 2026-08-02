@@ -44,6 +44,8 @@ async function persistSocial(state: SocialState) {
   });
 }
 
+let dmsRequest: Promise<void> | null = null;
+
 async function hydrateSocial(set: (partial: Partial<SocialState>) => void, get: () => SocialState) {
   if (get().loaded) return;
   const owner = await ownerId();
@@ -67,17 +69,23 @@ export const useSocial = create<SocialState>((set, get) => ({
 
   loadDms: async (force) => {
     await hydrateSocial(set, get);
-    if (get().loadingDms) return;
     if (!force && get().dms.length > 0) return;
-    set({ loadingDms: true });
-    try {
-      const dms = await api.dms();
-      set({ dms });
-      void persistSocial({ ...get(), dms });
-    } catch {
-      set({ loadingDms: false });
+    if (!dmsRequest) {
+      dmsRequest = (async () => {
+        set({ loadingDms: true });
+        try {
+          const dms = await api.dms();
+          set({ dms });
+          void persistSocial({ ...get(), dms });
+        } catch {
+          return;
+        } finally {
+          set({ loadingDms: false });
+          dmsRequest = null;
+        }
+      })();
     }
-    set({ loadingDms: false });
+    await dmsRequest;
   },
 
   loadFriends: async (force) => {

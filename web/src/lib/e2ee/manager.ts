@@ -61,8 +61,9 @@ interface ProtectedPayload {
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
 const bootstraps = new Map<string, Promise<IdentityRecord>>()
-const mediaCache = new Map<string, Promise<string>>()
+const mediaCache = new Map<string, { promise: Promise<string>; used: number }>()
 const cryptoLocks = new Map<string, Promise<void>>()
+const maxMediaCache = 24
 
 async function withCryptoLock<T>(key: string, task: () => Promise<T>): Promise<T> {
   const previous = cryptoLocks.get(key) ?? Promise.resolve()
@@ -373,9 +374,12 @@ export async function protectAttachment(file: File): Promise<{ file: File; secre
 }
 
 export function protectedMediaUrl(attachment: AttachmentDto, secret: AttachmentSecret): Promise<string> {
-  let pending = mediaCache.get(attachment.key)
-  if (!pending) {
-    pending = (async () => {
+  const cached = mediaCache.get(attachment.key)
+  if (cached) {
+    cached.used = Date.now()
+    return cached.promise
+  }
+  const promise = (async () => {
       const response = await fetch(api.mediaUrl(attachment.key))
       if (!response.ok) throw new Error('encrypted attachment download failed')
       const ciphertext = await response.arrayBuffer()
@@ -387,8 +391,22 @@ export function protectedMediaUrl(attachment: AttachmentDto, secret: AttachmentS
         ciphertext,
       )
       return URL.createObjectURL(new Blob([plaintext], { type: secret.t }))
-    })()
-    mediaCache.set(attachment.key, pending)
+  })()
+  mediaCache.set(attachment.key, { promise, used: Date.now() })
+  void promise.catch(() => {
+    if (mediaCache.get(attachment.key)?.promise === promise) mediaCache.delete(attachment.key)
+  })
+  while (mediaCache.size > maxMediaCache) {
+    const oldest = [...mediaCache.entries()].sort((a, b) => a[1].used - b[1].used)[0]
+    if (!oldest) break
+    mediaCache.delete(oldest[0])
+    void oldest[1].promise.then((url) => URL.revokeObjectURL(url), () => undefined)
   }
-  return pending
+  return promise
+}
+
+export function clearProtectedMediaCache() {
+  const entries = [...mediaCache.values()]
+  mediaCache.clear()
+  for (const entry of entries) void entry.promise.then((url) => URL.revokeObjectURL(url), () => undefined)
 }

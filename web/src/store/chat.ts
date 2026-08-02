@@ -117,7 +117,15 @@ async function fetchMessages(channelId: string, afterSeq?: number): Promise<Mess
 async function decryptRemoteMessages(messages: MessageDto[]): Promise<MessageDto[]> {
   const session = (await import('@/store/session')).useSession.getState();
   if (!session.user) return messages;
-  const dms = useSocial.getState().dms;
+  let dms = useSocial.getState().dms;
+  if (messages.some((message) => message.encrypted && !dms.some((dm) => dm.channel_id === message.channel_id))) {
+    try {
+      await useSocial.getState().loadDms();
+      dms = useSocial.getState().dms;
+    } catch {
+      dms = useSocial.getState().dms;
+    }
+  }
   const output: MessageDto[] = [];
   for (const message of messages.slice().sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0))) {
     if (!message.encrypted) {

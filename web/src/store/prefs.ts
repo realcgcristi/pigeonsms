@@ -19,6 +19,14 @@ export interface PrefsState {
   setE2ee: (enabled: boolean) => void;
 }
 
+export function migratePrefs(persisted: unknown, version: number): PrefsState {
+  const state = persisted && typeof persisted === 'object' ? persisted as Partial<PrefsState> : {};
+  return {
+    ...state,
+    e2ee: version < 3 || typeof state.e2ee !== 'boolean' ? true : state.e2ee,
+  } as PrefsState;
+}
+
 export const usePrefs = create<PrefsState>()(
   persist(
     (set) => ({
@@ -51,7 +59,7 @@ export const usePrefs = create<PrefsState>()(
       setShareLastSeen: (shareLastSeen) => set({ shareLastSeen }),
       setE2ee: (e2ee) => set({ e2ee }),
     }),
-    { name: 'pigeon.prefs', version: 3 },
+    { name: 'pigeon.prefs', version: 3, migrate: migratePrefs },
   ),
 );
 
