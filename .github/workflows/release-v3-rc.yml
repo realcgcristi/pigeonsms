@@ -84,6 +84,9 @@ jobs:
   windows:
     needs: quality
     runs-on: windows-latest
+    env:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -94,6 +97,10 @@ jobs:
             web/package-lock.json
             desktop/package-lock.json
       - uses: dtolnay/rust-toolchain@stable
+      - name: require updater signing key
+        shell: pwsh
+        run: |
+          if (-not $env:TAURI_SIGNING_PRIVATE_KEY) { throw 'TAURI_SIGNING_PRIVATE_KEY is required for an official rc build' }
       - run: npm ci --prefix web
       - run: npm ci --prefix desktop
       - run: npm run build:windows --prefix desktop
@@ -102,11 +109,31 @@ jobs:
         run: |
           $installer = Get-ChildItem desktop/src-tauri/target/release/bundle/nsis -Filter *.exe | Select-Object -First 1
           if (-not $installer) { throw 'NSIS installer was not produced' }
-          Copy-Item -LiteralPath $installer.FullName -Destination PigeonSMS_3.0.0-rc.1_x64-setup.exe
+          $signaturePath = "$($installer.FullName).sig"
+          if (-not (Test-Path -LiteralPath $signaturePath)) { throw 'updater signature was not produced' }
+          $version = (Get-Content desktop/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          $assetName = "PigeonSMS_${version}_x64-setup.exe"
+          Copy-Item -LiteralPath $installer.FullName -Destination $assetName
+          Copy-Item -LiteralPath $signaturePath -Destination "$assetName.sig"
+          $manifest = [ordered]@{
+            version = $version
+            notes = "PigeonSMS $version"
+            pub_date = (Get-Date).ToUniversalTime().ToString('o')
+            platforms = @{
+              'windows-x86_64' = @{
+                signature = (Get-Content -LiteralPath $signaturePath -Raw).Trim()
+                url = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:GITHUB_REF_NAME/$assetName"
+              }
+            }
+          }
+          $manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath latest.json -Encoding utf8
       - uses: actions/upload-artifact@v4
         with:
           name: pigeonsms-v3-rc1-windows
-          path: PigeonSMS_3.0.0-rc.1_x64-setup.exe
+          path: |
+            PigeonSMS_*.exe
+            PigeonSMS_*.exe.sig
+            latest.json
           if-no-files-found: error
 
   publish:
