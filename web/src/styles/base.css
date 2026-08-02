@@ -106,6 +106,9 @@ button:disabled {
   body:has(.connection-status) .chat__list {
     padding-top: 42px;
   }
+  body:has(.connection-status) .ui-screen__body {
+    margin-top: 42px;
+  }
 }
 .fatal-error { display: grid; min-height: 100dvh; place-items: center; padding: var(--sp-xl); background: var(--ink); color: var(--text-primary); }
 .fatal-error > div { max-width: 440px; padding: var(--sp-xxl); border: 1px solid var(--outline); border-radius: var(--r-card); background: var(--surface); text-align: center; }
