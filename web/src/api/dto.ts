@@ -1167,6 +1167,19 @@ export interface CallParticipantsResponse {
   participants: CallParticipantDto[];
 }
 
+export interface IceServerDto {
+  urls: string[];
+  username?: string;
+  credential?: string;
+}
+
+export interface CallConfigResponse {
+  ice_servers: IceServerDto[];
+  turn: boolean;
+  expires_at: number | null;
+  source: 'cloudflare' | 'stun';
+}
+
 export interface CallClientSignal {
   type: CallSignalType;
   target?: string;

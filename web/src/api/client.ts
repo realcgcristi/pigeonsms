@@ -25,6 +25,7 @@ import type {
   BotWithTokenDto,
   BridgeDto,
   BridgeKind,
+  CallConfigResponse,
   ChannelCommandsResponse,
   ChannelOverridesResponse,
   CreateChannelResponse,
@@ -1153,6 +1154,10 @@ class PigeonApi {
 
   callParticipants(channelId: string) {
     return request<{ participants: ApiUser[] }>(`/calls/${seg(channelId)}/participants`);
+  }
+
+  callConfig(channelId: string, signal?: AbortSignal) {
+    return request<CallConfigResponse>(`/calls/${seg(channelId)}/config`, { signal });
   }
 
   bots() {

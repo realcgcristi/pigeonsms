@@ -440,45 +440,112 @@ export function connectCall(
   token: string,
   handlers: {
     onEvent: (event: CallEvent) => void;
-    onOpen?: () => void;
-    onClose?: () => void;
+    onOpen?: (reconnected: boolean) => void;
+    onClose?: (willRetry: boolean) => void;
   },
 ): CallSocket {
   const url = `${PIGEON_WS_BASE}/calls/${encodeURIComponent(channelId)}/ws?mode=${mode}${
     token === 'cookie' ? '' : `&token=${encodeURIComponent(token)}`
   }`;
-  const socket = new WebSocket(url);
-  socket.onopen = () => handlers.onOpen?.();
-  socket.onclose = () => handlers.onClose?.();
-  socket.onmessage = (frame: MessageEvent<unknown>) => {
-    if (typeof frame.data !== 'string') return;
-    let parsed: unknown;
+  let socket: WebSocket | null = null;
+  let stopped = false;
+  let opened = false;
+  let retryAttempt = 0;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  const queue: string[] = [];
+
+  const schedule = () => {
+    if (stopped || retryTimer) return;
+    handlers.onClose?.(true);
+    const delay = jitter(Math.min(BASE_BACKOFF_MS * 2 ** retryAttempt, MAX_BACKOFF_MS));
+    retryAttempt += 1;
+    retryTimer = globalThis.setTimeout(() => {
+      retryTimer = null;
+      open();
+    }, delay);
+  };
+
+  const open = () => {
+    if (stopped) return;
+    let current: WebSocket;
     try {
-      parsed = JSON.parse(frame.data) as unknown;
+      current = new WebSocket(url);
     } catch {
+      schedule();
       return;
     }
-    if (typeof parsed !== 'object' || parsed === null) return;
-    if (typeof (parsed as { type?: unknown }).type !== 'string') return;
-    handlers.onEvent(parsed as CallEvent);
+    socket = current;
+    current.onopen = () => {
+      if (stopped || socket !== current) return;
+      const reconnected = opened;
+      opened = true;
+      retryAttempt = 0;
+      while (queue.length > 0 && current.readyState === WebSocket.OPEN) {
+        const payload = queue.shift();
+        if (payload) current.send(payload);
+      }
+      handlers.onOpen?.(reconnected);
+    };
+    current.onmessage = (frame: MessageEvent<unknown>) => {
+      if (typeof frame.data !== 'string') return;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(frame.data) as unknown;
+      } catch {
+        return;
+      }
+      if (typeof parsed !== 'object' || parsed === null) return;
+      if (typeof (parsed as { type?: unknown }).type !== 'string') return;
+      handlers.onEvent(parsed as CallEvent);
+    };
+    current.onerror = () => {
+      try {
+        current.close();
+      } catch {
+        schedule();
+      }
+    };
+    current.onclose = () => {
+      if (socket !== current) return;
+      socket = null;
+      schedule();
+    };
   };
+
+  open();
+
   return {
     send(signal) {
-      if (socket.readyState !== WebSocket.OPEN) return;
+      const payload = JSON.stringify(signal);
+      if (!socket || socket.readyState !== WebSocket.OPEN) {
+        queue.push(payload);
+        if (queue.length > 128) queue.shift();
+        return;
+      }
       try {
-        socket.send(JSON.stringify(signal));
+        socket.send(payload);
       } catch {
+        queue.push(payload);
+        if (queue.length > 128) queue.shift();
         socket.close();
       }
     },
     close() {
-      socket.onmessage = null;
-      socket.onclose = null;
+      stopped = true;
+      if (retryTimer) globalThis.clearTimeout(retryTimer);
+      retryTimer = null;
+      queue.length = 0;
+      const current = socket;
+      socket = null;
+      if (!current) return;
+      current.onmessage = null;
+      current.onclose = null;
       try {
-        socket.close();
+        current.close();
       } catch {
-        socket.onopen = null;
+        current.onopen = null;
       }
+      handlers.onClose?.(false);
     },
   };
 }

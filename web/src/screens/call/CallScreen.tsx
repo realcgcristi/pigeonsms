@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { api } from '@/api/client'
 import { connectCall } from '@/api/gateway'
 import type { CallEvent, CallMode, CallParticipant, CallSocket } from '@/api/gateway'
 import { CallEnd, Devices, Mic, MicOff, Refresh, Videocam, VideocamOff } from '@/components/icons'
@@ -12,22 +13,43 @@ import { duration } from '@/lib/format'
 import { useSession } from '@/store/session'
 import './Call.css'
 
-const ICE_SERVERS: RTCIceServer[] = [
-  { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
+const FALLBACK_ICE_SERVERS: RTCIceServer[] = [
+  { urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302'] },
 ]
-const turnUrl = import.meta.env.VITE_TURN_URL as string | undefined
-if (turnUrl) {
-  ICE_SERVERS.push({
-    urls: turnUrl,
-    username: import.meta.env.VITE_TURN_USERNAME as string | undefined,
-    credential: import.meta.env.VITE_TURN_CREDENTIAL as string | undefined,
-  })
-}
 
 type PeerState = {
   connection: RTCPeerConnection
   stream: MediaStream
   participant: CallParticipant
+  pendingIce: RTCIceCandidateInit[]
+  operation: Promise<void>
+  recoveryTimer: number
+  recoveryAttempt: number
+}
+
+function runPeer(state: PeerState, task: () => Promise<void>): Promise<void> {
+  const next = state.operation.then(task, task)
+  state.operation = next.catch(() => undefined)
+  return next
+}
+
+function offerPeer(state: PeerState, socket: CallSocket, iceRestart = false): Promise<void> {
+  return runPeer(state, async () => {
+    if (iceRestart && state.connection.signalingState === 'have-local-offer') {
+      await state.connection.setLocalDescription({ type: 'rollback' }).catch(() => undefined)
+    }
+    if (state.connection.signalingState !== 'stable') return
+    const offer = await state.connection.createOffer({ iceRestart })
+    await state.connection.setLocalDescription(offer)
+    socket.send({ type: 'offer', target: state.participant.userId, data: offer })
+  })
+}
+
+async function flushIce(state: PeerState): Promise<void> {
+  const pending = state.pendingIce.splice(0)
+  for (const candidate of pending) {
+    await state.connection.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => undefined)
+  }
 }
 
 export default function CallScreen() {
@@ -45,11 +67,13 @@ export default function CallScreen() {
   const socketRef = useRef<CallSocket | null>(null)
   const peers = useRef(new Map<string, PeerState>())
   const participantsRef = useRef(new Map<string, CallParticipant>())
+  const iceServers = useRef<RTCIceServer[]>(FALLBACK_ICE_SERVERS)
+  const turnAvailable = useRef(false)
 
   const [muted, setMuted] = useState(false)
   const [camera, setCamera] = useState(mode === 'video')
   const [sharing, setSharing] = useState(false)
-  const [status, setStatus] = useState('connecting…')
+  const [status, setStatus] = useState('connecting...')
   const [remote, setRemote] = useState<{ id: string; name: string; stream: MediaStream }[]>([])
   const [started] = useState(() => Date.now())
   const [elapsed, setElapsed] = useState(0)
@@ -64,19 +88,46 @@ export default function CallScreen() {
   const peerFor = useCallback(
     (participant: CallParticipant, socket: CallSocket) => {
       const existing = peers.current.get(participant.userId)
-      if (existing) return existing
+      if (existing) {
+        existing.participant = participant
+        return existing
+      }
 
-      const connection = new RTCPeerConnection({ iceServers: ICE_SERVERS })
+      const connection = new RTCPeerConnection({ iceServers: iceServers.current })
       const stream = new MediaStream()
-      const state: PeerState = { connection, stream, participant }
+      const state: PeerState = {
+        connection,
+        stream,
+        participant,
+        pendingIce: [],
+        operation: Promise.resolve(),
+        recoveryTimer: 0,
+        recoveryAttempt: 0,
+      }
       peers.current.set(participant.userId, state)
+
+      const scheduleRecovery = (immediate = false) => {
+        if (state.recoveryTimer || connection.connectionState === 'closed') return
+        const delay = immediate ? 0 : Math.min(1_500 * 2 ** state.recoveryAttempt, 30_000)
+        state.recoveryAttempt += 1
+        state.recoveryTimer = window.setTimeout(() => {
+          state.recoveryTimer = 0
+          if (connection.connectionState === 'connected' || connection.connectionState === 'closed') return
+          setStatus('reconnecting...')
+          void offerPeer(state, socket, true)
+            .catch(() => undefined)
+            .finally(() => scheduleRecovery(false))
+        }, delay)
+      }
 
       for (const track of localStream.current?.getTracks() ?? []) {
         connection.addTrack(track, localStream.current as MediaStream)
       }
 
       connection.ontrack = (event) => {
-        for (const track of event.streams[0]?.getTracks() ?? [event.track]) stream.addTrack(track)
+        for (const track of event.streams[0]?.getTracks() ?? [event.track]) {
+          if (!stream.getTrackById(track.id)) stream.addTrack(track)
+        }
         publish(participant.userId, participant, stream)
       }
       connection.onicecandidate = (event) => {
@@ -84,9 +135,17 @@ export default function CallScreen() {
         socket.send({ type: 'ice', target: participant.userId, data: event.candidate.toJSON() })
       }
       connection.onconnectionstatechange = () => {
-        if (connection.connectionState === 'connected') setStatus('connected')
-        if (connection.connectionState === 'failed') {
-          setStatus(turnUrl ? 'connection failed — retrying may help' : 'connection failed — TURN is not configured')
+        if (connection.connectionState === 'connected') {
+          if (state.recoveryTimer) window.clearTimeout(state.recoveryTimer)
+          state.recoveryTimer = 0
+          state.recoveryAttempt = 0
+          setStatus('connected')
+        } else if (connection.connectionState === 'disconnected') {
+          setStatus('reconnecting...')
+          scheduleRecovery(false)
+        } else if (connection.connectionState === 'failed') {
+          setStatus(turnAvailable.current ? 'reconnecting...' : 'reconnecting without relay...')
+          scheduleRecovery(true)
         }
       }
       return state
@@ -97,8 +156,106 @@ export default function CallScreen() {
   useEffect(() => {
     if (!token) return
     let cancelled = false
+    let configTimer = 0
+    let configController: AbortController | null = null
+
+    const refreshConfiguration = async () => {
+      configController?.abort()
+      const controller = new AbortController()
+      configController = controller
+      let delay = 60_000
+      try {
+        const config = await api.callConfig(channelId, controller.signal)
+        if (cancelled) return
+        const next = config.ice_servers.length > 0 ? config.ice_servers : FALLBACK_ICE_SERVERS
+        iceServers.current = next
+        turnAvailable.current = config.turn
+        const socket = socketRef.current
+        for (const peer of peers.current.values()) {
+          peer.connection.setConfiguration({ iceServers: next })
+          if (socket) void offerPeer(peer, socket, true).catch(() => undefined)
+        }
+        if (config.expires_at) delay = Math.max(60_000, config.expires_at - Date.now() - 300_000)
+        else delay = 300_000
+      } catch {
+        if (cancelled || controller.signal.aborted) return
+        delay = 60_000
+      }
+      if (!cancelled) configTimer = window.setTimeout(() => void refreshConfiguration(), delay)
+    }
+
+    const handle = async (event: CallEvent, socket: CallSocket) => {
+      if (event.type === 'ready') {
+        const active = new Set(event.participants.map((participant) => participant.userId))
+        for (const [userId, peer] of peers.current) {
+          if (active.has(userId)) continue
+          if (peer.recoveryTimer) window.clearTimeout(peer.recoveryTimer)
+          peer.connection.close()
+          peers.current.delete(userId)
+          participantsRef.current.delete(userId)
+          setRemote((list) => list.filter((entry) => entry.id !== userId))
+        }
+        for (const participant of event.participants) {
+          participantsRef.current.set(participant.userId, participant)
+          if (participant.userId === me?.id) continue
+          await offerPeer(peerFor(participant, socket), socket)
+        }
+        return
+      }
+      if (event.type === 'join') {
+        participantsRef.current.set(event.participant.userId, event.participant)
+        setStatus('connecting...')
+        return
+      }
+      if (event.type === 'leave') {
+        const peer = peers.current.get(event.participant.userId)
+        if (peer?.recoveryTimer) window.clearTimeout(peer.recoveryTimer)
+        peer?.connection.close()
+        peers.current.delete(event.participant.userId)
+        participantsRef.current.delete(event.participant.userId)
+        setRemote((list) => list.filter((entry) => entry.id !== event.participant.userId))
+        return
+      }
+      if (event.type !== 'offer' && event.type !== 'answer' && event.type !== 'ice') return
+
+      const participant: CallParticipant = participantsRef.current.get(event.from) ?? {
+        userId: event.from,
+        username: event.from,
+        mode: event.mode,
+      }
+      participantsRef.current.set(event.from, participant)
+      const peer = peerFor(participant, socket)
+      if (event.type === 'ice') {
+        const candidate = event.data as RTCIceCandidateInit
+        await runPeer(peer, async () => {
+          if (!peer.connection.remoteDescription) {
+            if (peer.pendingIce.length < 256) peer.pendingIce.push(candidate)
+            return
+          }
+          await peer.connection.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => undefined)
+        })
+        return
+      }
+
+      await runPeer(peer, async () => {
+        if (event.type === 'offer') {
+          if (peer.connection.signalingState !== 'stable') {
+            await peer.connection.setLocalDescription({ type: 'rollback' }).catch(() => undefined)
+          }
+          await peer.connection.setRemoteDescription(event.data as RTCSessionDescriptionInit)
+          await flushIce(peer)
+          const answer = await peer.connection.createAnswer()
+          await peer.connection.setLocalDescription(answer)
+          socket.send({ type: 'answer', target: event.from, data: answer })
+        } else {
+          await peer.connection.setRemoteDescription(event.data as RTCSessionDescriptionInit)
+          await flushIce(peer)
+        }
+      })
+    }
 
     const start = async () => {
+      void refreshConfiguration()
       let stream: MediaStream
       try {
         stream = await navigator.mediaDevices.getUserMedia({
@@ -118,58 +275,13 @@ export default function CallScreen() {
       if (localRef.current) localRef.current.srcObject = stream
 
       const socket = connectCall(channelId, mode, token, {
-        onOpen: () => setStatus('waiting for someone to join…'),
-        onClose: () => setStatus('call ended'),
-        onEvent: (event: CallEvent) => void handle(event, socket),
+        onOpen: (reconnected) => setStatus(reconnected ? 'restoring call...' : 'waiting for someone to join...'),
+        onClose: (willRetry) => setStatus(willRetry ? 'reconnecting signaling...' : 'call ended'),
+        onEvent: (event: CallEvent) => {
+          void handle(event, socket).catch(() => setStatus('recovering call...'))
+        },
       })
       socketRef.current = socket
-    }
-
-    const handle = async (event: CallEvent, socket: CallSocket) => {
-      if (event.type === 'ready') {
-        for (const participant of event.participants) {
-          participantsRef.current.set(participant.userId, participant)
-          if (participant.userId === me?.id) continue
-          const peer = peerFor(participant, socket)
-          const offer = await peer.connection.createOffer()
-          await peer.connection.setLocalDescription(offer)
-          socket.send({ type: 'offer', target: participant.userId, data: offer })
-        }
-        return
-      }
-      if (event.type === 'join') {
-        participantsRef.current.set(event.participant.userId, event.participant)
-        setStatus('connecting…')
-        return
-      }
-      if (event.type === 'leave') {
-        const peer = peers.current.get(event.participant.userId)
-        peer?.connection.close()
-        peers.current.delete(event.participant.userId)
-        participantsRef.current.delete(event.participant.userId)
-        setRemote((list) => list.filter((entry) => entry.id !== event.participant.userId))
-        return
-      }
-      if (event.type === 'offer' || event.type === 'answer' || event.type === 'ice') {
-        const participant: CallParticipant = participantsRef.current.get(event.from) ?? {
-          userId: event.from,
-          username: event.from,
-          mode: event.mode,
-        }
-        const peer = peerFor(participant, socket)
-        if (event.type === 'offer') {
-          await peer.connection.setRemoteDescription(new RTCSessionDescription(event.data as RTCSessionDescriptionInit))
-          const answer = await peer.connection.createAnswer()
-          await peer.connection.setLocalDescription(answer)
-          socket.send({ type: 'answer', target: event.from, data: answer })
-        } else if (event.type === 'answer') {
-          await peer.connection.setRemoteDescription(new RTCSessionDescription(event.data as RTCSessionDescriptionInit))
-        } else {
-          await peer.connection
-            .addIceCandidate(new RTCIceCandidate(event.data as RTCIceCandidateInit))
-            .catch(() => undefined)
-        }
-      }
     }
 
     void start()
@@ -178,10 +290,16 @@ export default function CallScreen() {
     return () => {
       cancelled = true
       window.clearInterval(timer)
+      if (configTimer) window.clearTimeout(configTimer)
+      configController?.abort()
       socketRef.current?.close()
       socketRef.current = null
-      for (const peer of peers.current.values()) peer.connection.close()
+      for (const peer of peers.current.values()) {
+        if (peer.recoveryTimer) window.clearTimeout(peer.recoveryTimer)
+        peer.connection.close()
+      }
       peers.current.clear()
+      participantsRef.current.clear()
       localStream.current?.getTracks().forEach((track) => track.stop())
       if (sharedTrack.current) {
         sharedTrack.current.onended = null
@@ -208,7 +326,7 @@ export default function CallScreen() {
     if (!stream) return
     const existing = stream.getVideoTracks()[0]
     if (existing) {
-      existing.enabled = !camera ? true : false
+      existing.enabled = !camera
       if (camera) {
         existing.stop()
         stream.removeTrack(existing)
@@ -226,9 +344,7 @@ export default function CallScreen() {
         const sender = peer.connection.getSenders().find((item) => item.track?.kind === 'video')
         if (sender) await sender.replaceTrack(track)
         else peer.connection.addTrack(track, stream)
-        const offer = await peer.connection.createOffer()
-        await peer.connection.setLocalDescription(offer)
-        socketRef.current?.send({ type: 'offer', target: peer.participant.userId, data: offer })
+        if (socketRef.current) await offerPeer(peer, socketRef.current)
       }
       if (localRef.current) localRef.current.srcObject = stream
       setCamera(true)
@@ -239,15 +355,14 @@ export default function CallScreen() {
   }
 
   const retryConnections = async () => {
-    setStatus('reconnecting…')
+    setStatus('reconnecting...')
+    const socket = socketRef.current
+    if (!socket) return
     for (const peer of peers.current.values()) {
-      try {
-        const offer = await peer.connection.createOffer({ iceRestart: true })
-        await peer.connection.setLocalDescription(offer)
-        socketRef.current?.send({ type: 'offer', target: peer.participant.userId, data: offer })
-      } catch {
-        setStatus('reconnect failed')
-      }
+      if (peer.recoveryTimer) window.clearTimeout(peer.recoveryTimer)
+      peer.recoveryTimer = 0
+      peer.recoveryAttempt = 0
+      await offerPeer(peer, socket, true).catch(() => setStatus('reconnect failed'))
     }
   }
 
@@ -284,9 +399,7 @@ export default function CallScreen() {
         const sender = peer.connection.getSenders().find((item) => item.track?.kind === 'video')
         if (sender) await sender.replaceTrack(track)
         else if (localStream.current) peer.connection.addTrack(track, localStream.current)
-        const offer = await peer.connection.createOffer()
-        await peer.connection.setLocalDescription(offer)
-        socketRef.current?.send({ type: 'offer', target: peer.participant.userId, data: offer })
+        if (socketRef.current) await offerPeer(peer, socketRef.current)
       }
       track.onended = () => void stopSharing()
       setSharing(true)
@@ -302,58 +415,60 @@ export default function CallScreen() {
     <Screen className="chat chat--workspace">
       {params.get('spaceId') ? <SpaceChannelRail channelId={channelId} spaceId={params.get('spaceId')} /> : null}
       <div className="call chat__conversation">
-      <TopBar title={title} subtitle={`${status} · ${duration(elapsed)}`} onBack={() => navigate(-1)} />
-      <div className="call__stage">
-        {others.length === 0 ? (
-          <div className="call__waiting">
-            <Avatar name={title} size="hero" />
-            <div className="call__hint">{status}</div>
-          </div>
-        ) : (
-          <div className="call__peers">
-            {others.map((peer) => (
-              <RemoteTile key={peer.id} name={peer.name} stream={peer.stream} />
-            ))}
-          </div>
-        )}
-        <video ref={localRef} className="call__video call__video--self" autoPlay playsInline muted />
-      </div>
-      <div className="call__controls">
-        <IconButton label="mute" filled={muted} onClick={toggleMic}>
-          {muted ? <MicOff /> : <Mic />}
-        </IconButton>
-        <IconButton label="camera" filled={camera} onClick={() => void toggleCamera()}>
-          {camera ? <Videocam /> : <VideocamOff />}
-        </IconButton>
-        <IconButton label={sharing ? 'stop sharing' : 'share screen'} filled={sharing} onClick={() => void toggleShare()}>
-          <Devices />
-        </IconButton>
-        <IconButton label="retry connection" onClick={() => void retryConnections()}>
-          <Refresh />
-        </IconButton>
-        <IconButton label="hang up" tone="danger" filled onClick={() => navigate(-1)}>
-          <CallEnd />
-        </IconButton>
-      </div>
+        <TopBar title={title} subtitle={`${status} · ${duration(elapsed)}`} onBack={() => navigate(-1)} />
+        <div className="call__stage">
+          {others.length === 0 ? (
+            <div className="call__waiting">
+              <Avatar name={title} size="hero" />
+              <div className="call__hint">{status}</div>
+            </div>
+          ) : (
+            <div className="call__peers">
+              {others.map((peer) => (
+                <RemoteTile key={peer.id} name={peer.name} stream={peer.stream} />
+              ))}
+            </div>
+          )}
+          <video ref={localRef} className="call__video call__video--self" autoPlay playsInline muted />
+        </div>
+        <div className="call__controls">
+          <IconButton label="mute" filled={muted} onClick={toggleMic}>
+            {muted ? <MicOff /> : <Mic />}
+          </IconButton>
+          <IconButton label="camera" filled={camera} onClick={() => void toggleCamera()}>
+            {camera ? <Videocam /> : <VideocamOff />}
+          </IconButton>
+          <IconButton label={sharing ? 'stop sharing' : 'share screen'} filled={sharing} onClick={() => void toggleShare()}>
+            <Devices />
+          </IconButton>
+          <IconButton label="retry connection" onClick={() => void retryConnections()}>
+            <Refresh />
+          </IconButton>
+          <IconButton label="hang up" tone="danger" filled onClick={() => navigate(-1)}>
+            <CallEnd />
+          </IconButton>
+        </div>
       </div>
     </Screen>
   )
 }
 
 function RemoteTile({ name, stream }: { name: string; stream: MediaStream }) {
-  const ref = useRef<HTMLVideoElement>(null)
-  useEffect(() => {
-    if (ref.current) ref.current.srcObject = stream
-  }, [stream])
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const audioRef = useRef<HTMLAudioElement>(null)
   const hasVideo = stream.getVideoTracks().length > 0
+  useEffect(() => {
+    if (videoRef.current) videoRef.current.srcObject = stream
+    if (audioRef.current) audioRef.current.srcObject = stream
+  }, [stream, hasVideo])
   return (
     <div className="call__peer">
       {hasVideo ? (
-        <video ref={ref} className="call__video" autoPlay playsInline />
+        <video ref={videoRef} className="call__video" autoPlay playsInline />
       ) : (
         <>
           <Avatar name={name} size="hero" />
-          <audio ref={ref as unknown as React.RefObject<HTMLAudioElement>} autoPlay />
+          <audio ref={audioRef} autoPlay />
         </>
       )}
       <span className="call__peer-name">{name}</span>
