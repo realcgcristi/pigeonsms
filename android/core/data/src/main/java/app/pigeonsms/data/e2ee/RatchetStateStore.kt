@@ -15,6 +15,7 @@ interface RatchetStateStore {
     suspend fun load(channelId: String, remoteDeviceId: String): RatchetState?
     suspend fun save(state: RatchetState)
     suspend fun loadMaster(channelId: String): ChannelMaster?
+    suspend fun listMasters(): Map<String, ChannelMaster>
     suspend fun saveMaster(channelId: String, master: ChannelMaster)
     suspend fun delete(channelId: String)
 }
@@ -40,16 +41,14 @@ internal class DaoRatchetStateStore(
 
     override suspend fun loadMaster(channelId: String): ChannelMaster? =
         dao.get(masterId(channelId))?.stateBlob?.let { value ->
-            runCatching {
-                val json = JSONObject(value)
-                val list = json.optJSONArray("devices") ?: JSONArray()
-                val devices = (0 until list.length()).map { index ->
-                    val item = list.getJSONObject(index)
-                    DevicePub(item.getString("id"), item.getString("key"))
-                }
-                ChannelMaster(json.getString("keyId"), Sodium.unb64(json.getString("key")), devices)
-            }.getOrNull()
+            runCatching { decodeMaster(JSONObject(value)) }.getOrNull()
         }
+
+    override suspend fun listMasters(): Map<String, ChannelMaster> = dao.masters().mapNotNull { row ->
+        runCatching {
+            row.channelId.removePrefix("master:") to decodeMaster(JSONObject(row.stateBlob))
+        }.getOrNull()
+    }.toMap()
 
     override suspend fun saveMaster(channelId: String, master: ChannelMaster) {
         val devices = JSONArray()
@@ -112,6 +111,15 @@ internal class DaoRatchetStateStore(
             skipped = skipped,
             skippedOrder = order,
         )
+    }
+
+    private fun decodeMaster(json: JSONObject): ChannelMaster {
+        val list = json.optJSONArray("devices") ?: JSONArray()
+        val devices = (0 until list.length()).map { index ->
+            val item = list.getJSONObject(index)
+            DevicePub(item.getString("id"), item.getString("key"))
+        }
+        return ChannelMaster(json.getString("keyId"), Sodium.unb64(json.getString("key")), devices)
     }
 
     private fun masterId(channelId: String) = "master:$channelId"

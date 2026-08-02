@@ -360,6 +360,7 @@ class ChatViewModel(
         type: String,
         totalSize: Long,
         caption: String,
+        encrypted: Boolean,
     ) {
         if (_ui.value.sending) return
         val reply = _ui.value.replyTo?.id
@@ -382,6 +383,7 @@ class ChatViewModel(
                     replyTo = reply,
                     selfName = selfName,
                     isDm = !isSpace,
+                    e2eeEnabled = encrypted,
                 )
             }.onSuccess {
                 _ui.update { it.copy(sending = false, replyTo = null, composerClearToken = it.composerClearToken + 1) }
@@ -405,8 +407,26 @@ class ChatViewModel(
         viewModelScope.launch {
             _ui.update { it.copy(sending = true, error = null) }
             runCatching {
-                val attachment = repo.uploadFile(bytes, filename, type)
-                repo.send(channelId, caption.trim(), reply, attachment, selfName, ttl = ttl, sendAt = sendAt, e2eeEnabled = encrypted, isDm = !isSpace)
+                val prepared = repo.uploadAttachment(
+                    channelId,
+                    bytes,
+                    filename,
+                    type,
+                    e2eeEnabled = encrypted,
+                    isDm = !isSpace,
+                )
+                repo.send(
+                    channelId,
+                    caption.trim(),
+                    reply,
+                    prepared.attachment,
+                    selfName,
+                    ttl = ttl,
+                    sendAt = sendAt,
+                    e2eeEnabled = encrypted,
+                    isDm = !isSpace,
+                    attachmentSecret = prepared.secret,
+                )
             }.onSuccess {
                 _ui.update {
                     it.copy(replyTo = null, composerClearToken = it.composerClearToken + 1)
@@ -419,6 +439,8 @@ class ChatViewModel(
             _ui.update { it.copy(sending = false) }
         }
     }
+
+    suspend fun attachmentUrl(message: MessageEntity): String? = repo.attachmentUrl(message)
 
     fun setReply(message: MessageEntity?) {
         if (message != null && (message.deleted || message.state != "SENT")) return

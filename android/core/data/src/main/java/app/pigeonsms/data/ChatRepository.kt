@@ -5,8 +5,10 @@ import app.pigeonsms.db.ChannelCursorEntity
 import app.pigeonsms.db.MessageEntity
 import app.pigeonsms.db.OutboxEntity
 import app.pigeonsms.db.PigeonDatabase
+import app.pigeonsms.data.e2ee.AttachmentSecret
 import app.pigeonsms.data.e2ee.DevicePub
 import app.pigeonsms.data.e2ee.E2eeManager
+import app.pigeonsms.data.e2ee.ProtectedMessage
 import app.pigeonsms.network.AttachmentDto
 import app.pigeonsms.network.ChannelCommandDto
 import app.pigeonsms.network.MessageDto
@@ -24,6 +26,8 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import org.json.JSONObject
+import java.io.FileInputStream
 import java.util.concurrent.atomic.AtomicLong
 
 /** Live pin/super-pin changes fanned out by the gateway; chat screens filter by channel. */
@@ -41,6 +45,11 @@ data class NearbyOutbound(
     val content: String,
     val createdAt: Long,
     val hasAttachment: Boolean,
+)
+
+data class PreparedAttachment(
+    val attachment: AttachmentDto,
+    val secret: AttachmentSecret? = null,
 )
 
 /**
@@ -67,6 +76,8 @@ class ChatRepository(
     private val reactionMutex = Mutex()
     private val pollMutex = Mutex()
     private val flushMutex = Mutex()
+    private val attachmentMutex = Mutex()
+    private val attachmentUrls = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     /**
      * Long-lived scope for fire-and-forget E2EE key-exchange kicked off from [send]. Using
@@ -131,6 +142,21 @@ class ChatRepository(
     }
 
     fun mediaUrl(key: String) = api.mediaUrl(key)
+
+    suspend fun attachmentUrl(message: MessageEntity): String? {
+        val key = message.attachmentKey ?: return null
+        val secret = AttachmentSecret.fromMetadata(message.metadataJson) ?: return api.mediaUrl(key)
+        val manager = e2ee ?: return null
+        val cacheKey = "$key:${secret.i}"
+        attachmentUrls[cacheKey]?.let { return it }
+        return attachmentMutex.withLock {
+            attachmentUrls[cacheKey] ?: manager.decryptAttachmentToCache(
+                cacheKey,
+                api.downloadMedia(key),
+                secret,
+            ).also { attachmentUrls[cacheKey] = it }
+        }
+    }
 
     suspend fun networklessPending(channelIds: Set<String>): List<NearbyOutbound> = db.outbox().all()
         .filter { it.channelId in channelIds }
@@ -244,10 +270,38 @@ class ChatRepository(
         replyTo: String?,
         selfName: String,
         isDm: Boolean,
+        e2eeEnabled: Boolean = false,
         onProgress: (Float) -> Unit = {},
     ) {
-        val attachment = social.uploadLargeStream(openStream, filename, type, totalSize, onProgress)
-        send(channelId, caption.trim(), replyTo, attachment, selfName, isDm = isDm)
+        val manager = e2ee
+        val secure = e2eeEnabled && isDm && manager != null
+        if (secure) check(ensureE2eeSession(channelId, manager)) { "encrypted messaging is not ready on the other device" }
+        val protected = if (secure) manager.protectAttachmentStream(openStream, filename, type, totalSize) else null
+        try {
+            val attachment = if (protected != null) {
+                social.uploadLargeStream(
+                    openStream = { FileInputStream(protected.file) },
+                    filename = "$filename.pigeon",
+                    type = "application/x-pigeon-encrypted",
+                    totalSize = protected.file.length(),
+                    onProgress = onProgress,
+                )
+            } else {
+                social.uploadLargeStream(openStream, filename, type, totalSize, onProgress)
+            }
+            send(
+                channelId,
+                caption.trim(),
+                replyTo,
+                attachment,
+                selfName,
+                e2eeEnabled = secure,
+                isDm = isDm,
+                attachmentSecret = protected?.secret,
+            )
+        } finally {
+            protected?.file?.delete()
+        }
     }
 
     /**
@@ -347,6 +401,7 @@ class ChatRepository(
         sendAt: Long? = null,
         e2eeEnabled: Boolean = false,
         isDm: Boolean = false,
+        attachmentSecret: AttachmentSecret? = null,
     ) {
         val nonce = "${System.currentTimeMillis()}-${(0..9999).random()}"
         val now = System.currentTimeMillis()
@@ -361,7 +416,7 @@ class ChatRepository(
         val mgr = e2ee
         val cipher = if (e2eeEnabled && isDm && mgr != null) {
             check(ensureE2eeSession(channelId, mgr)) { "encrypted messaging is not ready on the other device" }
-            mgr.encrypt(channelId, content)
+            mgr.encrypt(channelId, content, attachmentSecret)
         } else {
             null
         }
@@ -374,8 +429,12 @@ class ChatRepository(
                 id = "pending-$nonce", channelId = channelId, seq = pendingSeq.incrementAndGet(),
                 authorId = "me", authorName = selfName, authorAvatar = null, authorAccent = null,
                 content = content, replyTo = replyTo, nonce = nonce, attachmentKey = attachment?.key,
-                attachmentName = attachment?.name, attachmentType = attachment?.type, attachmentSize = attachment?.size,
+                attachmentName = attachmentSecret?.n ?: attachment?.name,
+                attachmentType = attachmentSecret?.t ?: attachment?.type,
+                attachmentSize = attachmentSecret?.z ?: attachment?.size,
                 createdAt = now, editedAt = null, deleted = false, reactionsJson = "[]", revisionsJson = null,
+                metadataJson = protectedMetadata(null, attachmentSecret),
+                encrypted = encrypted,
                 state = "SENDING",
             )
         )
@@ -561,6 +620,29 @@ class ChatRepository(
     suspend fun markRead(channelId: String, seq: Long) = api.markRead(channelId, seq)
     suspend fun uploadFile(bytes: ByteArray, filename: String, type: String) = api.uploadFile(bytes, filename, type)
 
+    suspend fun uploadAttachment(
+        channelId: String,
+        bytes: ByteArray,
+        filename: String,
+        type: String,
+        e2eeEnabled: Boolean,
+        isDm: Boolean,
+    ): PreparedAttachment {
+        val manager = e2ee
+        val secure = e2eeEnabled && isDm && manager != null
+        if (!secure) return PreparedAttachment(api.uploadFile(bytes, filename, type))
+        check(ensureE2eeSession(channelId, manager)) { "encrypted messaging is not ready on the other device" }
+        val protected = manager.protectAttachment(bytes, filename, type)
+        return PreparedAttachment(
+            attachment = api.uploadFile(
+                protected.bytes,
+                "$filename.pigeon",
+                "application/x-pigeon-encrypted",
+            ),
+            secret = protected.secret,
+        )
+    }
+
     private fun decodeReactions(value: String): List<ReactionDto> =
         runCatching { json.decodeFromString<List<ReactionDto>>(value) }.getOrDefault(emptyList())
 
@@ -650,16 +732,22 @@ class ChatRepository(
         }
     }
 
-    private suspend fun decryptForDisplay(channelId: String, content: String, isEncrypted: Boolean, authorId: String): String {
-        val manager = e2ee ?: return content
-        if (!isEncrypted || content.isEmpty()) return content
+    private suspend fun decryptForDisplay(
+        channelId: String,
+        content: String,
+        isEncrypted: Boolean,
+        authorId: String,
+    ): ProtectedMessage {
+        if (!isEncrypted || content.isEmpty()) return ProtectedMessage(content)
+        val manager = e2ee ?: return ProtectedMessage(lockedPlaceholder)
         // First-encrypted-message-in receive path: if we haven't established the session
         // for this DM yet, try now (unwraps the peer's envelope + seeds the ratchet).
         // Best-effort — on failure decrypt below just yields the locked placeholder.
         if (channelId !in establishedSessions) {
             runCatching { ensureE2eeSession(channelId, manager) }
         }
-        return runCatching { manager.decrypt(channelId, content, authorId) }.getOrNull() ?: lockedPlaceholder
+        return runCatching { manager.decrypt(channelId, content, authorId) }.getOrNull()
+            ?: ProtectedMessage(lockedPlaceholder)
     }
 
     private suspend fun mergeEvent(dto: MessageDto) {
@@ -670,8 +758,15 @@ class ChatRepository(
         mergeEventDecrypted(dto, display)
     }
 
-    private suspend fun mergeEventDecrypted(dto: MessageDto, display: String) = db.withTransaction {
-        val incoming = dto.toEntity().let { if (display !== dto.content) it.copy(content = display) else it }
+    private suspend fun mergeEventDecrypted(dto: MessageDto, display: ProtectedMessage) = db.withTransaction {
+        val secret = display.attachment
+        val incoming = dto.toEntity().copy(
+            content = display.text,
+            attachmentName = secret?.n ?: dto.attachment?.name,
+            attachmentType = secret?.t ?: dto.attachment?.type,
+            attachmentSize = secret?.z ?: dto.attachment?.size,
+            metadataJson = protectedMetadata(dto.metadata?.toString(), secret),
+        )
         // Reconcile with our own optimistic send: the gateway echo (and the send
         // API response) carry the nonce we minted locally. The optimistic row was
         // inserted under a temporary id ("pending-<nonce>"), so a lookup by the
@@ -692,6 +787,14 @@ class ChatRepository(
                 (!incoming.deleted && incomingVersion < currentVersion)
             )
         if (!stale) db.messages().upsertOne(incoming)
+    }
+
+    private fun protectedMetadata(base: String?, secret: AttachmentSecret?): String? {
+        if (secret == null) return base
+        val metadata = runCatching { JSONObject(base ?: "{}") }.getOrElse { JSONObject() }
+        metadata.put("e2ee", true)
+        metadata.put("e2ee_attachment", secret.toJson())
+        return metadata.toString()
     }
 
     private fun setReaction(reactions: List<ReactionDto>, value: ReactionDto): List<ReactionDto> {

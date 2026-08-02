@@ -108,6 +108,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -288,12 +290,15 @@ fun ChatScreen(
     LaunchedEffect(channelId) {
         app.pigeonsms.dismissChannelNotifications(notifContext, channelId)
     }
-    val mediaItems = remember(messages) {
+    val resolvedAttachmentUrls = remember(channelId) { mutableStateMapOf<String, String>() }
+    val mediaItems = remember(messages, resolvedAttachmentUrls.toMap()) {
         messages.mapNotNull { message ->
             val key = message.attachmentKey ?: return@mapNotNull null
             val type = message.attachmentType ?: return@mapNotNull null
             if (type.startsWith("image/") || type.startsWith("video/")) {
-                ConversationMedia(message.id, vm.mediaUrl(key), message.attachmentName, type)
+                val url = resolvedAttachmentUrls[message.id]
+                    ?: if (!message.encrypted) vm.mediaUrl(key) else return@mapNotNull null
+                ConversationMedia(message.id, url, message.attachmentName, type)
             } else null
         }
     }
@@ -487,6 +492,17 @@ fun ChatScreen(
                         key = { _, message -> message.id },
                         contentType = { _, message -> if (vm.isOwn(message)) "own" else "other" },
                     ) { index, message ->
+                        val attachmentKey = message.attachmentKey
+                        val attachmentUrl by produceState(
+                            initialValue = resolvedAttachmentUrls[message.id]
+                                ?: attachmentKey?.takeUnless { message.encrypted }?.let(vm::mediaUrl),
+                            message.id,
+                            message.metadataJson,
+                            attachmentKey,
+                        ) {
+                            value = runCatching { vm.attachmentUrl(message) }.getOrNull()
+                            value?.let { resolvedAttachmentUrls[message.id] = it }
+                        }
                         val previous = messages.getOrNull(index - 1)
                         val next = messages.getOrNull(index + 1)
                         val newDay = previous == null || dayLabel(previous.createdAt) != dayLabel(message.createdAt)
@@ -509,6 +525,7 @@ fun ChatScreen(
                             pinned = message.id in ui.pinnedMessageIds,
                             highlighted = message.id == highlightedMessageId,
                             mediaUrl = vm::mediaUrl,
+                            attachmentUrl = attachmentUrl,
                             onOpenProfile = onOpenProfile,
                             onNavigateToReply = { replyId ->
                                 val targetIndex = messages.indexOfFirst { it.id == replyId }
@@ -701,10 +718,12 @@ fun ChatScreen(
             onTyping = vm::typing,
             onCommandQuery = vm::filterCommands,
             onRunCommand = vm::runCommand,
-            onAttachment = vm::sendAttachment,
+            onAttachment = { bytes, name, type, caption, encrypted ->
+                vm.sendAttachment(bytes, name, type, caption, encrypted = encrypted)
+            },
             onAttachmentError = vm::reportError,
-            onStreamedAttachment = { open, name, type, size, caption ->
-                vm.sendStreamedAttachment(open, name, type, size, caption)
+            onStreamedAttachment = { open, name, type, size, caption, encrypted ->
+                vm.sendStreamedAttachment(open, name, type, size, caption, encrypted)
             },
             stickers = customEmoji.filter { it.kind == "sticker" },
             pickerEmoji = customEmoji,
@@ -1396,6 +1415,7 @@ private fun MessageBubble(
     pinned: Boolean,
     highlighted: Boolean,
     mediaUrl: (String) -> String,
+    attachmentUrl: String?,
     onOpenProfile: (String) -> Unit,
     onNavigateToReply: (String) -> Unit,
     onReply: () -> Unit,
@@ -1702,7 +1722,7 @@ private fun MessageBubble(
                         AttachmentView(
                             name = message.attachmentName,
                             type = message.attachmentType,
-                            url = mediaUrl(imageKey),
+                            url = attachmentUrl,
                             self = self,
                             onOpenMedia = { onOpenMedia(message.id) },
                         )
@@ -1744,7 +1764,7 @@ private fun MessageBubble(
                                     AttachmentView(
                                         name = message.attachmentName,
                                         type = message.attachmentType,
-                                        url = mediaUrl(key),
+                                        url = attachmentUrl,
                                         self = self,
                                         onOpenMedia = { onOpenMedia(message.id) },
                                     )
@@ -2669,7 +2689,21 @@ private object ActiveVoice {
 }
 
 @Composable
-private fun AttachmentView(name: String?, type: String?, url: String, self: Boolean, onOpenMedia: () -> Unit = {}) {
+private fun AttachmentView(name: String?, type: String?, url: String?, self: Boolean, onOpenMedia: () -> Unit = {}) {
+    if (url == null) {
+        Row(
+            Modifier.fillMaxWidth().widthIn(max = 280.dp).height(72.dp)
+                .clip(Corners.chip)
+                .background(bubbleContentColor(self).copy(alpha = 0.08f))
+                .padding(Spacing.m),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(Spacing.m),
+        ) {
+            CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp, color = bubbleContentColor(self))
+            Text(name ?: "decrypting attachment", color = bubbleContentColor(self), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        return
+    }
     if (type?.startsWith("image/") == true) {
         coil.compose.AsyncImage(
             model = url,
@@ -2833,11 +2867,11 @@ private fun Composer(
     // encrypted (E2EE flag). ttl/sendAt/encrypted map 1:1 to the send-path contract.
     onSend: (String, Long?, Long?, Boolean) -> Unit,
     onTyping: () -> Unit,
-    onAttachment: (ByteArray, String, String, String) -> Unit,
+    onAttachment: (ByteArray, String, String, String, Boolean) -> Unit,
     onAttachmentError: (String) -> Unit,
     /** This nest's stickers (2.9.5); empty hides the composer's sticker button. */
     /** Large-file path: (openStream, name, type, size, caption). */
-    onStreamedAttachment: (() -> java.io.InputStream, String, String, Long, String) -> Unit = { _, _, _, _, _ -> },
+    onStreamedAttachment: (() -> java.io.InputStream, String, String, Long, String, Boolean) -> Unit = { _, _, _, _, _, _ -> },
     stickers: List<SpaceEmojiDto> = emptyList(),
     /** Every emoji you can use — drives the picker and `:name` autocomplete. */
     pickerEmoji: List<SpaceEmojiDto> = emptyList(),
@@ -2893,7 +2927,7 @@ private fun Composer(
         keepKeyboardAfterSend = true
         focusRequester.requestFocus()
         keyboardController?.show()
-        onAttachment(bytes, name, type, body)
+        onAttachment(bytes, name, type, body, encryptOn)
     }
     fun consumeAttachment(uri: Uri?) {
         if (uri != null) {
@@ -2910,6 +2944,7 @@ private fun Composer(
                         probed.type,
                         probed.size,
                         "",
+                        encryptOn,
                     )
                     readingAttachment = false
                     return@launch
@@ -3054,7 +3089,7 @@ private fun Composer(
         if (send && file != null && file.exists() && file.length() > 0) {
             val bytes = file.readBytes()
             runCatching { file.delete() } // cache file is spent once the bytes are read
-            onAttachment(bytes, "voice.m4a", "audio/mp4", "")
+            onAttachment(bytes, "voice.m4a", "audio/mp4", "", encryptOn)
         } else {
             // stop() on a <1s recording throws and leaves an empty file — tell the
             // user instead of silently dropping the tap on send

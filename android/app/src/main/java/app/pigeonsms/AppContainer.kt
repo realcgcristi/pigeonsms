@@ -69,7 +69,10 @@ class AppContainer(context: Context) {
         val e2eeOn = runCatching { themeStore.prefs.first().e2ee }.getOrDefault(false)
         if (!e2eeOn) return
         runCatching {
-            kotlinx.coroutines.withContext(Dispatchers.IO) { e2eeManager.publishDevice() }
+            kotlinx.coroutines.withContext(Dispatchers.IO) {
+                e2eeManager.publishDevice()
+                e2eeManager.syncPendingDevices()
+            }
         }.onSuccess { deviceBootstrapped = true }
     }
 }

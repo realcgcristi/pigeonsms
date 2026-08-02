@@ -516,6 +516,7 @@ class PigeonApi(
     }.unwrap<BannerResponse>().key
     suspend fun resetAvatar() { client.delete("$baseUrl/media/avatar") { auth() }.unwrap<OkResponse>() }
     suspend fun resetBanner() { client.delete("$baseUrl/media/banner") { auth() }.unwrap<OkResponse>() }
+    suspend fun downloadMedia(key: String) = client.get("$baseUrl/media/${q(key)}") { auth() }.unwrap<ByteArray>()
     fun mediaUrl(key: String) = "$baseUrl/media/$key"
 
     // --- push / updates ---
@@ -541,6 +542,10 @@ class PigeonApi(
     }
     /** The caller's own registered devices (full detail). */
     suspend fun myDevices() = client.get("$baseUrl/auth/devices") { auth() }.unwrap<DevicesResponse>().devices
+    suspend fun pendingDeviceSync() = client.get("$baseUrl/auth/device-sync") { auth() }.unwrap<DevicesResponse>().devices
+    suspend fun completeDeviceSync(id: String) {
+        client.delete("$baseUrl/auth/device-sync/${q(id)}") { auth() }.unwrap<OkResponse>()
+    }
     /** Another user's device pub keys — only when a mutual DM/friend exists (403 otherwise). */
     suspend fun userDevices(userId: String) = client.get("$baseUrl/users/$userId/devices") { auth() }.unwrap<DevicesResponse>().devices
     suspend fun transparency(userId: String) =

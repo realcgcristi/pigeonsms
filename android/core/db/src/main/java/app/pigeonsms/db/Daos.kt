@@ -160,6 +160,9 @@ interface RatchetStateDao {
     @Query("SELECT * FROM ratchet_state WHERE channelId = :channelId LIMIT 1")
     suspend fun get(channelId: String): RatchetStateEntity?
 
+    @Query("SELECT * FROM ratchet_state WHERE channelId LIKE 'master:%'")
+    suspend fun masters(): List<RatchetStateEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun put(state: RatchetStateEntity)
 

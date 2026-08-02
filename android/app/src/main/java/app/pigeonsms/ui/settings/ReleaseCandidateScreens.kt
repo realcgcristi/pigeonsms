@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -59,13 +60,17 @@ import app.pigeonsms.data.LocalSession
 import app.pigeonsms.data.NetworklessManager
 import app.pigeonsms.data.TransparencyCheckpointStore
 import app.pigeonsms.data.TimeMachineVerifier
+import app.pigeonsms.data.e2ee.SafetyFingerprint
 import app.pigeonsms.design.theme.Corners
 import app.pigeonsms.design.theme.Spacing
 import app.pigeonsms.network.SpaceDto
+import app.pigeonsms.network.PigeonApiException
 import app.pigeonsms.network.TimeCapsuleDto
 import app.pigeonsms.network.TimeEventDto
 import app.pigeonsms.network.TransparencyResponse
+import app.pigeonsms.ui.components.QrCode
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -287,13 +292,20 @@ private fun EventCard(event: TimeEventDto) {
 @Composable
 fun KeyTransparencyScreen(userId: String, onBack: () -> Unit) {
     val context = LocalContext.current
-    val api = (context.applicationContext as PigeonApp).container.api
+    val container = (context.applicationContext as PigeonApp).container
+    val api = container.api
     val store = remember { TransparencyCheckpointStore(context.applicationContext) }
     var response by remember { mutableStateOf<TransparencyResponse?>(null) }
     var verified by remember { mutableStateOf<Boolean?>(null) }
     var detail by remember { mutableStateOf("checking the public device-key history") }
+    var safety by remember { mutableStateOf<SafetyFingerprint?>(null) }
+    var reload by remember { mutableIntStateOf(0) }
 
-    LaunchedEffect(userId) {
+    LaunchedEffect(userId, reload) {
+        response = null
+        verified = null
+        safety = null
+        detail = "checking the public device-key history"
         runCatching {
             val data = api.transparency(userId)
             val previous = store.get(userId)
@@ -303,15 +315,23 @@ fun KeyTransparencyScreen(userId: String, onBack: () -> Unit) {
             val safe = valid && consistent && !KeyTransparencyVerifier.changed(previous, data.checkpoint) && !gossip.conflict
             response = data
             verified = safe
+            val ownerId = container.sessionStore.session.first()?.userId
+            if (ownerId != null && ownerId != userId) {
+                safety = runCatching { container.e2eeManager.safetyNumber(ownerId, userId) }.getOrNull()
+            }
             detail = if (safe) {
                 store.put(userId, data.checkpoint)
                 "the full key history is valid and consistent with this device"
             } else {
                 "the key history changed unexpectedly — verify on another trusted device"
             }
-        }.onFailure {
+        }.onFailure { error ->
             verified = false
-            detail = it.message ?: "could not verify the key history"
+            detail = if (error is PigeonApiException && error.code == "not_found") {
+                "key transparency is not available on this server yet"
+            } else {
+                error.message ?: "could not verify the key history"
+            }
         }
     }
 
@@ -330,18 +350,53 @@ fun KeyTransparencyScreen(userId: String, onBack: () -> Unit) {
                             tint = if (verified == false) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
                         )
                         Column(Modifier.padding(start = Spacing.m)) {
-                            Text(if (verified == true) "key history verified" else if (verified == false) "key warning" else "verifying keys", fontWeight = FontWeight.Bold)
+                            Text(
+                                if (verified == true) "key history verified" else if (verified == false) "key warning" else "verifying keys",
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
                             Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }
             }
+            if (verified == false && response == null) {
+                item {
+                    OutlinedButton(onClick = { reload += 1 }, modifier = Modifier.fillMaxWidth()) {
+                        Text("try again")
+                    }
+                }
+            }
             response?.let { data ->
+                safety?.let { fingerprint ->
+                    item {
+                        Group("safety number")
+                        GroupCard {
+                            Column(
+                                Modifier.fillMaxWidth().padding(Spacing.l),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(Spacing.m),
+                            ) {
+                                QrCode(fingerprint.qr, Modifier.width(220.dp))
+                                Text(
+                                    fingerprint.number.chunked(5).joinToString(" "),
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                                Text(
+                                    "compare this on a trusted call or scan it from the other person's device",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
+                        }
+                    }
+                }
                 item {
                     Group("checkpoint")
                     GroupCard {
                         Column(Modifier.padding(Spacing.l)) {
-                            Text("${data.checkpoint.tree_size} recorded key events", fontWeight = FontWeight.Bold)
+                            Text("${data.checkpoint.tree_size} recorded key events", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                             Text(data.checkpoint.root_hash, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
@@ -352,7 +407,7 @@ fun KeyTransparencyScreen(userId: String, onBack: () -> Unit) {
                         Row(Modifier.fillMaxWidth().padding(Spacing.l)) {
                             Text(entry.action, color = if (entry.action == "revoke") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                             Column(Modifier.padding(start = Spacing.m).weight(1f)) {
-                                Text(entry.device_id, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(entry.device_id, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurface)
                                 Text(entry.entry_hash, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
@@ -413,7 +468,11 @@ fun NetworklessScreen(
                             tint = if (status.error != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
                         )
                         Column(Modifier.padding(start = Spacing.m)) {
-                            Text(if (status.active) "nearby link active" else "networkless mode is off", fontWeight = FontWeight.Bold)
+                            Text(
+                                if (status.active) "nearby link active" else "networkless mode is off",
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
                             Text(
                                 if (status.active) "${status.peers} peers · ${status.exchanged} messages exchanged" else "encrypted LAN and existing Wi-Fi Direct groups",
                                 style = MaterialTheme.typography.bodySmall,

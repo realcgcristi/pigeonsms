@@ -52,6 +52,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -111,11 +112,12 @@ fun ConversationInfoScreen(
 ) {
     val media by vm.media.collectAsState()
     val ui by vm.ui.collectAsState()
-    val mediaItems = remember(media) {
-        media.mapNotNull { message ->
+    val mediaItems by produceState(initialValue = emptyList<ConversationMedia>(), media) {
+        value = media.mapNotNull { message ->
             val key = message.attachmentKey ?: return@mapNotNull null
             val type = message.attachmentType ?: return@mapNotNull null
-            ConversationMedia(message.id, vm.mediaUrl(key), message.attachmentName, type)
+            val url = runCatching { vm.attachmentUrl(message) }.getOrNull() ?: return@mapNotNull null
+            ConversationMedia(message.id, url, message.attachmentName, type)
         }
     }
     var viewerIndex by remember { mutableStateOf<Int?>(null) }
