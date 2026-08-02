@@ -103,7 +103,7 @@ import type {
   UsersSearchResponse,
 } from '@/api/dto';
 
-export { ApiError, onUnauthorized, setTokenProvider } from '@/api/http';
+export { ApiError, onUnauthorized, setAuthProvider } from '@/api/http';
 
 export function deviceName(): string {
   const ua = navigator.userAgent;

@@ -8,6 +8,8 @@ import type {
   SuperPinRemoveEventDto,
   SuperPinSetEventDto,
 } from '@/api/dto';
+import type { AuthProvider, AuthSession } from '@/api/auth';
+import { websocketAuthQuery } from '@/api/auth';
 
 export const PIGEON_WS_BASE = 'wss://api.pigeonsms.aldi.best';
 export const PIGEON_WS = `${PIGEON_WS_BASE}/gateway`;
@@ -103,7 +105,6 @@ export type GatewayEventName = GatewayEvent['t'];
 export type GatewayEventOf<N extends GatewayEventName> = Extract<GatewayEvent, { t: N }>;
 export type GatewayEventData<N extends GatewayEventName> = GatewayEventOf<N>['d'];
 
-export type TokenProvider = () => string | null | Promise<string | null>;
 export type CursorProvider = () =>
   | Record<string, number>
   | null
@@ -166,7 +167,7 @@ export class Gateway {
   private readonly anyListeners = new Set<AnyListener>();
   private readonly statusListeners = new Set<StatusListener>();
 
-  private tokenProvider: TokenProvider = () => null;
+  private authProvider: AuthProvider = () => null;
   private cursorProvider: CursorProvider = () => null;
   private authFailureHandler: () => void | Promise<void> = () => undefined;
 
@@ -182,8 +183,8 @@ export class Gateway {
     return this.state;
   }
 
-  setTokenProvider(provider: TokenProvider): void {
-    this.tokenProvider = provider;
+  setAuthProvider(provider: AuthProvider): void {
+    this.authProvider = provider;
   }
 
   setCursorProvider(provider: CursorProvider): void {
@@ -312,14 +313,14 @@ export class Gateway {
     let backoff = BASE_BACKOFF_MS;
     let consecutiveImmediateFailures = 0;
     while (this.running) {
-      let token: string | null = null;
+      let auth: AuthSession | null = null;
       try {
-        token = await this.tokenProvider();
+        auth = (await this.authProvider()) ?? null;
       } catch {
-        token = null;
+        auth = null;
       }
       if (!this.running) break;
-      if (!token) {
+      if (!auth) {
         await this.wait(NO_TOKEN_RETRY_MS);
         continue;
       }
@@ -340,11 +341,9 @@ export class Gateway {
       } catch {
         resumeSuffix = '';
       }
-      const reached = await this.session(
-        token === 'cookie'
-          ? `${this.url}?${resumeSuffix.replace(/^&/, '')}`
-          : `${this.url}?token=${encodeURIComponent(token)}${resumeSuffix}`,
-      );
+      const authQuery = websocketAuthQuery(auth);
+      const query = `${authQuery}${resumeSuffix}`.replace(/^&/, '');
+      const reached = await this.session(query ? `${this.url}?${query}` : this.url);
       if (reached) {
         backoff = BASE_BACKOFF_MS;
         consecutiveImmediateFailures = 0;
@@ -437,16 +436,15 @@ export interface CallSocket {
 export function connectCall(
   channelId: string,
   mode: CallMode,
-  token: string,
+  auth: AuthSession,
   handlers: {
     onEvent: (event: CallEvent) => void;
     onOpen?: (reconnected: boolean) => void;
     onClose?: (willRetry: boolean) => void;
   },
 ): CallSocket {
-  const url = `${PIGEON_WS_BASE}/calls/${encodeURIComponent(channelId)}/ws?mode=${mode}${
-    token === 'cookie' ? '' : `&token=${encodeURIComponent(token)}`
-  }`;
+  const authQuery = websocketAuthQuery(auth);
+  const url = `${PIGEON_WS_BASE}/calls/${encodeURIComponent(channelId)}/ws?mode=${mode}${authQuery ? `&${authQuery}` : ''}`;
   let socket: WebSocket | null = null;
   let stopped = false;
   let opened = false;
@@ -573,11 +571,12 @@ export interface ChannelSocket {
 export function connectChannelSocket(
   kind: 'dm' | 'space',
   channelId: string,
-  token: string,
+  auth: AuthSession,
   onEvent: (event: ChannelSocketEvent) => void,
 ): ChannelSocket {
   const segment = kind === 'dm' ? 'dms' : 'spaces';
-  const url = `${PIGEON_WS_BASE}/${segment}/${encodeURIComponent(channelId)}/ws?token=${encodeURIComponent(token)}`;
+  const authQuery = websocketAuthQuery(auth);
+  const url = `${PIGEON_WS_BASE}/${segment}/${encodeURIComponent(channelId)}/ws${authQuery ? `?${authQuery}` : ''}`;
   const socket = new WebSocket(url);
   socket.onmessage = (frame: MessageEvent<unknown>) => {
     if (typeof frame.data !== 'string') return;

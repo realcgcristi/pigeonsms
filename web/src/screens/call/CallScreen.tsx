@@ -57,7 +57,7 @@ export default function CallScreen() {
   const [params] = useSearchParams()
   const navigate = useNavigate()
   const toast = useToast()
-  const token = useSession((s) => s.token)
+  const auth = useSession((s) => s.auth)
   const me = useSession((s) => s.user)
 
   const mode: CallMode = params.get('video') === 'true' ? 'video' : 'voice'
@@ -154,7 +154,7 @@ export default function CallScreen() {
   )
 
   useEffect(() => {
-    if (!token) return
+    if (!auth) return
     let cancelled = false
     let configTimer = 0
     let configController: AbortController | null = null
@@ -274,7 +274,7 @@ export default function CallScreen() {
       localStream.current = stream
       if (localRef.current) localRef.current.srcObject = stream
 
-      const socket = connectCall(channelId, mode, token, {
+      const socket = connectCall(channelId, mode, auth, {
         onOpen: (reconnected) => setStatus(reconnected ? 'restoring call...' : 'waiting for someone to join...'),
         onClose: (willRetry) => setStatus(willRetry ? 'reconnecting signaling...' : 'call ended'),
         onEvent: (event: CallEvent) => {
@@ -308,7 +308,7 @@ export default function CallScreen() {
       sharedTrack.current = null
       localStream.current = null
     }
-  }, [channelId, mode, me?.id, peerFor, started, token, toast])
+  }, [auth, channelId, mode, me?.id, peerFor, started, toast])
 
   const toggleMic = () => {
     const track = localStream.current?.getAudioTracks()[0]

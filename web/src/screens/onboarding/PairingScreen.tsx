@@ -16,7 +16,7 @@ const TERMINAL = new Set(['denied', 'cancelled', 'expired']);
 
 export default function PairingScreen() {
   const navigate = useNavigate();
-  const token = useSession((state) => state.token);
+  const auth = useSession((state) => state.auth);
   const completeAuth = useSession((state) => state.completeAuth);
   const initialInvite = useMemo(() => parsePairingInvite(window.location.href), []);
   const [link, setLink] = useState(initialInvite ? window.location.href : '');
@@ -79,7 +79,7 @@ export default function PairingScreen() {
     };
   }, [claimSecret, completeAuth, invite, navigate]);
 
-  if (token) {
+  if (auth) {
     return (
       <div className="pairing-page">
         <section className="pairing-card pairing-card--centered">

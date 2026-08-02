@@ -1,14 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { send, setTokenProvider } from '@/api/http'
+import { bearerSession, cookieSession } from '@/api/auth'
+import { send, setAuthProvider } from '@/api/http'
 
 afterEach(() => {
-  setTokenProvider(() => null)
+  setAuthProvider(() => null)
   vi.unstubAllGlobals()
 })
 
 describe('authenticated requests', () => {
-  it('uses the first-party session cookie without sending the cookie sentinel as a bearer token', async () => {
-    setTokenProvider(() => 'cookie')
+  it('uses first-party cookie auth without creating an authorization header', async () => {
+    setAuthProvider(() => cookieSession())
     const fetchMock = vi.fn(async () => new Response(null, { status: 204 }))
     vi.stubGlobal('fetch', fetchMock)
 
@@ -20,7 +21,7 @@ describe('authenticated requests', () => {
   })
 
   it('continues to send real bearer tokens for preview and desktop clients', async () => {
-    setTokenProvider(() => 'preview-token')
+    setAuthProvider(() => bearerSession('preview-token'))
     const fetchMock = vi.fn(async () => new Response(null, { status: 204 }))
     vi.stubGlobal('fetch', fetchMock)
 

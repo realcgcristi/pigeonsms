@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { connectCall } from '@/api/gateway'
+import { bearerSession, cookieSession } from '@/api/auth'
 
 class FakeWebSocket {
   static readonly CONNECTING = 0
@@ -52,7 +53,7 @@ describe('call signaling recovery', () => {
     vi.stubGlobal('WebSocket', FakeWebSocket)
     const opened: boolean[] = []
     const closed: boolean[] = []
-    const call = connectCall('channel', 'voice', 'token', {
+    const call = connectCall('channel', 'voice', bearerSession('token'), {
       onEvent: () => undefined,
       onOpen: (reconnected) => opened.push(reconnected),
       onClose: (willRetry) => closed.push(willRetry),
@@ -79,5 +80,12 @@ describe('call signaling recovery', () => {
     await vi.advanceTimersByTimeAsync(60_000)
     expect(FakeWebSocket.instances).toHaveLength(2)
     expect(closed).toEqual([true, false])
+  })
+
+  it('uses the browser cookie explicitly without putting a fake token in the URL', () => {
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    const call = connectCall('channel', 'voice', cookieSession(), { onEvent: () => undefined })
+    expect(FakeWebSocket.instances[0]?.url).toBe('wss://api.pigeonsms.aldi.best/calls/channel/ws?mode=voice')
+    call.close()
   })
 })

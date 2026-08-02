@@ -46,16 +46,16 @@ const CallScreen = lazy(() => import('@/screens/call/CallScreen'));
 const NotificationsScreen = lazy(() => import('@/screens/notifications/NotificationsScreen'));
 
 function Gate({ children }: { children: React.ReactNode }) {
-  const token = useSession((s) => s.token);
+  const auth = useSession((s) => s.auth);
   const location = useLocation();
-  if (!token) return <Navigate to="/login" replace state={{ from: location.pathname }} />;
+  if (!auth) return <Navigate to="/login" replace state={{ from: location.pathname }} />;
   return <>{children}</>;
 }
 
 export default function App() {
   const restore = useSession((s) => s.restore);
   const restored = useSession((s) => s.restored);
-  const token = useSession((s) => s.token);
+  const auth = useSession((s) => s.auth);
   const syncOutbox = useChat((s) => s.syncOutbox);
 
   useEffect(() => {
@@ -63,26 +63,26 @@ export default function App() {
   }, [restore]);
 
   useEffect(() => {
-    if (!token) return;
+    if (!auth) return;
     const sync = () => void syncOutbox();
     window.addEventListener('online', sync);
     sync();
     return () => window.removeEventListener('online', sync);
-  }, [syncOutbox, token]);
+  }, [syncOutbox, auth]);
 
   if (!restored) return <LoadingState label="opening pigeonsms" />;
 
   return (
     <ToastProvider>
-      <ConnectionStatus active={!!token} />
+      <ConnectionStatus active={!!auth} />
       <div className="app-backdrop" aria-hidden="true" />
-      <div className={token ? 'app-frame app-frame--authed' : 'app-frame app-frame--guest'}>
-        {token ? <NavBar /> : null}
-        <main className={token ? 'app-workspace' : 'app-workspace app-workspace--guest'}>
+      <div className={auth ? 'app-frame app-frame--authed' : 'app-frame app-frame--guest'}>
+        {auth ? <NavBar /> : null}
+        <main className={auth ? 'app-workspace' : 'app-workspace app-workspace--guest'}>
           <ErrorBoundary>
           <Suspense fallback={<LoadingState label="loading" />}>
             <Routes>
-              <Route path="/login" element={token ? <Navigate to="/" replace /> : <OnboardingScreen />} />
+              <Route path="/login" element={auth ? <Navigate to="/" replace /> : <OnboardingScreen />} />
               <Route path="/pair" element={<PairingScreen />} />
               <Route path="/" element={<Gate><MessagesScreen /></Gate>} />
               <Route path="/friends" element={<Gate><FriendsScreen /></Gate>} />

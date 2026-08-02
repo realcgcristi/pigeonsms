@@ -1,4 +1,5 @@
 import type { ApiErrorDetail } from '@/api/dto';
+import type { AuthProvider, AuthSession } from '@/api/auth';
 
 const configuredApi = (import.meta.env.VITE_PIGEON_API as string | undefined)?.trim();
 export const API_BASE = (configuredApi || 'https://api.pigeonsms.aldi.best').replace(/\/$/, '');
@@ -21,17 +22,15 @@ export class ApiError extends Error {
   }
 }
 
-export type TokenProvider = () => string | null | undefined | Promise<string | null | undefined>;
+let authProvider: AuthProvider = () => null;
 
-let tokenProvider: TokenProvider = () => null;
-
-export function setTokenProvider(provider: TokenProvider): void {
-  tokenProvider = provider;
+export function setAuthProvider(provider: AuthProvider): void {
+  authProvider = provider;
 }
 
-export async function currentToken(): Promise<string | null> {
-  const token = await tokenProvider();
-  return token ?? null;
+export async function currentAuth(): Promise<AuthSession | null> {
+  const auth = await authProvider();
+  return auth ?? null;
 }
 
 export type UnauthorizedHook = (error: ApiError) => void;
@@ -114,8 +113,8 @@ export async function send(path: string, options: RequestOptions = {}): Promise<
   }
 
   if (options.auth !== false) {
-    const token = await currentToken();
-    if (token && token !== 'cookie') headers.set('authorization', `Bearer ${token}`);
+    const auth = await currentAuth();
+    if (auth?.mode === 'bearer') headers.set('authorization', `Bearer ${auth.token}`);
   }
 
   let response: Response;

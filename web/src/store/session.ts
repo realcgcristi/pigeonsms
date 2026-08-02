@@ -1,6 +1,7 @@
 import { create } from 'zustand';
-import { api, onUnauthorized, setTokenProvider } from '@/api/client';
+import { api, onUnauthorized, setAuthProvider } from '@/api/client';
 import { gateway } from '@/api/gateway';
+import { bearerSession, cookieSession, resolveStoredAuth, type AuthSession } from '@/api/auth';
 import { latestServerSequence } from '@/lib/messageSync';
 import {
   clearDesktopSessionToken,
@@ -15,12 +16,14 @@ const KEY = 'pigeon.session';
 const TOKEN_KEY = 'pigeon.session.token';
 
 interface Persisted {
-  token: string;
+  auth: AuthSession;
   user: ApiUser;
 }
 
-function runtimeToken(bearer: string): string {
-  return window.location.hostname === 'pigeonsms.aldi.best' ? 'cookie' : bearer;
+function runtimeAuth(bearer: string): AuthSession {
+  return !isDesktopApp() && window.location.hostname === 'pigeonsms.aldi.best'
+    ? cookieSession()
+    : bearerSession(bearer);
 }
 
 async function read(): Promise<Persisted | null> {
@@ -32,27 +35,35 @@ async function read(): Promise<Persisted | null> {
 
     let sessionToken = sessionStorage.getItem(TOKEN_KEY);
     const legacyToken = parsed.token;
+    let secureToken: string | null = null;
     if (isDesktopApp()) {
-      const secureToken = await loadDesktopSessionToken();
+      secureToken = await loadDesktopSessionToken();
       sessionToken = secureToken || sessionToken || legacyToken || null;
       if (!sessionToken) return null;
       sessionStorage.setItem(TOKEN_KEY, sessionToken);
       if (!secureToken) await storeDesktopSessionToken(sessionToken);
     }
 
-    const token = sessionToken || legacyToken || 'cookie';
+    const auth = resolveStoredAuth({
+      desktop: isDesktopApp(),
+      firstParty: window.location.hostname === 'pigeonsms.aldi.best',
+      secureToken,
+      sessionToken,
+      legacyToken,
+    });
+    if (!auth) return null;
     if (legacyToken) {
       sessionStorage.setItem(TOKEN_KEY, legacyToken);
       localStorage.setItem(KEY, JSON.stringify({ user: parsed.user }));
     }
-    return { token, user: parsed.user };
+    return { auth, user: parsed.user };
   } catch {
     return null;
   }
 }
 
 async function write(value: Persisted | null): Promise<void> {
-  const bearer = value?.token && value.token !== 'cookie' ? value.token : null;
+  const bearer = value?.auth.mode === 'bearer' ? value.auth.token : null;
   const desktop = isDesktopApp();
   const isFirstParty = !desktop && window.location.hostname === 'pigeonsms.aldi.best';
 
@@ -78,7 +89,7 @@ async function write(value: Persisted | null): Promise<void> {
 }
 
 export interface SessionState {
-  token: string | null;
+  auth: AuthSession | null;
   user: ApiUser | null;
   loading: boolean;
   error: string | null;
@@ -97,7 +108,7 @@ export interface SessionState {
 let bound = false;
 
 export const useSession = create<SessionState>((set, get) => ({
-  token: null,
+  auth: null,
   user: null,
   loading: false,
   error: null,
@@ -107,8 +118,8 @@ export const useSession = create<SessionState>((set, get) => ({
   restore: async () => {
     if (!bound) {
       bound = true;
-      setTokenProvider(() => useSession.getState().token);
-      gateway.setTokenProvider(() => useSession.getState().token);
+      setAuthProvider(() => useSession.getState().auth);
+      gateway.setAuthProvider(() => useSession.getState().auth);
       gateway.setCursorProvider(async () => {
         const { useChat } = await import('@/store/chat');
         const cursors: Record<string, number> = {};
@@ -122,7 +133,7 @@ export const useSession = create<SessionState>((set, get) => ({
         void write(null);
         gateway.stop();
         void import('@/store/networkless').then(({ stopNetworkless }) => stopNetworkless());
-        set({ token: null, user: null, restored: true });
+        set({ auth: null, user: null, restored: true });
       });
     }
 
@@ -132,18 +143,18 @@ export const useSession = create<SessionState>((set, get) => ({
         set({ restored: true });
         return;
       }
-      set({ token: stored.token, user: stored.user, restored: true });
+      set({ auth: stored.auth, user: stored.user, restored: true });
       gateway.start();
       void get().refresh();
     } catch {
-      set({ token: null, user: null, restored: true });
+      set({ auth: null, user: null, restored: true });
     }
   },
 
   completeAuth: async (auth) => {
-    const token = runtimeToken(auth.token);
-    await write({ token, user: auth.user });
-    set({ token, user: auth.user, loading: false, error: null, totpRequired: false });
+    const session = runtimeAuth(auth.token);
+    await write({ auth: session, user: auth.user });
+    set({ auth: session, user: auth.user, loading: false, error: null, totpRequired: false });
     gateway.start();
   },
 
@@ -196,15 +207,15 @@ export const useSession = create<SessionState>((set, get) => ({
     gateway.stop();
     const { stopNetworkless } = await import('@/store/networkless');
     stopNetworkless();
-    set({ token: null, user: null, error: null, totpRequired: false });
+    set({ auth: null, user: null, error: null, totpRequired: false });
   },
 
   refresh: async () => {
-    const token = get().token;
-    if (!token) return;
+    const auth = get().auth;
+    if (!auth) return;
     try {
       const user = await api.me();
-      void write({ token, user });
+      void write({ auth, user });
       set({ user });
     } catch {
       set({ error: null });
@@ -212,10 +223,10 @@ export const useSession = create<SessionState>((set, get) => ({
   },
 
   patchUser: (fields) => {
-    const { token, user } = get();
+    const { auth, user } = get();
     if (!user) return;
     const next = { ...user, ...fields };
-    if (token) void write({ token, user: next });
+    if (auth) void write({ auth, user: next });
     set({ user: next });
   },
 }));

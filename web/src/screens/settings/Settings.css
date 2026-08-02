@@ -235,6 +235,10 @@
 
 .transparency__status--verified { color: var(--success); }
 .transparency__status--warning { color: var(--danger); }
+.transparency__status strong,
+.transparency__checkpoint strong,
+.transparency__entry strong,
+.networkless__status strong { color: var(--text-primary); }
 .transparency__status div,
 .transparency__checkpoint div,
 .transparency__entry div { display: grid; gap: 4px; min-width: 0; }
@@ -285,6 +289,9 @@
 .networkless__status--failed { color: var(--danger); }
 .networkless__status div { display: grid; gap: 4px; }
 .networkless__status span { color: var(--text-secondary); }
+
+.settings-screen .ui-topbar__title { color: var(--text-primary); }
+.settings-screen .ui-topbar__sub { color: var(--text-secondary); }
 
 .networkless__form {
   display: grid;
