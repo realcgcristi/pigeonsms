@@ -25,6 +25,9 @@ export interface Env {
   SERVER_VERSION?: string;
   WEBAUTHN_RP_ID?: string;
   WEBAUTHN_ANDROID_ORIGINS?: string;
+  TURN_KEY_ID?: string;
+  TURN_KEY_API_TOKEN?: string;
+  TURN_CREDENTIAL_TTL_SECONDS?: string;
   /** VAPID keypair for browser push; absent = web push simply off. */
   VAPID_PUBLIC_KEY?: string;
   VAPID_PRIVATE_JWK?: string;
