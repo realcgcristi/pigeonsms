@@ -117,6 +117,22 @@
   font-size: var(--fs-body-md);
 }
 
+.onboarding__divider {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-m);
+  color: var(--text-tertiary);
+  font-size: var(--fs-label-md);
+}
+
+.onboarding__divider::before,
+.onboarding__divider::after {
+  content: '';
+  flex: 1 1 auto;
+  height: 1px;
+  background: var(--outline);
+}
+
 .onboarding__showcase {
   display: none;
 }

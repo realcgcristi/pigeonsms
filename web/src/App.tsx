@@ -9,6 +9,7 @@ import { useSession } from '@/store/session';
 import { useChat } from '@/store/chat';
 
 const OnboardingScreen = lazy(() => import('@/screens/onboarding/OnboardingScreen'));
+const PairingScreen = lazy(() => import('@/screens/onboarding/PairingScreen'));
 const MessagesScreen = lazy(() => import('@/screens/home/MessagesScreen'));
 const FriendsScreen = lazy(() => import('@/screens/friends/FriendsScreen'));
 const SpacesScreen = lazy(() => import('@/screens/spaces/SpacesScreen'));
@@ -21,7 +22,7 @@ const NestMembersScreen = lazy(() => import('@/screens/spaces/NestMembersScreen'
 const NestEmojiScreen = lazy(() => import('@/screens/spaces/NestEmojiScreen'));
 const ProfileScreen = lazy(() => import('@/screens/profile/ProfileScreen'));
 const EditProfileScreen = lazy(() => import('@/screens/settings/EditProfileScreen'));
-const DevicesScreen = lazy(() => import('@/screens/settings/DevicesScreen'));
+const TrustCenterScreen = lazy(() => import('@/screens/settings/TrustCenterScreen'));
 const HistoryScreen = lazy(() => import('@/screens/settings/HistoryScreen'));
 const SecurityScreen = lazy(() => import('@/screens/settings/SecurityScreen'));
 const KeyTransparencyScreen = lazy(() => import('@/screens/settings/KeyTransparencyScreen'));
@@ -82,6 +83,7 @@ export default function App() {
           <Suspense fallback={<LoadingState label="loading" />}>
             <Routes>
               <Route path="/login" element={token ? <Navigate to="/" replace /> : <OnboardingScreen />} />
+              <Route path="/pair" element={<PairingScreen />} />
               <Route path="/" element={<Gate><MessagesScreen /></Gate>} />
               <Route path="/friends" element={<Gate><FriendsScreen /></Gate>} />
               <Route path="/spaces" element={<Gate><SpacesScreen /></Gate>} />
@@ -94,7 +96,8 @@ export default function App() {
               <Route path="/nest/:spaceId/emoji" element={<Gate><NestEmojiScreen /></Gate>} />
               <Route path="/profile/:id" element={<Gate><ProfileScreen /></Gate>} />
               <Route path="/settings/editprofile" element={<Gate><EditProfileScreen /></Gate>} />
-              <Route path="/settings/devices" element={<Gate><DevicesScreen /></Gate>} />
+              <Route path="/settings/devices" element={<Gate><TrustCenterScreen /></Gate>} />
+              <Route path="/settings/trust" element={<Gate><TrustCenterScreen /></Gate>} />
               <Route path="/settings/history" element={<Gate><HistoryScreen /></Gate>} />
               <Route path="/settings/security" element={<Gate><SecurityScreen /></Gate>} />
               <Route path="/settings/key-transparency" element={<Gate><KeyTransparencyScreen /></Gate>} />

@@ -1,5 +1,5 @@
 const allowedRoute =
-  /^\/(?:call|chat|forum|friends|nest|notifications|profile|search|settings|spaces|thread|threads|you)(?:\/|$)/;
+  /^\/(?:call|chat|forum|friends|nest|notifications|pair|profile|search|settings|spaces|thread|threads|you)(?:\/|$)/;
 
 export function isDesktopApp(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;

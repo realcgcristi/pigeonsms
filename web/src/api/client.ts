@@ -6,6 +6,7 @@ import {
   requestVoid,
   seg,
 } from '@/api/http';
+import type { AuthenticationResponseJSON, RegistrationResponseJSON } from '@simplewebauthn/browser';
 import type {
   ApiUser,
   AttachmentDto,
@@ -59,6 +60,13 @@ import type {
   NotificationsResponse,
   OkResponse,
   OpenDmResponse,
+  PairingInviteResponse,
+  PairingResponse,
+  PairingsResponse,
+  PasskeyAuthenticationOptionsResponse,
+  PasskeyRegistrationOptionsResponse,
+  PasskeyResponse,
+  PasskeysResponse,
   PermissionsResponse,
   PollVoteResponse,
   ProfileResponse,
@@ -87,6 +95,7 @@ import type {
   ThreadResponse,
   ThreadsResponse,
   TotpSetupResponse,
+  TrustCenterResponse,
   UploadCompleteResponse,
   UploadResponse,
   UploadSessionResponse,
@@ -95,7 +104,7 @@ import type {
 
 export { ApiError, onUnauthorized, setTokenProvider } from '@/api/http';
 
-function deviceName(): string {
+export function deviceName(): string {
   const ua = navigator.userAgent;
   if (/android/i.test(ua)) return 'web (android)';
   if (/iphone|ipad/i.test(ua)) return 'web (ios)';
@@ -103,6 +112,10 @@ function deviceName(): string {
   if (/windows/i.test(ua)) return 'web (windows)';
   if (/linux/i.test(ua)) return 'web (linux)';
   return 'web';
+}
+
+function clientPlatform(): 'web' | 'desktop' {
+  return '__TAURI_INTERNALS__' in window ? 'desktop' : 'web';
 }
 
 export function nonce(): string {
@@ -135,6 +148,106 @@ class PigeonApi {
       json: totp
         ? { login, password, device_name: deviceName(), totp }
         : { login, password, device_name: deviceName() },
+    });
+  }
+
+  passkeyRegistrationOptions() {
+    return request<PasskeyRegistrationOptionsResponse>('/auth/passkeys/register/options', {
+      method: 'POST',
+      json: { platform: clientPlatform() },
+    });
+  }
+
+  verifyPasskeyRegistration(
+    challengeId: string,
+    response: RegistrationResponseJSON,
+    name: string,
+  ) {
+    return request<PasskeyResponse>('/auth/passkeys/register/verify', {
+      method: 'POST',
+      json: { challenge_id: challengeId, response, name },
+    }).then((result) => result.passkey);
+  }
+
+  passkeyAuthenticationOptions(login?: string) {
+    return request<PasskeyAuthenticationOptionsResponse>('/auth/passkeys/authenticate/options', {
+      method: 'POST',
+      auth: false,
+      json: { login: login?.trim() || undefined, platform: clientPlatform() },
+    });
+  }
+
+  verifyPasskeyAuthentication(challengeId: string, response: AuthenticationResponseJSON) {
+    return request<AuthResponse>('/auth/passkeys/authenticate/verify', {
+      method: 'POST',
+      auth: false,
+      json: { challenge_id: challengeId, response, device_name: deviceName() },
+    });
+  }
+
+  passkeys() {
+    return request<PasskeysResponse>('/auth/passkeys').then((result) => result.passkeys);
+  }
+
+  renamePasskey(id: string, name: string) {
+    return requestVoid(`/auth/passkeys/${seg(id)}`, { method: 'PATCH', json: { name } });
+  }
+
+  revokePasskey(id: string) {
+    return requestVoid(`/auth/passkeys/${seg(id)}`, { method: 'DELETE' });
+  }
+
+  trustCenter() {
+    return request<TrustCenterResponse>('/auth/trust');
+  }
+
+  createPairing() {
+    return request<PairingInviteResponse>('/auth/pairings', { method: 'POST' }).then(
+      (result) => result.pairing,
+    );
+  }
+
+  pairings() {
+    return request<PairingsResponse>('/auth/pairings').then((result) => result.pairings);
+  }
+
+  pairing(id: string) {
+    return request<PairingResponse>(`/auth/pairings/${seg(id)}`).then((result) => result.pairing);
+  }
+
+  requestPairing(id: string, secret: string, claimSecret: string) {
+    return request<PairingResponse>(`/auth/pairings/${seg(id)}/request`, {
+      method: 'POST',
+      auth: false,
+      json: { secret, claim_secret: claimSecret, device_name: deviceName() },
+    }).then((result) => result.pairing);
+  }
+
+  pairingStatus(id: string, secret: string, claimSecret: string) {
+    return request<PairingResponse>(`/auth/pairings/${seg(id)}/status`, {
+      method: 'POST',
+      auth: false,
+      json: { secret, claim_secret: claimSecret },
+    }).then((result) => result.pairing);
+  }
+
+  approvePairing(id: string) {
+    return requestVoid(`/auth/pairings/${seg(id)}/approve`, { method: 'POST' });
+  }
+
+  denyPairing(id: string) {
+    return requestVoid(`/auth/pairings/${seg(id)}/deny`, { method: 'POST' });
+  }
+
+  cancelPairing(id: string) {
+    return requestVoid(`/auth/pairings/${seg(id)}`, { method: 'DELETE' });
+  }
+
+  claimPairing(id: string, secret: string, claimSecret: string) {
+    return request<AuthResponse>(`/auth/pairings/${seg(id)}/claim`, {
+      method: 'POST',
+      auth: false,
+      json: { secret, claim_secret: claimSecret },
     });
   }
 
@@ -991,6 +1104,10 @@ class PigeonApi {
       method: 'POST',
       json: name ? { pub_key, name } : { pub_key },
     });
+  }
+
+  revokeDevice(id: string) {
+    return requestVoid(`/auth/devices/${seg(id)}`, { method: 'DELETE' });
   }
 
   getKeyBackup() {

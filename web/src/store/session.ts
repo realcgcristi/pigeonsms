@@ -8,7 +8,7 @@ import {
   storeDesktopSessionToken,
 } from '@/desktop/runtime';
 import { shareTokenWithWorker } from '@/lib/push';
-import type { ApiUser } from '@/api/dto';
+import type { ApiUser, AuthResponse } from '@/api/dto';
 
 const KEY = 'pigeon.session';
 const TOKEN_KEY = 'pigeon.session.token';
@@ -84,7 +84,9 @@ export interface SessionState {
   totpRequired: boolean;
   restored: boolean;
   restore: () => Promise<void>;
+  completeAuth: (auth: AuthResponse) => Promise<void>;
   login: (login: string, password: string, totp?: string) => Promise<boolean>;
+  passkeyLogin: (login?: string) => Promise<boolean>;
   signup: (invite: string, username: string, email: string, password: string) => Promise<boolean>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
@@ -137,14 +139,18 @@ export const useSession = create<SessionState>((set, get) => ({
     }
   },
 
+  completeAuth: async (auth) => {
+    const token = runtimeToken(auth.token);
+    await write({ token, user: auth.user });
+    set({ token, user: auth.user, loading: false, error: null, totpRequired: false });
+    gateway.start();
+  },
+
   login: async (login, password, totp) => {
     set({ loading: true, error: null });
     try {
       const auth = await api.login(login, password, totp);
-      const token = runtimeToken(auth.token);
-      await write({ token, user: auth.user });
-      set({ token, user: auth.user, loading: false, totpRequired: false });
-      gateway.start();
+      await get().completeAuth(auth);
       return true;
     } catch (err) {
       const code = (err as { code?: string })?.code;
@@ -154,14 +160,24 @@ export const useSession = create<SessionState>((set, get) => ({
     }
   },
 
+  passkeyLogin: async (login) => {
+    set({ loading: true, error: null, totpRequired: false });
+    try {
+      const { authenticateWithPasskey } = await import('@/lib/passkeys');
+      const auth = await authenticateWithPasskey(login);
+      await get().completeAuth(auth);
+      return true;
+    } catch (err) {
+      set({ loading: false, error: err instanceof Error ? err.message : 'passkey sign-in failed' });
+      return false;
+    }
+  },
+
   signup: async (invite, username, email, password) => {
     set({ loading: true, error: null });
     try {
       const auth = await api.signup(invite, username, email, password);
-      const token = runtimeToken(auth.token);
-      await write({ token, user: auth.user });
-      set({ token, user: auth.user, loading: false });
-      gateway.start();
+      await get().completeAuth(auth);
       return true;
     } catch (err) {
       set({ loading: false, error: err instanceof Error ? err.message : 'signup failed' });

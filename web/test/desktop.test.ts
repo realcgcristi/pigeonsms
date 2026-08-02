@@ -14,6 +14,12 @@ describe('desktop deep links', () => {
     expect(desktopRouteFromUrl('pigeonsms://open')).toBe('/');
   });
 
+  it('opens one-time pairing links', () => {
+    expect(desktopRouteFromUrl('pigeonsms://pair?pairing_id=123&secret=one')).toBe(
+      '/pair?pairing_id=123&secret=one',
+    );
+  });
+
   it('rejects unknown routes and foreign schemes', () => {
     expect(desktopRouteFromUrl('pigeonsms://admin/users')).toBeNull();
     expect(desktopRouteFromUrl('https://pigeonsms.aldi.best/chat/123')).toBeNull();

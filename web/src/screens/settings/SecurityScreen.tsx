@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import QRCode from 'qrcode'
 import { api } from '@/api/client'
-import { Download, Key, Shield, Warning } from '@/components/icons'
+import { Download, Key, Shield, Verified, Warning } from '@/components/icons'
 import { Button } from '@/components/ui/Button'
 import { Dialog } from '@/components/ui/Overlay'
 import { TextField } from '@/components/ui/TextField'
@@ -144,6 +144,12 @@ export default function SecurityScreen() {
         </SettingsGroup>
 
         <SettingsGroup label="device identity">
+          <SettingsRow
+            icon={<Verified size={18} />}
+            title="trust center"
+            value="sessions, passkeys, encrypted devices and pairing"
+            onClick={() => navigate('/settings/trust')}
+          />
           <SettingsRow
             icon={<Key size={18} />}
             title="key transparency"

@@ -4,7 +4,6 @@ import {
   Block,
   Bolt,
   DarkMode,
-  Devices,
   Edit,
   Groups,
   History,
@@ -13,6 +12,7 @@ import {
   Notifications,
   Palette,
   Shield,
+  Verified,
   Wifi,
 } from '@/components/icons'
 import { Avatar } from '@/components/ui/Avatar'
@@ -42,9 +42,9 @@ export default function SettingsScreen() {
 
         <SettingsGroup label="account">
           <SettingsRow icon={<Edit size={18} />} title="edit profile" onClick={() => navigate('/settings/editprofile')} />
-          <SettingsRow icon={<Devices size={18} />} title="active sessions" onClick={() => navigate('/settings/devices')} />
+          <SettingsRow icon={<Verified size={18} />} title="trust center" value="sessions, passkeys, encryption keys and pairing" onClick={() => navigate('/settings/trust')} />
           <SettingsRow icon={<History size={18} />} title="login history" onClick={() => navigate('/settings/history')} />
-          <SettingsRow icon={<Shield size={18} />} title="two-factor auth" value="extra account security" onClick={() => navigate('/settings/security')} />
+          <SettingsRow icon={<Shield size={18} />} title="password & two-factor" value="sign-in and recovery settings" onClick={() => navigate('/settings/security')} />
         </SettingsGroup>
 
         <SettingsGroup label="preferences">

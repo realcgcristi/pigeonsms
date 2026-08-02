@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '@/api/client'
-import { ArrowBack, Devices, Groups, Lock } from '@/components/icons'
+import { ArrowBack, Devices, Fingerprint, Groups, Lock, QrCode } from '@/components/icons'
 import { Logo } from '@/components/Logo'
 import { Button } from '@/components/ui/Button'
 import { IconButton } from '@/components/ui/IconButton'
 import { TextField } from '@/components/ui/TextField'
+import { passkeysSupported } from '@/lib/passkeys'
 import { useSession } from '@/store/session'
 import './Onboarding.css'
 
@@ -15,6 +16,7 @@ export default function OnboardingScreen() {
   const navigate = useNavigate()
   const login = useSession((s) => s.login)
   const signup = useSession((s) => s.signup)
+  const passkeyLogin = useSession((s) => s.passkeyLogin)
   const loading = useSession((s) => s.loading)
   const sessionError = useSession((s) => s.error)
   const totpRequired = useSession((s) => s.totpRequired)
@@ -58,6 +60,11 @@ export default function OnboardingScreen() {
     if (ok) navigate('/', { replace: true })
   }
 
+  const submitPasskey = async () => {
+    const ok = await passkeyLogin(loginField.trim() || undefined)
+    if (ok) navigate('/', { replace: true })
+  }
+
   const message = error || sessionError
 
   return (
@@ -83,6 +90,9 @@ export default function OnboardingScreen() {
                 </Button>
                 <Button variant="text" fullWidth onClick={() => setStep('login')}>
                   i already have an account
+                </Button>
+                <Button variant="text" fullWidth leading={<QrCode size={19} />} onClick={() => navigate('/pair')}>
+                  pair this device
                 </Button>
               </div>
             </div>
@@ -152,6 +162,25 @@ export default function OnboardingScreen() {
               {message ? <div className="onboarding__error">{message}</div> : null}
               <Button type="submit" size="cta" fullWidth loading={loading}>
                 sign in
+              </Button>
+              {passkeysSupported() ? (
+                <>
+                  <div className="onboarding__divider"><span>or</span></div>
+                  <Button
+                    type="button"
+                    variant="tonal"
+                    size="cta"
+                    fullWidth
+                    leading={<Fingerprint />}
+                    disabled={loading}
+                    onClick={() => void submitPasskey()}
+                  >
+                    sign in with a passkey
+                  </Button>
+                </>
+              ) : null}
+              <Button type="button" variant="text" fullWidth leading={<QrCode size={19} />} onClick={() => navigate('/pair')}>
+                pair from another device
               </Button>
             </form>
           ) : null}

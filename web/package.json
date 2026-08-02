@@ -12,13 +12,14 @@
     "deploy": "npm run build && wrangler pages deploy dist --project-name pigeonsms-web --commit-dirty=true"
   },
   "dependencies": {
+    "@simplewebauthn/browser": "^13.3.0",
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-deep-link": "^2.4.9",
     "@tauri-apps/plugin-opener": "^2.5.4",
     "qrcode": "^1.5.4",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "react-router-dom": "^7.9.1",
+    "react-router-dom": "7.18.2",
     "zustand": "^5.0.8"
   },
   "devDependencies": {

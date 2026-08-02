@@ -1,3 +1,8 @@
+import type {
+  PublicKeyCredentialCreationOptionsJSON,
+  PublicKeyCredentialRequestOptionsJSON,
+} from '@simplewebauthn/browser';
+
 export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 export type JsonObject = { [key: string]: JsonValue };
 
@@ -34,6 +39,81 @@ export interface AuthResponse {
   user: ApiUser;
 }
 
+export interface PasskeyDto {
+  id: string;
+  name: string;
+  rp_id: string;
+  transports: string[];
+  device_type: string;
+  backed_up: boolean;
+  created_at: number;
+  last_used: number | null;
+}
+
+export interface PasskeyRegistrationOptionsResponse {
+  challenge_id: string;
+  options: PublicKeyCredentialCreationOptionsJSON;
+}
+
+export interface PasskeyAuthenticationOptionsResponse {
+  challenge_id: string;
+  options: PublicKeyCredentialRequestOptionsJSON;
+}
+
+export interface PasskeyResponse {
+  passkey: PasskeyDto;
+}
+
+export interface PasskeysResponse {
+  passkeys: PasskeyDto[];
+}
+
+export type PairingStatus =
+  | 'created'
+  | 'requested'
+  | 'approved'
+  | 'claimed'
+  | 'denied'
+  | 'cancelled'
+  | 'expired';
+
+export interface PairingDto {
+  id: string;
+  status: PairingStatus;
+  requested_device_name: string | null;
+  requested_user_agent: string | null;
+  verification_code: string | null;
+  created_at: number;
+  expires_at: number;
+  requested_at: number | null;
+  approved_at: number | null;
+  claimed_at: number | null;
+  denied_at: number | null;
+  cancelled_at: number | null;
+}
+
+export interface PairingInviteDto {
+  id: string;
+  secret: string;
+  uri: string;
+  deep_link?: string;
+  status: 'created';
+  created_at: number;
+  expires_at: number;
+}
+
+export interface PairingResponse {
+  pairing: PairingDto;
+}
+
+export interface PairingInviteResponse {
+  pairing: PairingInviteDto;
+}
+
+export interface PairingsResponse {
+  pairings: PairingDto[];
+}
+
 export interface MeResponse {
   user: ApiUser;
 }
@@ -61,6 +141,7 @@ export interface SessionDto {
   ip?: string | null;
   created_at?: number;
   last_seen?: number;
+  expires_at?: number;
   current?: boolean;
 }
 
@@ -78,6 +159,32 @@ export interface HistoryEntry {
 
 export interface HistoryResponse {
   history: HistoryEntry[];
+}
+
+export interface TrustWarningDto {
+  code: string;
+  severity: 'info' | 'warning' | 'critical';
+  message: string;
+}
+
+export interface TrustDeviceDto {
+  id: string;
+  name?: string | null;
+  created_at?: number;
+  last_seen?: number | null;
+}
+
+export interface TrustCenterResponse {
+  risk: 'good' | 'warning' | 'critical';
+  warnings: TrustWarningDto[];
+  totp_enabled: boolean;
+  key_backup: { ready: boolean; updated_at: number | null };
+  transparency: { checkpoint: TransparencyCheckpointDto; conflicts: number };
+  sessions: SessionDto[];
+  devices: TrustDeviceDto[];
+  passkeys: PasskeyDto[];
+  pairings: PairingDto[];
+  failed_logins: HistoryEntry[];
 }
 
 export interface TotpSetupResponse {
