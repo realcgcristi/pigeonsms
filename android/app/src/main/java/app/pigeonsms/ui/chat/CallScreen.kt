@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import app.pigeonsms.PigeonApp
 import app.pigeonsms.design.theme.Spacing
 import app.pigeonsms.ui.call.CallAudioController
 import app.pigeonsms.ui.call.CallControlBar
@@ -75,12 +76,14 @@ private class RemoteTile(val peerId: String, val track: VideoTrack)
  */
 @Composable
 fun CallScreenDialog(
+    channelId: String,
     websocketUrl: String,
     video: Boolean,
     title: String,
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
+    val api = remember(context) { (context.applicationContext as PigeonApp).container.api }
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
 
     // Shared EGL context for all renderers + the encoder/decoder factories.
@@ -115,6 +118,8 @@ fun CallScreenDialog(
     val client = remember {
         WebRtcCallClient(
             appContext = context.applicationContext,
+            api = api,
+            channelId = channelId,
             websocketUrl = websocketUrl,
             video = video,
             eglBase = eglBase,

@@ -190,7 +190,7 @@ fun DevicesScreen(onBack: () -> Unit) {
                         Column(Modifier.weight(1f)) {
                             Text(passkey.name.lowercase(), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface)
                             Text(
-                                if (passkey.last_used != null) "used ${rel(passkey.last_used)}" else "created ${rel(passkey.created_at)}",
+                                passkey.last_used?.let { "used ${rel(it)}" } ?: "created ${rel(passkey.created_at)}",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )

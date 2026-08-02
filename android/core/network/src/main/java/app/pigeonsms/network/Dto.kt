@@ -19,6 +19,21 @@ data class ApiUser(
 data class AuthResponse(val token: String, val user: ApiUser)
 
 @Serializable
+data class IceServerDto(
+    val urls: List<String> = emptyList(),
+    val username: String? = null,
+    val credential: String? = null,
+)
+
+@Serializable
+data class CallConfigResponse(
+    val ice_servers: List<IceServerDto> = emptyList(),
+    val turn: Boolean = false,
+    val expires_at: Long? = null,
+    val source: String = "stun",
+)
+
+@Serializable
 data class PasskeyOptionsResponse(
     val challenge_id: String,
     val options: JsonObject,

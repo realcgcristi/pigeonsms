@@ -1,11 +1,12 @@
 package app.pigeonsms.ui.call
 
 import android.content.Context
+import app.pigeonsms.network.PigeonApi
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
-import io.ktor.client.plugins.websocket.webSocket
 import io.ktor.client.plugins.websocket.WebSockets
+import io.ktor.client.plugins.websocket.webSocket
 import io.ktor.websocket.Frame
 import io.ktor.websocket.close
 import io.ktor.websocket.readText
@@ -15,11 +16,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import org.webrtc.AudioSource
 import org.webrtc.AudioTrack
@@ -31,66 +32,46 @@ import org.webrtc.EglBase
 import org.webrtc.IceCandidate
 import org.webrtc.MediaConstraints
 import org.webrtc.MediaStream
-import org.webrtc.MediaStreamTrack
 import org.webrtc.PeerConnection
 import org.webrtc.PeerConnectionFactory
 import org.webrtc.RtpReceiver
 import org.webrtc.SdpObserver
 import org.webrtc.SessionDescription
 import org.webrtc.SurfaceTextureHelper
-import org.webrtc.SurfaceViewRenderer
 import org.webrtc.VideoCapturer
 import org.webrtc.VideoSource
 import org.webrtc.VideoTrack
 import org.webrtc.audio.JavaAudioDeviceModule
 
-/**
- * Native WebRTC call engine (org.webrtc.*). Replaces the WebView getUserMedia
- * path, which fails with NotReadableError on some devices even though native mic
- * capture works fine (voice messages record). All media is captured with the
- * platform mic/camera; signaling reuses the EXACT CallRoom Durable Object
- * protocol that the old in-WebView JS spoke, byte-for-byte:
- *
- *   inbound : ready {participant,participants[]}, join {participant},
- *             leave {participant}, offer {from,data:{type,sdp}},
- *             answer {from,data}, ice {from,data:{candidate,sdpMid,sdpMLineIndex}}
- *   outbound: {type:'offer',target,data:<sdp>}, {type:'answer',target,data},
- *             {type:'ice',target,data:<candidate>}
- *
- * Offer initiator rule mirrors the JS: the peer with the lexicographically
- * smaller selfId creates the offer (`if (selfId < peerId) createOffer`).
- *
- * ICE: Google STUN only. No TURN is available, so cross-NAT (symmetric NAT)
- * calls may fail to connect; same-network / cone-NAT calls will.
- *
- * Threading: PeerConnectionFactory / PeerConnection / capturer calls happen off
- * the UI thread here (a background coroutine scope); the caller must init/attach
- * SurfaceViewRenderers and read [remoteVideoTracks] on the main thread. Callbacks
- * from org.webrtc arrive on WebRTC's signaling thread — we marshal everything
- * user-visible through [onEvent]/[onRemoteTrack]/[onRemoteRemoved], which the
- * Compose layer re-dispatches to main.
- */
 class WebRtcCallClient(
     private val appContext: Context,
+    private val api: PigeonApi,
+    private val channelId: String,
     private val websocketUrl: String,
     private val video: Boolean,
     val eglBase: EglBase,
-    /** Diagnostics/status line — mirrors the old JS `phase`/`status` output. */
     private val onEvent: (WebRtcEvent) -> Unit,
-    /** A remote video track appeared for [peerId]. Called on any thread. */
     private val onRemoteTrack: (peerId: String, track: VideoTrack) -> Unit,
-    /** A peer left / its connection died — drop its tile. Called on any thread. */
     private val onRemoteRemoved: (peerId: String) -> Unit,
 ) {
+    private data class PeerState(
+        val connection: PeerConnection,
+        val pendingIce: MutableList<IceCandidate> = mutableListOf(),
+        var remoteDescriptionSet: Boolean = false,
+        var makingOffer: Boolean = false,
+        var recoveryAttempt: Int = 0,
+        var recoveryJob: Job? = null,
+    )
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-
     private val http = HttpClient(OkHttp) { install(WebSockets) }
+    private val outbound = Channel<String>(256, BufferOverflow.DROP_OLDEST)
+    private val lock = Any()
+    private val peers = HashMap<String, PeerState>()
 
-    // Outbound signaling queue — decouples WebRTC callback threads from the ws.
-    private val outbound = Channel<String>(Channel.UNLIMITED)
     @Volatile private var session: DefaultClientWebSocketSession? = null
     @Volatile private var ended = false
-    @Volatile private var wsJob: Job? = null
+    @Volatile private var iceServers = fallbackIceServers()
 
     private lateinit var factory: PeerConnectionFactory
     private var audioSource: AudioSource? = null
@@ -100,44 +81,32 @@ class WebRtcCallClient(
     private var capturer: VideoCapturer? = null
     private var surfaceHelper: SurfaceTextureHelper? = null
     private var frontFacing = true
+    private var selfId = ""
+    private var signalingGeneration = 0
+    private var configJob: Job? = null
 
-    /** Local camera preview track (null for voice calls). Read on main thread. */
     @Volatile var localVideoTrack: VideoTrack? = null
         private set
 
-    private var selfId: String = ""
-    private val peers = HashMap<String, PeerConnection>()
-    private val lock = Any()
-
-    private val iceServers = listOf(
-        PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
-    )
-
-    // --- lifecycle -----------------------------------------------------------
-
-    /** Build the factory + acquire local media, then connect signaling. Blocks
-     *  briefly on the WebRTC init; safe to call from a coroutine. */
     fun start() {
         scope.launch {
             try {
                 initFactory()
                 acquireLocalMedia()
                 onEvent(WebRtcEvent.MediaReady)
+                val refreshDelay = refreshIceServers(false)
+                configJob = scope.launch { refreshIceServersLoop(refreshDelay) }
                 connectSignaling()
-            } catch (t: Throwable) {
-                onEvent(WebRtcEvent.Error("setup failed: ${t.message ?: t.javaClass.simpleName}"))
+            } catch (error: Throwable) {
+                onEvent(WebRtcEvent.Error("setup failed: ${error.message ?: error.javaClass.simpleName}"))
             }
         }
     }
 
     private fun initFactory() {
         PeerConnectionFactory.initialize(
-            PeerConnectionFactory.InitializationOptions.builder(appContext)
-                .createInitializationOptions(),
+            PeerConnectionFactory.InitializationOptions.builder(appContext).createInitializationOptions(),
         )
-        // Use the plain MIC source (same as the app's working voice-message recorder)
-        // instead of WebRTC's default VOICE_COMMUNICATION, and turn off hardware
-        // AEC/NS — on some devices those init paths fail and the mic never opens.
         val audioModule = JavaAudioDeviceModule.builder(appContext)
             .setAudioSource(android.media.MediaRecorder.AudioSource.MIC)
             .setUseHardwareAcousticEchoCanceler(false)
@@ -150,59 +119,93 @@ class WebRtcCallClient(
             .setVideoEncoderFactory(encoder)
             .setVideoDecoderFactory(decoder)
             .createPeerConnectionFactory()
-        onEvent(WebRtcEvent.Phase("webrtc factory ready"))
+        onEvent(WebRtcEvent.Phase("webrtc ready"))
     }
 
     private fun acquireLocalMedia() {
-        // Audio — always.
         audioSource = factory.createAudioSource(MediaConstraints())
         audioTrack = factory.createAudioTrack("pigeon-audio", audioSource).apply { setEnabled(true) }
-        onEvent(WebRtcEvent.Phase("mic ok"))
-
+        onEvent(WebRtcEvent.Phase("microphone ready"))
         if (!video) return
 
-        // Video — front camera by default.
         val enumerator = Camera2Enumerator(appContext)
-        val deviceName = pickCamera(enumerator, front = true)
-            ?: enumerator.deviceNames.firstOrNull()
+        val deviceName = pickCamera(enumerator, true) ?: enumerator.deviceNames.firstOrNull()
         if (deviceName == null) {
-            onEvent(WebRtcEvent.Phase("no camera found — audio only"))
+            onEvent(WebRtcEvent.Phase("audio only"))
             return
         }
         frontFacing = enumerator.isFrontFacing(deviceName)
-        val cap = enumerator.createCapturer(deviceName, null)
-        capturer = cap
+        val nextCapturer = enumerator.createCapturer(deviceName, null)
+        capturer = nextCapturer
         surfaceHelper = SurfaceTextureHelper.create("PigeonCapture", eglBase.eglBaseContext)
-        val src = factory.createVideoSource(cap.isScreencast)
-        videoSource = src
-        cap.initialize(surfaceHelper, appContext, src.capturerObserver)
-        cap.startCapture(1280, 720, 30)
-        val track = factory.createVideoTrack("pigeon-video", src).apply { setEnabled(true) }
+        val source = factory.createVideoSource(nextCapturer.isScreencast)
+        videoSource = source
+        nextCapturer.initialize(surfaceHelper, appContext, source.capturerObserver)
+        nextCapturer.startCapture(1280, 720, 30)
+        val track = factory.createVideoTrack("pigeon-video", source).apply { setEnabled(true) }
         videoTrack = track
         localVideoTrack = track
-        onEvent(WebRtcEvent.Phase("camera ok (${if (frontFacing) "front" else "back"})"))
+        onEvent(WebRtcEvent.Phase("camera ready"))
     }
 
     private fun pickCamera(enumerator: Camera2Enumerator, front: Boolean): String? =
         enumerator.deviceNames.firstOrNull { enumerator.isFrontFacing(it) == front }
 
-    // --- signaling -----------------------------------------------------------
+    private suspend fun refreshIceServersLoop(initialDelay: Long) {
+        var nextDelay = initialDelay
+        while (!ended && scope.isActive) {
+            delay(nextDelay)
+            if (ended) return
+            nextDelay = refreshIceServers(true)
+        }
+    }
+
+    private suspend fun refreshIceServers(restartPeers: Boolean): Long {
+        return runCatching {
+            val config = api.callConfig(channelId)
+            val next = config.ice_servers.flatMap { server ->
+                server.urls.mapNotNull { url ->
+                    runCatching {
+                        PeerConnection.IceServer.builder(url).apply {
+                            server.username?.let { setUsername(it) }
+                            server.credential?.let { setPassword(it) }
+                        }.createIceServer()
+                    }.getOrNull()
+                }
+            }.ifEmpty { fallbackIceServers() }
+            iceServers = next
+            onEvent(WebRtcEvent.Phase(if (config.turn) "relay ready" else "direct connection mode"))
+            if (restartPeers) {
+                val peerIds = synchronized(lock) {
+                    peers.forEach { (_, state) -> runCatching { state.connection.setConfiguration(rtcConfiguration()) } }
+                    peers.keys.toList()
+                }
+                peerIds.forEach { createOffer(it, true) }
+            }
+            config.expires_at?.let { maxOf(60_000L, it - System.currentTimeMillis() - 300_000L) } ?: 300_000L
+        }.getOrElse {
+            onEvent(WebRtcEvent.Phase("relay configuration unavailable"))
+            60_000L
+        }
+    }
 
     private suspend fun connectSignaling() {
-        var retries = 0
+        var attempt = 0
         while (!ended && scope.isActive) {
             try {
-                onEvent(WebRtcEvent.Phase("connecting ws…"))
+                onEvent(WebRtcEvent.Phase(if (attempt == 0) "connecting" else "restoring signaling"))
                 http.webSocket(websocketUrl) {
                     session = this
-                    retries = 0
+                    signalingGeneration += 1
+                    attempt = 0
                     onEvent(WebRtcEvent.Status(CallStatus.Connecting))
-                    onEvent(WebRtcEvent.Phase("ws open — waiting for peer"))
-                    // Pump outbound queue for the life of this session.
                     val sender = launch {
                         for (text in outbound) {
                             if (!isActive) break
-                            runCatching { send(text) }
+                            if (runCatching { send(text) }.isFailure) {
+                                outbound.trySend(text)
+                                break
+                            }
                         }
                     }
                     try {
@@ -214,155 +217,221 @@ class WebRtcCallClient(
                         session = null
                     }
                 }
-            } catch (t: Throwable) {
-                onEvent(WebRtcEvent.Phase("ws error: ${t.message ?: t.javaClass.simpleName}"))
+            } catch (error: Throwable) {
+                if (!ended) onEvent(WebRtcEvent.Phase("signaling interrupted"))
             }
             if (ended) break
-            // Signaling dropped — tear down peers, retry with backoff.
-            dropAllPeers()
-            if (retries < 5) {
-                retries++
-                onEvent(WebRtcEvent.Status(CallStatus.Reconnecting))
-                delay(minOf(1000L * retries, 4000L))
-            } else {
-                onEvent(WebRtcEvent.Status(CallStatus.Ended))
-                onEvent(WebRtcEvent.Error("signaling closed"))
-                break
-            }
+            onEvent(WebRtcEvent.Status(CallStatus.Reconnecting))
+            val wait = minOf(1_000L * (1L shl minOf(attempt, 5)), 30_000L)
+            attempt += 1
+            delay(wait)
         }
     }
 
-    /** Enqueue outbound signaling JSON; safe from any (WebRTC callback) thread. */
     private fun signal(json: String) {
         if (!ended) outbound.trySend(json)
     }
 
     private fun handleInbound(raw: String) {
-        val m = runCatching { JSONObject(raw) }.getOrNull() ?: return
-        when (m.optString("type")) {
+        val message = runCatching { JSONObject(raw) }.getOrNull() ?: return
+        when (message.optString("type")) {
             "ready" -> {
-                val self = m.optJSONObject("participant")
-                selfId = self?.optString("userId").orEmpty()
-                val others = m.optJSONArray("participants")
+                selfId = message.optJSONObject("participant")?.optString("userId").orEmpty()
+                val participants = message.optJSONArray("participants")
                 var count = 0
-                if (others != null) {
-                    for (i in 0 until others.length()) {
-                        val p = others.optJSONObject(i) ?: continue
-                        val pid = p.optString("userId")
-                        if (pid.isEmpty() || pid == selfId) continue
-                        count++
-                        // Smaller id creates the offer (mirrors old JS).
-                        if (selfId < pid) createPeer(pid, offer = true)
+                if (participants != null) {
+                    for (index in 0 until participants.length()) {
+                        val participant = participants.optJSONObject(index) ?: continue
+                        val peerId = participant.optString("userId")
+                        if (peerId.isEmpty() || peerId == selfId) continue
+                        count += 1
+                        createPeer(peerId)
+                        if (signalingGeneration > 1 || selfId < peerId) createOffer(peerId, signalingGeneration > 1)
                     }
                 }
-                onEvent(WebRtcEvent.Phase("ready — $count other participant(s)"))
+                onEvent(WebRtcEvent.Phase("ready with $count peer(s)"))
             }
             "join" -> {
-                val p = m.optJSONObject("participant") ?: return
-                val pid = p.optString("userId")
-                if (pid.isEmpty() || pid == selfId) return
-                onEvent(WebRtcEvent.Phase("peer joined: ${p.optString("username").ifBlank { pid.take(6) }}"))
-                if (selfId < pid) createPeer(pid, offer = true)
+                val participant = message.optJSONObject("participant") ?: return
+                val peerId = participant.optString("userId")
+                if (peerId.isEmpty() || peerId == selfId) return
+                createPeer(peerId)
+                if (selfId < peerId) createOffer(peerId, false)
             }
-            "leave" -> {
-                val p = m.optJSONObject("participant") ?: return
-                dropPeer(p.optString("userId"))
-            }
-            "offer" -> {
-                val from = m.optString("from")
-                val data = m.optJSONObject("data") ?: return
-                val pc = createPeer(from, offer = false) ?: return
-                val sdp = SessionDescription(SessionDescription.Type.OFFER, data.optString("sdp"))
-                pc.setRemoteDescription(object : SimpleSdpObserver() {
-                    override fun onSetSuccess() {
-                        pc.createAnswer(object : SimpleSdpObserver() {
-                            override fun onCreateSuccess(desc: SessionDescription) {
-                                pc.setLocalDescription(SimpleSdpObserver(), desc)
+            "leave" -> dropPeer(message.optJSONObject("participant")?.optString("userId").orEmpty())
+            "offer" -> acceptOffer(message)
+            "answer" -> acceptAnswer(message)
+            "ice" -> acceptIce(message)
+        }
+    }
+
+    private fun acceptOffer(message: JSONObject) {
+        val from = message.optString("from")
+        val data = message.optJSONObject("data") ?: return
+        var state = createPeer(from) ?: return
+        val collision = synchronized(lock) {
+            state.makingOffer || state.connection.signalingState() != PeerConnection.SignalingState.STABLE
+        }
+        if (collision && selfId < from) return
+        if (collision) {
+            dropPeer(from)
+            state = createPeer(from) ?: return
+        }
+        val target = state
+        val description = SessionDescription(SessionDescription.Type.OFFER, data.optString("sdp"))
+        target.connection.setRemoteDescription(object : SimpleSdpObserver() {
+            override fun onSetSuccess() {
+                markRemoteDescription(from, target)
+                target.connection.createAnswer(object : SimpleSdpObserver() {
+                    override fun onCreateSuccess(answer: SessionDescription) {
+                        target.connection.setLocalDescription(object : SimpleSdpObserver() {
+                            override fun onSetSuccess() {
                                 signal(
                                     JSONObject()
                                         .put("type", "answer")
                                         .put("target", from)
-                                        .put("data", sdpToJson(desc))
+                                        .put("data", sdpToJson(answer))
                                         .toString(),
                                 )
                             }
-                        }, MediaConstraints())
+                        }, answer)
                     }
-                }, sdp)
+                }, MediaConstraints())
             }
-            "answer" -> {
-                val from = m.optString("from")
-                val data = m.optJSONObject("data") ?: return
-                val pc = synchronized(lock) { peers[from] } ?: return
-                val sdp = SessionDescription(SessionDescription.Type.ANSWER, data.optString("sdp"))
-                pc.setRemoteDescription(SimpleSdpObserver(), sdp)
+            override fun onSetFailure(error: String?) {
+                scheduleRecovery(from, true)
             }
-            "ice" -> {
-                val from = m.optString("from")
-                val data = m.optJSONObject("data") ?: return
-                val pc = createPeer(from, offer = false) ?: return
-                val candidate = IceCandidate(
-                    data.optString("sdpMid"),
-                    data.optInt("sdpMLineIndex"),
-                    data.optString("candidate"),
-                )
-                pc.addIceCandidate(candidate)
+        }, description)
+    }
+
+    private fun acceptAnswer(message: JSONObject) {
+        val from = message.optString("from")
+        val data = message.optJSONObject("data") ?: return
+        val state = synchronized(lock) { peers[from] } ?: return
+        val description = SessionDescription(SessionDescription.Type.ANSWER, data.optString("sdp"))
+        state.connection.setRemoteDescription(object : SimpleSdpObserver() {
+            override fun onSetSuccess() {
+                markRemoteDescription(from, state)
             }
-            // mute / camera are informational for remote UI; we don't render
-            // remote mute state, so nothing to do (kept for protocol parity).
+            override fun onSetFailure(error: String?) {
+                scheduleRecovery(from, true)
+            }
+        }, description)
+    }
+
+    private fun acceptIce(message: JSONObject) {
+        val from = message.optString("from")
+        val data = message.optJSONObject("data") ?: return
+        val state = createPeer(from) ?: return
+        val candidate = IceCandidate(
+            data.optString("sdpMid"),
+            data.optInt("sdpMLineIndex"),
+            data.optString("candidate"),
+        )
+        val addNow = synchronized(lock) {
+            if (peers[from] !== state) return@synchronized false
+            if (!state.remoteDescriptionSet) {
+                if (state.pendingIce.size < 256) state.pendingIce += candidate
+                false
+            } else true
+        }
+        if (addNow) state.connection.addIceCandidate(candidate)
+    }
+
+    private fun markRemoteDescription(peerId: String, state: PeerState) {
+        val pending = synchronized(lock) {
+            if (peers[peerId] !== state) return
+            state.remoteDescriptionSet = true
+            state.pendingIce.toList().also { state.pendingIce.clear() }
+        }
+        pending.forEach(state.connection::addIceCandidate)
+    }
+
+    private fun rtcConfiguration() = PeerConnection.RTCConfiguration(iceServers).apply {
+        sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
+        continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
+    }
+
+    private fun createPeer(peerId: String): PeerState? {
+        if (peerId.isEmpty() || peerId == selfId || ended) return null
+        synchronized(lock) {
+            peers[peerId]?.let { return it }
+            val connection = factory.createPeerConnection(rtcConfiguration(), PeerObserver(peerId)) ?: return null
+            audioTrack?.let { connection.addTrack(it, listOf("pigeon-stream")) }
+            videoTrack?.let { connection.addTrack(it, listOf("pigeon-stream")) }
+            return PeerState(connection).also { peers[peerId] = it }
         }
     }
 
-    // --- peer connections ----------------------------------------------------
-
-    private fun createPeer(peerId: String, offer: Boolean): PeerConnection? {
-        if (peerId.isEmpty() || peerId == selfId) return null
-        synchronized(lock) {
-            peers[peerId]?.let { return it }
-            val config = PeerConnection.RTCConfiguration(iceServers).apply {
-                sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
-                continualGatheringPolicy =
-                    PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
-            }
-            val pc = factory.createPeerConnection(
-                config,
-                PeerObserver(peerId),
-            ) ?: return null
-            // Attach local tracks. UNIFIED_PLAN: addTrack per track.
-            audioTrack?.let { pc.addTrack(it, listOf("pigeon-stream")) }
-            videoTrack?.let { pc.addTrack(it, listOf("pigeon-stream")) }
-            peers[peerId] = pc
-            if (offer) {
-                pc.createOffer(object : SimpleSdpObserver() {
-                    override fun onCreateSuccess(desc: SessionDescription) {
-                        pc.setLocalDescription(SimpleSdpObserver(), desc)
+    private fun createOffer(peerId: String, iceRestart: Boolean) {
+        val state = synchronized(lock) {
+            val current = peers[peerId] ?: createPeer(peerId) ?: return
+            if (current.makingOffer || current.connection.signalingState() != PeerConnection.SignalingState.STABLE) return
+            current.makingOffer = true
+            current
+        }
+        val constraints = MediaConstraints().apply {
+            if (iceRestart) mandatory.add(MediaConstraints.KeyValuePair("IceRestart", "true"))
+        }
+        state.connection.createOffer(object : SimpleSdpObserver() {
+            override fun onCreateSuccess(description: SessionDescription) {
+                state.connection.setLocalDescription(object : SimpleSdpObserver() {
+                    override fun onSetSuccess() {
+                        synchronized(lock) { if (peers[peerId] === state) state.makingOffer = false }
                         signal(
                             JSONObject()
                                 .put("type", "offer")
                                 .put("target", peerId)
-                                .put("data", sdpToJson(desc))
+                                .put("data", sdpToJson(description))
                                 .toString(),
                         )
                     }
-                }, MediaConstraints())
+                    override fun onSetFailure(error: String?) {
+                        offerFailed(peerId, state)
+                    }
+                }, description)
             }
-            return pc
+            override fun onCreateFailure(error: String?) {
+                offerFailed(peerId, state)
+            }
+        }, constraints)
+    }
+
+    private fun offerFailed(peerId: String, state: PeerState) {
+        synchronized(lock) { if (peers[peerId] === state) state.makingOffer = false }
+        scheduleRecovery(peerId, false)
+    }
+
+    private fun scheduleRecovery(peerId: String, immediate: Boolean) {
+        synchronized(lock) {
+            val current = peers[peerId] ?: return
+            if (current.recoveryJob?.isActive == true) return
+            current.recoveryJob = scope.launch {
+                val wait = if (immediate) 0L else minOf(1_500L * (1L shl minOf(current.recoveryAttempt, 5)), 30_000L)
+                delay(wait)
+                synchronized(lock) {
+                    if (peers[peerId] !== current || ended) return@launch
+                    current.recoveryAttempt += 1
+                }
+                onEvent(WebRtcEvent.Status(CallStatus.Reconnecting))
+                createOffer(peerId, true)
+                delay(10_000L)
+                synchronized(lock) { if (peers[peerId] === current) current.recoveryJob = null }
+                scheduleRecovery(peerId, false)
+            }
         }
     }
 
     private fun dropPeer(peerId: String) {
         if (peerId.isEmpty()) return
-        val pc = synchronized(lock) { peers.remove(peerId) }
-        pc?.let { runCatching { it.dispose() } }
+        val state = synchronized(lock) { peers.remove(peerId) }
+        state?.recoveryJob?.cancel()
+        state?.connection?.let { runCatching { it.dispose() } }
         onRemoteRemoved(peerId)
     }
 
     private fun dropAllPeers() {
-        val all = synchronized(lock) {
-            val copy = peers.keys.toList()
-            copy
-        }
-        all.forEach { dropPeer(it) }
+        synchronized(lock) { peers.keys.toList() }.forEach(::dropPeer)
     }
 
     private inner class PeerObserver(private val peerId: String) : PeerConnection.Observer {
@@ -382,14 +451,14 @@ class WebRtcCallClient(
             )
         }
 
-        override fun onIceCandidatesRemoved(candidates: Array<out IceCandidate>?) {}
-        override fun onSignalingChange(state: PeerConnection.SignalingState?) {}
-        override fun onIceGatheringChange(state: PeerConnection.IceGatheringState?) {}
-        override fun onIceConnectionReceivingChange(receiving: Boolean) {}
-        override fun onRenegotiationNeeded() {}
-        override fun onAddStream(stream: MediaStream?) {}
-        override fun onRemoveStream(stream: MediaStream?) {}
-        override fun onDataChannel(channel: org.webrtc.DataChannel?) {}
+        override fun onIceCandidatesRemoved(candidates: Array<out IceCandidate>?) = Unit
+        override fun onSignalingChange(state: PeerConnection.SignalingState?) = Unit
+        override fun onIceGatheringChange(state: PeerConnection.IceGatheringState?) = Unit
+        override fun onIceConnectionReceivingChange(receiving: Boolean) = Unit
+        override fun onRenegotiationNeeded() = Unit
+        override fun onAddStream(stream: MediaStream?) = Unit
+        override fun onRemoveStream(stream: MediaStream?) = Unit
+        override fun onDataChannel(channel: org.webrtc.DataChannel?) = Unit
 
         override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {
             onEvent(WebRtcEvent.Phase("ice ${peerId.take(6)}: $state"))
@@ -398,36 +467,33 @@ class WebRtcCallClient(
         override fun onConnectionChange(newState: PeerConnection.PeerConnectionState) {
             onEvent(WebRtcEvent.Phase("peer ${peerId.take(6)}: $newState"))
             when (newState) {
-                PeerConnection.PeerConnectionState.CONNECTED ->
+                PeerConnection.PeerConnectionState.CONNECTED -> {
+                    synchronized(lock) {
+                        peers[peerId]?.let {
+                            it.recoveryJob?.cancel()
+                            it.recoveryJob = null
+                            it.recoveryAttempt = 0
+                        }
+                    }
                     onEvent(WebRtcEvent.Status(CallStatus.Connected))
-                PeerConnection.PeerConnectionState.FAILED,
-                PeerConnection.PeerConnectionState.CLOSED,
-                PeerConnection.PeerConnectionState.DISCONNECTED ->
-                    dropPeer(peerId)
-                else -> {}
+                }
+                PeerConnection.PeerConnectionState.DISCONNECTED -> scheduleRecovery(peerId, false)
+                PeerConnection.PeerConnectionState.FAILED -> scheduleRecovery(peerId, true)
+                PeerConnection.PeerConnectionState.CLOSED -> scope.launch { dropPeer(peerId) }
+                else -> Unit
             }
         }
 
-        // Unified-plan track callback. Audio auto-plays via the audio device
-        // module; video tracks are handed to the Compose layer for a renderer.
         override fun onTrack(transceiver: org.webrtc.RtpTransceiver?) {
-            val track = transceiver?.receiver?.track() ?: return
-            if (track is VideoTrack) {
-                onEvent(WebRtcEvent.Phase("remote video from ${peerId.take(6)}"))
-                onRemoteTrack(peerId, track)
-            }
+            val track = transceiver?.receiver?.track()
+            if (track is VideoTrack) onRemoteTrack(peerId, track)
         }
 
         override fun onAddTrack(receiver: RtpReceiver?, streams: Array<out MediaStream>?) {
             val track = receiver?.track()
-            if (track is VideoTrack) {
-                onEvent(WebRtcEvent.Phase("remote video (addTrack) ${peerId.take(6)}"))
-                onRemoteTrack(peerId, track)
-            }
+            if (track is VideoTrack) onRemoteTrack(peerId, track)
         }
     }
-
-    // --- controls (called from UI) ------------------------------------------
 
     fun setMuted(muted: Boolean) {
         audioTrack?.setEnabled(!muted)
@@ -440,32 +506,26 @@ class WebRtcCallClient(
     }
 
     fun switchCamera() {
-        val cap = capturer as? CameraVideoCapturer ?: return
-        cap.switchCamera(object : CameraVideoCapturer.CameraSwitchHandler {
+        val camera = capturer as? CameraVideoCapturer ?: return
+        camera.switchCamera(object : CameraVideoCapturer.CameraSwitchHandler {
             override fun onCameraSwitchDone(isFront: Boolean) {
                 frontFacing = isFront
             }
             override fun onCameraSwitchError(error: String?) {
-                onEvent(WebRtcEvent.Phase("camera switch error: $error"))
+                onEvent(WebRtcEvent.Phase("camera switch failed"))
             }
         })
     }
 
-    /** True while the local front camera is active — the preview should mirror. */
     val isFrontCamera: Boolean get() = frontFacing
 
-    // --- teardown ------------------------------------------------------------
-
-    /** Fully release everything. Idempotent. Renderers are released by the UI. */
     fun release() {
         if (ended) return
         ended = true
-        scope.launch {
-            runCatching { session?.close() }
-            session = null
-        }
+        configJob?.cancel()
+        val activeSession = session
+        session = null
         outbound.close()
-        // Stop capture first so no frames flow into a disposed source.
         runCatching { capturer?.stopCapture() }
         runCatching { capturer?.dispose() }
         runCatching { surfaceHelper?.dispose() }
@@ -476,30 +536,32 @@ class WebRtcCallClient(
         runCatching { audioSource?.dispose() }
         localVideoTrack = null
         runCatching { if (::factory.isInitialized) factory.dispose() }
-        runCatching { http.close() }
-        scope.cancel()
+        scope.launch {
+            runCatching { activeSession?.close() }
+            runCatching { http.close() }
+            scope.cancel()
+        }
     }
 
-    private fun sdpToJson(desc: SessionDescription): JSONObject =
-        JSONObject().put("type", desc.type.canonicalForm()).put("sdp", desc.description)
+    private fun sdpToJson(description: SessionDescription): JSONObject =
+        JSONObject().put("type", description.type.canonicalForm()).put("sdp", description.description)
+
+    private fun fallbackIceServers() = listOf(
+        PeerConnection.IceServer.builder("stun:stun.cloudflare.com:3478").createIceServer(),
+        PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
+    )
 }
 
-/** Minimal SdpObserver so callers only override what they need. */
 private open class SimpleSdpObserver : SdpObserver {
-    override fun onCreateSuccess(desc: SessionDescription) {}
-    override fun onSetSuccess() {}
-    override fun onCreateFailure(error: String?) {}
-    override fun onSetFailure(error: String?) {}
+    override fun onCreateSuccess(desc: SessionDescription) = Unit
+    override fun onSetSuccess() = Unit
+    override fun onCreateFailure(error: String?) = Unit
+    override fun onSetFailure(error: String?) = Unit
 }
 
-/** Events the engine emits to the Compose layer (which re-dispatches to main). */
 sealed interface WebRtcEvent {
-    /** Verbose diagnostics line — mirrors the old JS `phase`. */
     data class Phase(val text: String) : WebRtcEvent
-    /** Connection lifecycle change. */
     data class Status(val status: CallStatus) : WebRtcEvent
-    /** Fatal-ish error line for the on-screen log. */
     data class Error(val message: String) : WebRtcEvent
-    /** Local mic (and camera, if video) captured — safe to start audio routing. */
     data object MediaReady : WebRtcEvent
 }

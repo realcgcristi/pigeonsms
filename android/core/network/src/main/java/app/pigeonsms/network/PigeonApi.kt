@@ -63,6 +63,9 @@ class PigeonApi(
     // --- auth ---
     suspend fun checkInvite(code: String) = client.get("$baseUrl/auth/invite/$code").unwrap<InviteCheckResponse>().valid
 
+    suspend fun callConfig(channelId: String) =
+        client.get("$baseUrl/calls/$channelId/config") { auth() }.unwrap<CallConfigResponse>()
+
     suspend fun signup(invite: String, username: String, email: String, password: String, deviceName: String) =
         client.post("$baseUrl/auth/signup") {
             contentType(ContentType.Application.Json)

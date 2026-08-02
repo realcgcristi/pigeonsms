@@ -840,6 +840,7 @@ fun ChatScreen(
         val token = sessionToken
         if (token != null) {
             CallScreenDialog(
+                channelId = channelId,
                 websocketUrl = "wss://api.pigeonsms.aldi.best/calls/${Uri.encode(channelId)}/ws?mode=${if (video) "video" else "voice"}&token=${Uri.encode(token)}",
                 video = video,
                 title = title,
