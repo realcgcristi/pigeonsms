@@ -19,6 +19,7 @@ import { Avatar } from '@/components/ui/Avatar'
 import { ChevronRight } from '@/components/icons'
 import { Screen, ScreenBody, SettingsGroup, SettingsRow, TopBar } from '@/components/ui/Layout'
 import { useSession } from '@/store/session'
+import { isDesktopApp } from '@/desktop/runtime'
 import './Settings.css'
 
 export default function SettingsScreen() {
@@ -56,6 +57,9 @@ export default function SettingsScreen() {
         </SettingsGroup>
 
         <SettingsGroup label="app">
+          {isDesktopApp() ? (
+            <SettingsRow icon={<Bolt size={18} />} title="windows app" value="startup, tray and native notifications" onClick={() => navigate('/settings/desktop')} />
+          ) : null}
           <SettingsRow icon={<Wifi size={18} />} title="networkless mode" value="encrypted nearby messaging over LAN" onClick={() => navigate('/settings/networkless')} />
           <SettingsRow icon={<Bolt size={18} />} title="bots" value="build bots and slash commands" onClick={() => navigate('/settings/bots')} />
           <SettingsRow icon={<DarkMode size={18} />} title="app style" value="choose the complete interface skin" onClick={() => navigate('/settings/appicon')} />

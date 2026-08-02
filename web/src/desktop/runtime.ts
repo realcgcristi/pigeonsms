@@ -18,6 +18,12 @@ export interface DesktopUpdateProgress {
 }
 
 let pendingDesktopUpdate: import('@tauri-apps/plugin-updater').Update | null = null;
+const desktopNotificationPreference = 'pigeon.desktop.notifications';
+
+interface DesktopMessageDetail {
+  title?: string;
+  body?: string;
+}
 
 export async function checkDesktopUpdate(): Promise<DesktopUpdateInfo | null> {
   if (!isDesktopApp()) return null;
@@ -103,17 +109,82 @@ export async function clearDesktopSessionToken(): Promise<void> {
   await invoke('clear_session_token');
 }
 
+export async function desktopNotificationsEnabled(): Promise<boolean> {
+  if (!isDesktopApp() || localStorage.getItem(desktopNotificationPreference) === 'off') return false;
+  const { isPermissionGranted } = await import('@tauri-apps/plugin-notification');
+  return isPermissionGranted();
+}
+
+export async function setDesktopNotificationsEnabled(enabled: boolean): Promise<boolean> {
+  if (!isDesktopApp()) return false;
+  if (!enabled) {
+    localStorage.setItem(desktopNotificationPreference, 'off');
+    return false;
+  }
+
+  const { isPermissionGranted, requestPermission } = await import('@tauri-apps/plugin-notification');
+  const granted = (await isPermissionGranted()) || (await requestPermission()) === 'granted';
+  localStorage.setItem(desktopNotificationPreference, granted ? 'on' : 'off');
+  return granted;
+}
+
+export async function desktopAutostartEnabled(): Promise<boolean> {
+  if (!isDesktopApp()) return false;
+  const { isEnabled } = await import('@tauri-apps/plugin-autostart');
+  return isEnabled();
+}
+
+export async function setDesktopAutostart(enabled: boolean): Promise<void> {
+  if (!isDesktopApp()) return;
+  const { disable, enable } = await import('@tauri-apps/plugin-autostart');
+  await (enabled ? enable() : disable());
+}
+
+export async function syncDesktopUnread(count: number): Promise<void> {
+  if (!isDesktopApp()) return;
+  const { invoke } = await import('@tauri-apps/api/core');
+  await invoke('set_unread_count', { count: Math.max(0, Math.min(Math.trunc(count), 9999)) });
+}
+
 export async function initializeDesktopRuntime(): Promise<void> {
   if (!isDesktopApp()) return;
 
-  const [{ getCurrent, onOpenUrl }, { openUrl }] = await Promise.all([
+  const [{ getCurrent, onOpenUrl }, { openUrl }, { getCurrentWindow, UserAttentionType }, shortcut, { invoke }] = await Promise.all([
     import('@tauri-apps/plugin-deep-link'),
     import('@tauri-apps/plugin-opener'),
+    import('@tauri-apps/api/window'),
+    import('@tauri-apps/plugin-global-shortcut'),
+    import('@tauri-apps/api/core'),
   ]);
+  const appWindow = getCurrentWindow();
 
   const initialUrls = await getCurrent();
   initialUrls?.forEach(openDeepLink);
   await onOpenUrl((urls) => urls.forEach(openDeepLink));
+
+  try {
+    if (!(await shortcut.isRegistered('CommandOrControl+Shift+P'))) {
+      await shortcut.register('CommandOrControl+Shift+P', (event) => {
+        if (event.state === 'Pressed') void invoke('toggle_main_window');
+      });
+    }
+  } catch {
+    undefined;
+  }
+
+  window.addEventListener('pigeon:desktop-message', (event) => {
+    const detail = (event as CustomEvent<DesktopMessageDetail>).detail;
+    void Promise.all([desktopNotificationsEnabled(), appWindow.isFocused()])
+      .then(async ([enabled, focused]) => {
+        if (!enabled || focused) return;
+        const { sendNotification } = await import('@tauri-apps/plugin-notification');
+        const title = String(detail?.title || 'new message').slice(0, 80);
+        const body = String(detail?.body || '').replace(/\s+/g, ' ').trim().slice(0, 240);
+        sendNotification({ title, ...(body ? { body } : {}) });
+        await appWindow.requestUserAttention(UserAttentionType.Informational);
+      })
+      .catch(() => undefined);
+  });
 
   document.addEventListener('click', (event) => {
     const target = event.target;

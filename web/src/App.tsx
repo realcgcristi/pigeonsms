@@ -34,6 +34,7 @@ const AppearanceScreen = lazy(() => import('@/screens/settings/AppearanceScreen'
 const AppIconScreen = lazy(() => import('@/screens/settings/AppIconScreen'));
 const PrivacyScreen = lazy(() => import('@/screens/settings/PrivacyScreen'));
 const NotificationSettingsScreen = lazy(() => import('@/screens/settings/NotificationSettingsScreen'));
+const DesktopSettingsScreen = lazy(() => import('@/screens/settings/DesktopSettingsScreen'));
 const NestSettingsScreen = lazy(() => import('@/screens/settings/NestSettingsScreen'));
 const NestManageScreen = lazy(() => import('@/screens/settings/NestManageScreen'));
 const TimeMachineScreen = lazy(() => import('@/screens/settings/TimeMachineScreen'));
@@ -123,6 +124,7 @@ export default function App() {
               <Route path="/settings/appicon" element={<Gate><AppIconScreen /></Gate>} />
               <Route path="/settings/privacy" element={<Gate><PrivacyScreen /></Gate>} />
               <Route path="/settings/notifications" element={<Gate><NotificationSettingsScreen /></Gate>} />
+              <Route path="/settings/desktop" element={<Gate><DesktopSettingsScreen /></Gate>} />
               <Route path="/settings/nests" element={<Gate><NestSettingsScreen /></Gate>} />
               <Route path="/settings/nests/:spaceId" element={<Gate><NestManageScreen /></Gate>} />
               <Route path="/settings/nests/:spaceId/time-machine" element={<Gate><TimeMachineScreen /></Gate>} />

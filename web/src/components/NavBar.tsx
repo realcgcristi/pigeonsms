@@ -5,6 +5,7 @@ import { Logo, NestIcon } from '@/components/Logo'
 import { Avatar } from '@/components/ui/Avatar'
 import { useSession } from '@/store/session'
 import { totalDmUnread, totalSpaceUnread, useSocial } from '@/store/social'
+import { syncDesktopUnread } from '@/desktop/runtime'
 import './NavBar.css'
 
 const TABS = ['/', '/friends', '/spaces', '/you'] as const
@@ -49,6 +50,10 @@ export function NavBar() {
   const messageBadge = totalDmUnread(dms)
   const nestBadge = totalSpaceUnread(spaces)
   const name = user?.display_name || user?.username || 'you'
+
+  useEffect(() => {
+    void syncDesktopUnread(messageBadge + nestBadge).catch(() => undefined)
+  }, [messageBadge, nestBadge])
 
   const tabs = [
     { route: '/', label: 'messages', icon: <Forum />, badge: messageBadge },

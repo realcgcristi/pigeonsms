@@ -548,6 +548,12 @@ export const useChat = create<ChatState>((set, get) => ({
           patchChannel(s, decoded.channel_id, (c) => ({ ...c, messages: mergeRemoteMessages(c.messages, [decoded]) })),
         );
         void persist(decoded.channel_id, get().channel(decoded.channel_id).messages);
+        void ownerId().then((owner) => {
+          if (!owner || decoded.author.id === owner) return;
+          const title = decoded.author.display_name || decoded.author.username || 'new message';
+          const body = decoded.content || (decoded.attachment ? 'sent an attachment' : 'sent a message');
+          window.dispatchEvent(new CustomEvent('pigeon:desktop-message', { detail: { title, body } }));
+        });
       });
     });
     const offEdit = gateway.on('message.edit', (message) => {

@@ -1,30 +1,24 @@
-# PigeonSMS Desktop
+# pigeonsms for windows
 
-The Windows client wraps the shared PigeonSMS web interface in a secure Tauri 2 shell. It adds Windows Credential Manager session storage, native window state restoration, a system tray, single-instance behavior, deep links, and NSIS/MSI installers.
+the native client shares the web interface and adds credential manager storage, native notifications, launch at login, tray mode, unread status, deep links, single-instance handling and signed updates.
 
-## Requirements
+## setup
 
-- Node.js 24 or newer
-- Rust stable with the `stable-msvc` toolchain
-- Microsoft Visual Studio Build Tools with Desktop development with C++
-- Microsoft Edge WebView2 Runtime
-
-## Develop
+- node.js 24+
+- rust stable with `stable-msvc`
+- visual studio build tools with desktop development with c++
+- microsoft edge webview2 runtime
 
 ```powershell
 npm install
 npm run dev
 ```
 
-The development command starts the web app on port 5183 and launches the native window.
-
-## Build
+## build
 
 ```powershell
 npm run build:app
 npm run build:windows
 ```
 
-The first command creates the standalone executable without an installer. The second creates Windows NSIS and MSI installers.
-
-Deep links use the `pigeonsms://` scheme. For example, `pigeonsms://chat/123` opens chat `123`.
+`ctrl + shift + p` shows or hides the app. closing the window leaves it in the tray. deep links use `pigeonsms://`, such as `pigeonsms://chat/123`.

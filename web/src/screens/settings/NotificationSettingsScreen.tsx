@@ -6,6 +6,11 @@ import { Switch } from '@/components/ui/Switch'
 import { Chip, ChipRow, Screen, ScreenBody, SettingsGroup, TopBar } from '@/components/ui/Layout'
 import { useToast } from '@/components/ui/Toast'
 import { disablePush, enablePush, pushEnabled, pushSupported } from '@/lib/push'
+import {
+  desktopNotificationsEnabled,
+  isDesktopApp,
+  setDesktopNotificationsEnabled,
+} from '@/desktop/runtime'
 import { useSocial } from '@/store/social'
 import './Settings.css'
 
@@ -90,30 +95,37 @@ export default function NotificationSettingsScreen() {
     }
   }
 
-  const [webPush, setWebPush] = useState(false)
+  const [push, setPush] = useState(false)
   const [busy, setBusy] = useState(false)
-  const supported = pushSupported()
+  const desktop = isDesktopApp()
+  const supported = desktop || pushSupported()
 
   useEffect(() => {
-    void pushEnabled().then(setWebPush)
-  }, [])
+    void (desktop ? desktopNotificationsEnabled() : pushEnabled()).then(setPush)
+  }, [desktop])
 
-  const toggleWebPush = async (next: boolean) => {
+  const togglePush = async (next: boolean) => {
     setBusy(true)
     try {
-      if (next) {
+      if (desktop) {
+        const enabled = await setDesktopNotificationsEnabled(next)
+        setPush(enabled)
+        if (next && !enabled) toast.error('windows blocked notifications')
+        else if (enabled) toast.show('native notifications on')
+      } else if (next) {
         const ok = await enablePush()
-        setWebPush(ok)
+        setPush(ok)
         if (!ok) toast.error('the browser blocked notifications')
         else toast.show('push notifications on')
       } else {
         await disablePush()
-        setWebPush(false)
+        setPush(false)
       }
     } catch {
       toast.error('could not change push notifications')
+    } finally {
+      setBusy(false)
     }
-    setBusy(false)
   }
 
   return (
@@ -122,11 +134,11 @@ export default function NotificationSettingsScreen() {
       <ScreenBody>
         <SettingsGroup label="global">
           <div className="settings__row-toggle">
-            <span>push notifications</span>
+            <span>{desktop ? 'native notifications' : 'push notifications'}</span>
             <Switch
-              checked={webPush}
+              checked={push}
               disabled={!supported || busy}
-              onChange={(next) => void toggleWebPush(next)}
+              onChange={(next) => void togglePush(next)}
             />
           </div>
           {!supported ? (

@@ -8,6 +8,11 @@
   "permissions": [
     "core:default",
     "deep-link:default",
+    "autostart:default",
+    "global-shortcut:allow-is-registered",
+    "global-shortcut:allow-register",
+    "global-shortcut:allow-unregister",
+    "notification:default",
     "opener:default",
     "process:allow-restart",
     "updater:default"
