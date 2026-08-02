@@ -1,5 +1,12 @@
 # changelog
 
+## v3-rc2
+
+- adds passkeys and trusted qr device pairing across web and android
+- makes calls recover across network changes with runtime turn credentials, ice restarts and reconnecting signaling
+- makes offline delivery deterministic across duplicates, stale edits, deletes, nearby messages and queued acknowledgements
+- adds signed tauri updates, an in-app update flow and ci-built windows installers with release checksums
+
 ## v3-rc1
 
 - adds nest time machine with verifiable event replay and client-encrypted restore or fork checkpoints

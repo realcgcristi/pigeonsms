@@ -84,7 +84,7 @@ app.get('/.well-known/pigeon', (c) => {
     protocol: { name: 'open-pigeon', versions: ['1.0'], preferred: '1.0' },
     server: {
       name: c.env.SERVER_NAME ?? 'pigeonsms',
-      version: c.env.SERVER_VERSION ?? '3.0.0-rc.1',
+      version: c.env.SERVER_VERSION ?? '3.0.0-rc.2',
       source: 'https://github.com/realcgcristi/pigeonsms',
     },
     endpoints: {
