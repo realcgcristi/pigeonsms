@@ -162,8 +162,11 @@ fun CallScreenDialog(
         onDismiss()
     }
 
-    // Start capture + signaling once.
-    LaunchedEffect(Unit) { client.start() }
+    LaunchedEffect(Unit) {
+        app.pigeonsms.ui.call.ActiveCall.register(endCall)
+        app.pigeonsms.ui.call.CallForegroundService.start(context.applicationContext, video, title)
+        client.start()
+    }
 
     // Phone-call audio routing once the mic is live (grabbing MODE_IN_COMMUNICATION
     // earlier is what tripped NotReadableError on the WebView path; here we still

@@ -22,7 +22,7 @@ shipped and iterating: dms, nests with text/voice/forum channels, forum tags + l
 - ~~better media: gifs picker, stickers, larger uploads with resumable transfer~~ — **done in v2.9.5.** custom nest emoji + stickers, and resumable chunked uploads (50mb → 500mb, resumes after a restart).
 - import/export your data (privacy = you can take it and leave)
 - accessibility pass (talkback, larger text, reduced motion is partly there)
-- self-host quality-of-life: a one-command deploy, clearer docs, an admin dashboard
+- ~~self-host quality-of-life: a one-command deploy, clearer docs~~ — **done.** `docker compose up --build` for local, `node scripts/pigeonctl.mjs cloudflare` for a real Cloudflare deploy (provisions D1/R2/Queue, applies migrations, deploys the Worker). See [self-hosting docs](docs/content/selfhost.md). what's left: an **admin dashboard UI** — `backend/src/routes/admin.ts` has the token-gated api (invites, password resets, release pushes) but nothing in the web client calls it yet, planned for v3.1.
 
 ## maybe / someday
 

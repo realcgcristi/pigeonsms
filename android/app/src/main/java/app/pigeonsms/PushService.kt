@@ -19,6 +19,7 @@ import kotlinx.coroutines.launch
 
 const val NOTIF_CHANNEL_MESSAGES = "messages"
 const val NOTIF_CHANNEL_UPDATES = "updates"
+const val NOTIF_CHANNEL_CALLS = "calls"
 
 /**
  * FCM data `type` values. Message pushes historically carry no `type` (they are
@@ -63,6 +64,13 @@ fun ensureNotificationChannel(context: Context) {
             "Updates",
             NotificationManager.IMPORTANCE_DEFAULT,
         ).apply { description = "New versions of PigeonSMS" },
+    )
+    nm.createNotificationChannel(
+        NotificationChannel(
+            NOTIF_CHANNEL_CALLS,
+            "Calls",
+            NotificationManager.IMPORTANCE_LOW,
+        ).apply { description = "Ongoing call status" },
     )
     if (Build.VERSION.SDK_INT >= 26) {
         nm.getNotificationChannel(NOTIF_CHANNEL_MESSAGES)?.apply { setShowBadge(true) }

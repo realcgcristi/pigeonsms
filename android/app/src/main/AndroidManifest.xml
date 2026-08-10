@@ -126,6 +126,11 @@
             </intent-filter>
         </service>
 
+        <service
+            android:name=".ui.call.CallForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="microphone|camera" />
+
         <!-- Explicit PendingIntents from message notifications only. -->
         <receiver
             android:name=".NotificationActionReceiver"
