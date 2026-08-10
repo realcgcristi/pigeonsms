@@ -5,18 +5,21 @@ import com.sun.jna.NativeLong
 import org.json.JSONObject
 
 /**
- * Password-derived encrypted key backup for multi-device recovery (EXPERIMENTAL,
- * flag-OFF). Produces the {blob, kdf_salt, kdf_params} triple stored via
- * PUT /auth/key-backup (see [KeyBackupDto]).
+ * Password-derived encrypted key backup for multi-device recovery. Part of the
+ * E2EE stack shipped in v3-rc3 as a user opt-in, default OFF. Produces the
+ * {blob, kdf_salt, kdf_params} triple stored via PUT /auth/key-backup (see
+ * [KeyBackupDto]).
  *
  * KDF: Argon2id (libsodium crypto_pwhash) — memory-hard, the recommended default.
  * kdf_params is JSON so the server stays algorithm-agnostic and future backups can
  * bump cost or swap to scrypt without a schema change. The derived 32-byte key is
  * used directly as an XChaCha20-Poly1305 AEAD key over the serialized key bundle.
  *
- * TODO(e2ee): the OPSLIMIT/MEMLIMIT below are MODERATE. Real-device test on low-end
- * hardware (minSdk 26) — INTERACTIVE may be needed to keep restore under a couple
- * seconds; whatever we pick MUST be recorded in kdf_params so restore reproduces it.
+ * Hardening backlog (doesn't block the opt-in ship): OPSLIMIT/MEMLIMIT below are
+ * MODERATE, chosen for security margin, but not yet timed on real low-end
+ * hardware (minSdk 26). If restore takes too long there, drop to INTERACTIVE —
+ * whatever gets picked MUST stay recorded in kdf_params (already true here) so a
+ * cost change doesn't break restoring an older backup.
  */
 internal object KeyBackup {
 

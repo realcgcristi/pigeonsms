@@ -14,8 +14,8 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 /**
- * Persists the device's X25519 identity keypair. The private key is EXPERIMENTAL
- * and ships flag-OFF.
+ * Persists the device's X25519 identity keypair. Part of the E2EE stack shipped
+ * in v3-rc3 as a user opt-in, default OFF.
  *
  * WHY WE DON'T STORE X25519 DIRECTLY IN KEYSTORE: Android Keystore's asymmetric
  * support is EC (P-256/…) + RSA — there is no X25519/curve25519 key type, and no
@@ -25,10 +25,13 @@ import javax.crypto.spec.GCMParameterSpec
  * where available, StrongBox not required). The X25519 secret itself only exists
  * in-process, decrypted on demand.
  *
- * TODO(e2ee): real-device test the Keystore-backed AES key on API 26 (minSdk) —
- * setUnlockedDeviceRequired / setUserAuthenticationRequired are intentionally OFF
- * so background send/receive works; revisit if we want at-rest-behind-lock.
- * TODO(e2ee): consider StrongBox (setIsStrongBoxBacked) on devices that support it.
+ * Hardening backlog (doesn't block the opt-in ship): this Keystore-backed AES key
+ * hasn't been exercised on real API 26 (minSdk) hardware, only emulator/unit
+ * coverage. `setUnlockedDeviceRequired` / `setUserAuthenticationRequired` are
+ * intentionally left OFF so background send/receive keeps working — revisit only
+ * if we want at-rest-behind-lock. StrongBox (`setIsStrongBoxBacked`) is also not
+ * yet attempted on devices that support it; it would need a fallback path since
+ * not all hardware backs it.
  */
 private val Context.e2eeStore by preferencesDataStore(name = "pigeon_e2ee")
 

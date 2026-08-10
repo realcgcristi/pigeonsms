@@ -11,9 +11,10 @@ import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
 /**
- * Thin libsodium (lazysodium) facade for the E2EE stack. Ships FLAG-OFF and is
- * EXPERIMENTAL — see [E2eeManager]. Everything here is byte-array in / byte-array
- * out; base64 is only applied at the transport boundary (envelopes, backups).
+ * Thin libsodium (lazysodium) facade for the E2EE stack. Shipped in v3-rc3 as a
+ * user opt-in, default OFF — see [E2eeManager]. Everything here is byte-array in /
+ * byte-array out; base64 is only applied at the transport boundary (envelopes,
+ * backups).
  *
  * Primitives used:
  *  - X25519 identity keys + crypto_box_seal (sealed box) to wrap per-DM keys to a
@@ -23,8 +24,11 @@ import javax.crypto.spec.SecretKeySpec
  *    random nonce sidesteps the counter-reuse footguns of the 12-byte variants.
  *  - HKDF/HMAC-SHA256 (see [Ratchet]) for the symmetric-key and root chains.
  *
- * TODO(e2ee): every path here needs on-real-device validation. lazysodium loads a
- * native .so via JNA; on some ABIs / minified builds the loader needs a keep rule.
+ * Hardening backlog (doesn't block the opt-in ship, but should land before this
+ * is ever considered for default-on): a real-device pass across ABIs, since
+ * lazysodium loads a native .so via JNA and only emulator/unit coverage has run
+ * so far. The minified-release keep rules it needs are in
+ * `android/app/proguard-rules.pro` (com.goterl.lazysodium.**, com.sun.jna.**).
  */
 object Sodium {
     // LazySodiumAndroid is thread-safe for these stateless calls.
