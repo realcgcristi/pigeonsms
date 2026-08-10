@@ -27,6 +27,8 @@
 
 so this is pigeonsms, a chat app i've been chipping away at for the past couple weeks. android app plus a backend that lives entirely on cloudflare. dms, group servers (i call them "nests"), the whole thing
 
+**small, small pause, out of ideas mostly and also out of things to add/change, calls i just can't properly get working, it is a headache**
+
 it's a passion project, built with privacy in mind — a way for friend groups to chat on a platform they actually control. you can self-host the whole thing (it's all here, gpl'd), or just use the instance i already run at pigeonsms.aldi.best. no ads, no tracking, no data mining, no premium tier gating features behind a paywall. it's yours.
 
 
