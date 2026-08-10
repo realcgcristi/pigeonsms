@@ -16,7 +16,7 @@ Live: https://pigeonsms.aldi.best (Cloudflare Pages `pigeonsms-web` + `pigeonsms
 `backend/src/index.ts` CORS now allows pigeonsms.aldi.best, pigeonsms-web.pages.dev and its preview subdomains. Worker redeployed (version 55678664).
 
 ## Current notes
-- `GET /spaces/:id/members` still does not return `role_ids`, so the role-assign sheet cannot pre-check a member's existing roles (the client safely treats the field as optional).
+- `GET /spaces/:id/members` returns `role_ids`, so the role-assign sheet can pre-check a member's existing roles.
 - calls now use the Worker `CallRoom` signalling path, with screen sharing, camera renegotiation, ICE restart, and optional TURN configuration through `VITE_TURN_*`.
-- end-to-end encryption remains intentionally hidden until the Android experimental protocol is promoted to a stable cross-client contract; the web client does not present a misleading security switch.
+- end-to-end encryption shipped in v3-rc3: a double-ratchet DM stream with the same Open Pigeon contract as Android, exposed as an opt-in "encrypted direct messages" switch in Settings → Security (off by default).
 - production host: `https://pigeonsms.aldi.best`; API health: `https://api.pigeonsms.aldi.best/health`.

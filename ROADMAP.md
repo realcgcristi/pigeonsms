@@ -9,12 +9,12 @@ shipped and iterating: dms, nests with text/voice/forum channels, forum tags + l
 ## v3 — the big rocks
 
 - **fix calls.** the #1 priority. get voice/video actually working: reliable native mic/camera capture across devices, and stand up a **TURN server** (coturn) so media traverses symmetric/cellular NAT. the signaling + UI are already done. this is the thing i most want help with.
-- **desktop client.** a proper desktop app — leaning toward tauri (rust shell + web UI) so it's light and cross-platform (win/mac/linux), sharing the same backend. maybe a plain web client first as a stepping stone.
-- ~~**end-to-end encryption** for DMs~~ — **done, shipped in v2.8.0.** X25519 identity keys per device, a double-ratchet DM message stream, sealed per-device key envelopes, and a password-derived encrypted key backup for multi-device. it's experimental and off-by-default while it hardens, but the full key exchange + device management story is built. e2ee is off the roadmap.
+- ~~**desktop client.**~~ — **done.** a native windows shell built with tauri, sharing the same backend as android and web — credential manager storage, notifications, launch at login, tray mode, unread status, deep links, and signed updates.
+- ~~**end-to-end encryption** for DMs~~ — **done, shipped in v3-rc3.** X25519 identity keys per device, a double-ratchet DM message stream, sealed per-device key envelopes, and a password-derived encrypted key backup for multi-device, on both android and web. it's still opt-in and off-by-default while real-device hardening continues, but the full key exchange + device management story is built. e2ee is off the roadmap.
 
 ## v3 — smaller wants
 
-- web client (browser access, no install)
+- ~~web client (browser access, no install)~~ — **done, shipped in v3-beta2.** responsive from phone to ultrawide desktop, encrypted local-first cache, offline outbox, branches, channel categories, pigeon packs, migration, bridge management. live at [pigeonsms.aldi.best](https://pigeonsms.aldi.best).
 - ~~message search that's actually good (server-side, across a whole nest)~~ — **done in v2.9.5.** nest-wide FTS5 plus a global search across every nest and your DMs, with snippets and `from:`/channel filters.
 - ~~threads / better forum threading~~ — **done in v2.9.5.** any message in a text channel can start a thread; replies are ordinary messages so they keep sequencing, push, search and e2ee.
 - ~~richer roles + permissions per nest (not just owner/member)~~ — **done in v2.9.5.** custom roles with a 14-flag permission set and per-channel allow/deny overrides.
@@ -27,7 +27,7 @@ shipped and iterating: dms, nests with text/voice/forum channels, forum tags + l
 ## maybe / someday
 
 - federation between self-hosted instances
-- bots / a small automation api
 - voice channels that actually work like discord (depends on calls landing first)
+- ~~bots / a small automation api~~ — **done.** real bot accounts, a full rest surface, slash commands (global or per-nest), webhook or long-poll delivery, signed callbacks, and official sdks in typescript, kotlin and rust. see [BOTS.md](BOTS.md) and [`examples/echo-bot/`](examples/echo-bot/). off the roadmap.
 
 if something here excites you, open an issue to say you're taking it so we don't double up.
