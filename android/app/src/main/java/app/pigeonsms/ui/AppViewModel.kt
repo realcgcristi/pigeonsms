@@ -63,6 +63,10 @@ class AppViewModel(
     data class IncomingPing(val channelId: String, val title: String, val preview: String)
     private val _pings = MutableSharedFlow<IncomingPing>(extraBufferCapacity = 8)
     val pings: SharedFlow<IncomingPing> = _pings
+
+    data class IncomingCall(val channelId: String, val title: String, val mode: String, val isSpace: Boolean)
+    private val _incomingCalls = MutableSharedFlow<IncomingCall>(extraBufferCapacity = 4)
+    val incomingCalls: SharedFlow<IncomingCall> = _incomingCalls
     private var dmsJob: Job? = null
     private var friendsJob: Job? = null
     private var spacesJob: Job? = null
@@ -144,6 +148,16 @@ class AppViewModel(
                     "message.delete" -> {
                         val id = ev.d.jsonObject["id"]?.jsonPrimitive?.content
                         if (id != null) chat.applyDelete(id)
+                    }
+                    "call.incoming" -> {
+                        val d = ev.d.jsonObject
+                        val channelId = d["channelId"]?.jsonPrimitive?.content
+                        val mode = d["mode"]?.jsonPrimitive?.content ?: "voice"
+                        val callerUsername = d["from"]?.jsonObject?.get("username")?.jsonPrimitive?.content ?: "someone"
+                        if (channelId != null) {
+                            val isSpaceChannel = _home.value.spaces.any { space -> space.channels.any { it.id == channelId } }
+                            _incomingCalls.tryEmit(IncomingCall(channelId, "@$callerUsername", mode, isSpaceChannel))
+                        }
                     }
                     "poll.update" -> {
                         val update = runCatching {

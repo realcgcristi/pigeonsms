@@ -1,5 +1,7 @@
-import { assertChannelAccess } from '../lib/channels';
+import { assertChannelAccess, channelRecipients, fanout } from '../lib/channels';
+import type { ChannelRow } from '../lib/channels';
 import { sha256Hex } from '../lib/crypto';
+import { callNotificationPlan } from '../lib/notifications';
 import { ApiError } from '../middleware/errors';
 import { sessionTokenFromCookie } from '../middleware/auth';
 import type { Env } from '../types';
@@ -138,7 +140,7 @@ export class CallRoom {
 
       // The Worker route checks this before forwarding too. Repeating it here
       // prevents the room from trusting identity or membership passed by a caller.
-      await assertChannelAccess(this.env, identity.userId, path.channelId);
+      const channel = await assertChannelAccess(this.env, identity.userId, path.channelId);
 
       if (path.endpoint === 'participants') {
         return Response.json(
@@ -153,7 +155,7 @@ export class CallRoom {
         return errorResponse(426, 'upgrade_required', 'WebSocket upgrade required');
       }
 
-      return this.accept(identity, mode);
+      return this.accept(identity, mode, channel);
     } catch (err) {
       if (err instanceof ApiError) return errorResponse(err.status, err.code, err.message);
       console.error('CallRoom fetch failed', err);
@@ -226,7 +228,7 @@ export class CallRoom {
     return row ? { userId: row.id, username: row.username } : null;
   }
 
-  private accept(identity: { userId: string; username: string }, mode: CallMode): Response {
+  private accept(identity: { userId: string; username: string }, mode: CallMode, channel: ChannelRow): Response {
     const participant: CallParticipant = { ...identity, mode };
     const existingSockets = this.state.getWebSockets();
     const alreadyPresent = existingSockets.some(
@@ -246,7 +248,33 @@ export class CallRoom {
     });
     if (!alreadyPresent) this.broadcast({ type: 'join', participant }, server);
 
+    // Nobody else was in the room — this is a fresh call, not someone joining
+    // one already in progress. Ring the rest of the channel.
+    if (existingSockets.length === 0) {
+      this.state.waitUntil(this.notifyIncomingCall(channel, identity, mode));
+    }
+
     return new Response(null, { status: 101, webSocket: client });
+  }
+
+  private async notifyIncomingCall(
+    channel: ChannelRow,
+    caller: { userId: string; username: string },
+    mode: CallMode,
+  ): Promise<void> {
+    try {
+      const recipients = await channelRecipients(this.env, channel);
+      const plan = await callNotificationPlan(this.env, channel, { id: caller.userId, username: caller.username }, mode);
+      fanout(
+        this.env,
+        this.state,
+        recipients,
+        { t: 'call.incoming', d: { channelId: channel.id, mode, from: { userId: caller.userId, username: caller.username } } },
+        { exclude: caller.userId, push: plan.push },
+      );
+    } catch (err) {
+      console.error('CallRoom notifyIncomingCall failed', err);
+    }
   }
 
   private participants(sockets: WebSocket[] = this.state.getWebSockets()): CallParticipant[] {

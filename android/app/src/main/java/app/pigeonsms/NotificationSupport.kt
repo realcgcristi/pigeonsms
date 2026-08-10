@@ -33,6 +33,35 @@ const val EXTRA_SENDER_USERNAME = "sender_username"
 const val EXTRA_SENDER_DISPLAY_NAME = "sender_display_name"
 const val EXTRA_NOTIFICATION_TITLE = "title"
 
+const val EXTRA_CALL_CHANNEL_ID = "call_channel_id"
+const val EXTRA_CALL_MODE = "call_mode"
+const val EXTRA_CALL_TITLE = "call_title"
+const val EXTRA_CALL_SPACE = "call_space"
+
+data class CallTarget(
+    val channelId: String,
+    val mode: String,
+    val title: String,
+    val isSpace: Boolean,
+)
+
+fun Intent.callTargetOrNull(): CallTarget? {
+    val channelId = extras?.getString(EXTRA_CALL_CHANNEL_ID).clean() ?: return null
+    return CallTarget(
+        channelId = channelId,
+        mode = extras?.getString(EXTRA_CALL_MODE).clean() ?: "voice",
+        title = extras?.getString(EXTRA_CALL_TITLE).clean() ?: "call",
+        isSpace = extras?.getBoolean(EXTRA_CALL_SPACE, false) ?: false,
+    )
+}
+
+fun Intent.putCallTarget(target: CallTarget): Intent = apply {
+    putExtra(EXTRA_CALL_CHANNEL_ID, target.channelId)
+    putExtra(EXTRA_CALL_MODE, target.mode)
+    putExtra(EXTRA_CALL_TITLE, target.title)
+    putExtra(EXTRA_CALL_SPACE, target.isSpace)
+}
+
 /**
  * The information needed to open a message notification in the channel.
  *

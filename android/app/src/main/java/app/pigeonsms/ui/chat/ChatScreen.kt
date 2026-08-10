@@ -280,6 +280,8 @@ fun ChatScreen(
     onOpenThreads: (() -> Unit)? = null,
     /** Navigate to a sibling channel by id (from a tapped #channel) — 2.9.5. */
     onOpenChannel: ((id: String, name: String, isSpace: Boolean) -> Unit)? = null,
+    /** Set when this screen was opened by answering an incoming call. */
+    autoStartCallVideo: Boolean? = null,
 ) {
     val vmAppContext = LocalContext.current.applicationContext
     val vm: ChatViewModel = pigeonVm(key = "chat-$channelId") { container, _ ->
@@ -444,6 +446,9 @@ fun ChatScreen(
             pendingCallVideo = video
             callPermissionLauncher.launch(missing.toTypedArray())
         }
+    }
+    LaunchedEffect(autoStartCallVideo) {
+        autoStartCallVideo?.let { startCall(it) }
     }
 
     ChatAccent(appearance.accent) {

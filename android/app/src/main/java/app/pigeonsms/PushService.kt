@@ -20,6 +20,7 @@ import kotlinx.coroutines.launch
 const val NOTIF_CHANNEL_MESSAGES = "messages"
 const val NOTIF_CHANNEL_UPDATES = "updates"
 const val NOTIF_CHANNEL_CALLS = "calls"
+const val NOTIF_CHANNEL_INCOMING_CALLS = "incoming_calls"
 
 /**
  * FCM data `type` values. Message pushes historically carry no `type` (they are
@@ -27,6 +28,7 @@ const val NOTIF_CHANNEL_CALLS = "calls"
  * 2.8.0 release-broadcast payload ({ type:"app_update", version_code }).
  */
 const val PUSH_TYPE_APP_UPDATE = "app_update"
+const val PUSH_KIND_CALL_INCOMING = "call_incoming"
 
 /**
  * Deep-link + extras for the app-update notification. The About screen owns the
@@ -72,6 +74,13 @@ fun ensureNotificationChannel(context: Context) {
             NotificationManager.IMPORTANCE_LOW,
         ).apply { description = "Ongoing call status" },
     )
+    nm.createNotificationChannel(
+        NotificationChannel(
+            NOTIF_CHANNEL_INCOMING_CALLS,
+            "Incoming calls",
+            NotificationManager.IMPORTANCE_HIGH,
+        ).apply { description = "Someone is calling you" },
+    )
     if (Build.VERSION.SDK_INT >= 26) {
         nm.getNotificationChannel(NOTIF_CHANNEL_MESSAGES)?.apply { setShowBadge(true) }
     }
@@ -110,6 +119,10 @@ class PushService : FirebaseMessagingService() {
         // About screen rather than a chat, and skip all the channel/mute logic.
         if (data["type"] == PUSH_TYPE_APP_UPDATE) {
             showAppUpdate(data, message.notification?.title, message.notification?.body)
+            return
+        }
+        if (data["kind"] == PUSH_KIND_CALL_INCOMING) {
+            showIncomingCall(data)
             return
         }
 
@@ -261,6 +274,39 @@ class PushService : FirebaseMessagingService() {
 
         getSystemService(NotificationManager::class.java)
             ?.notify(notificationId, notif.build())
+    }
+
+    private fun showIncomingCall(data: Map<String, String>) {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) return
+        val channelId = data["channel_id"].orNullIfBlank() ?: return
+        val mode = data["mode"].orNullIfBlank() ?: "voice"
+        val isSpace = !data["space_id"].orNullIfBlank().isNullOrEmpty()
+        val title = data["title"].orNullIfBlank() ?: "PigeonSMS"
+        val body = data["body"].orNullIfBlank() ?: if (mode == "video") "incoming video call" else "incoming voice call"
+
+        ensureNotificationChannel(this)
+        val notificationId = nextNotificationId()
+        val target = CallTarget(channelId = channelId, mode = mode, title = title, isSpace = isSpace)
+        val answerIntent = Intent(this, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            .putCallTarget(target)
+        val answer = PendingIntent.getActivity(this, notificationId, answerIntent, pendingIntentFlags(mutable = false))
+
+        val notif = NotificationCompat.Builder(this, NOTIF_CHANNEL_INCOMING_CALLS)
+            .setSmallIcon(R.drawable.ic_stat_notify)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_CALL)
+            .setAutoCancel(true)
+            .setContentIntent(answer)
+            .addAction(android.R.drawable.ic_menu_call, "Answer", answer)
+            .setTimeoutAfter(45_000)
+            .build()
+
+        getSystemService(NotificationManager::class.java)?.notify(notificationId, notif)
     }
 
     private fun String?.orNullIfBlank(): String? = this?.trim()?.takeIf { it.isNotEmpty() }

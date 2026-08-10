@@ -44,6 +44,44 @@ export async function messageNotificationPlan(
   };
 }
 
+export interface CallNotificationPlan {
+  title: string;
+  body: string;
+  push: PushPayload;
+}
+
+export async function callNotificationPlan(
+  env: Env,
+  channel: ChannelRow,
+  actor: { id: string; username: string },
+  mode: 'voice' | 'video',
+): Promise<CallNotificationPlan> {
+  let title = `@${actor.username}`;
+  if (channel.space_id) {
+    const space = await env.DB.prepare('SELECT name FROM spaces WHERE id = ? AND deleted_at IS NULL')
+      .bind(channel.space_id)
+      .first<{ name: string }>();
+    title = `${space?.name ?? 'Space'} • #${channel.name ?? 'channel'} • @${actor.username}`;
+  }
+  const body = mode === 'video' ? 'incoming video call' : 'incoming voice call';
+  return {
+    title,
+    body,
+    push: {
+      title,
+      body,
+      data: {
+        kind: 'call_incoming',
+        channel_id: channel.id,
+        space_id: channel.space_id ?? '',
+        mode,
+        caller_id: actor.id,
+        caller_username: actor.username,
+      },
+    },
+  };
+}
+
 /** Persist one in-app notification per recipient; duplicate retries are ignored. */
 export async function storeMessageNotifications(
   env: Env,

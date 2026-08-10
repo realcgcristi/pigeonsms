@@ -71,6 +71,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import app.pigeonsms.PigeonApp
 import app.pigeonsms.data.ChatAppearanceStore
 import app.pigeonsms.data.LocalSession
 import kotlinx.coroutines.flow.first
@@ -315,16 +316,18 @@ fun AppShell(session: LocalSession) {
                 )
             }
             composable(
-                "chat/{cid}/{title}?avatar={avatar}&space={space}",
+                "chat/{cid}/{title}?avatar={avatar}&space={space}&call={call}",
                 arguments = listOf(
                     androidx.navigation.navArgument("avatar") { defaultValue = "" },
                     androidx.navigation.navArgument("space") { defaultValue = "false" },
+                    androidx.navigation.navArgument("call") { defaultValue = "" },
                 ),
             ) { entry ->
                 val cid = entry.arguments?.getString("cid") ?: return@composable
                 val title = entry.arguments?.getString("title") ?: "chat"
                 val avatar = entry.arguments?.getString("avatar")?.takeIf { it.isNotBlank() }
                 val isSpace = entry.arguments?.getString("space")?.toBoolean() == true
+                val callMode = entry.arguments?.getString("call")?.takeIf { it.isNotBlank() }
                 CompositionLocalProvider(LocalNavAnimatedScope provides this) {
                 ChatScreen(
                     channelId = cid,
@@ -344,6 +347,11 @@ fun AppShell(session: LocalSession) {
                     onOpenChannel = { id, chName, space ->
                         val suffix = if (space) "?space=true" else ""
                         nav.navigate("chat/$id/${enc(chName)}$suffix")
+                    },
+                    autoStartCallVideo = when (callMode) {
+                        "video" -> true
+                        "voice" -> false
+                        else -> null
                     },
                 )
                 }
@@ -478,6 +486,18 @@ fun AppShell(session: LocalSession) {
         // In-app heads-up banner for messages arriving in channels you're not viewing.
         var ping by remember { androidx.compose.runtime.mutableStateOf<AppViewModel.IncomingPing?>(null) }
         val pingMuteStore = remember { ChatAppearanceStore(appContext.applicationContext) }
+        val pigeonApp = remember(appContext) { appContext.applicationContext as PigeonApp }
+        val pendingCall by pigeonApp.pendingCallTarget.collectAsState()
+        LaunchedEffect(pendingCall) {
+            val call = pendingCall ?: return@LaunchedEffect
+            nav.navigate("chat/${call.channelId}/${enc(call.title)}?space=${call.isSpace}&call=${call.mode}")
+            pigeonApp.consumeCallTarget(call)
+        }
+        LaunchedEffect(app) {
+            app.incomingCalls.collect { call ->
+                nav.navigate("chat/${call.channelId}/${enc(call.title)}?space=${call.isSpace}&call=${call.mode}")
+            }
+        }
         LaunchedEffect(app) {
             app.pings.collect { incoming ->
                 // muted chats stay silent — same per-chat toggle the appearance sheet sets

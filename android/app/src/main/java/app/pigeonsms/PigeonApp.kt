@@ -19,6 +19,8 @@ class PigeonApp : Application(), ImageLoaderFactory {
     val pendingNotificationTarget: StateFlow<NotificationTarget?> = _pendingNotificationTarget.asStateFlow()
     private val _pendingPairingLink = MutableStateFlow<String?>(null)
     val pendingPairingLink: StateFlow<String?> = _pendingPairingLink.asStateFlow()
+    private val _pendingCallTarget = MutableStateFlow<CallTarget?>(null)
+    val pendingCallTarget: StateFlow<CallTarget?> = _pendingCallTarget.asStateFlow()
 
     override fun onCreate() {
         super.onCreate()
@@ -33,9 +35,20 @@ class PigeonApp : Application(), ImageLoaderFactory {
 
     fun publishIntent(intent: Intent?) {
         intent?.notificationTargetOrNull()?.let { _pendingNotificationTarget.value = it }
+        intent?.callTargetOrNull()?.let { _pendingCallTarget.value = it }
         intent?.dataString
             ?.takeIf { app.pigeonsms.pairing.PairingLinks.parse(it) != null }
             ?.let { _pendingPairingLink.value = it }
+    }
+
+    fun publishCallTarget(target: CallTarget) {
+        _pendingCallTarget.value = target
+    }
+
+    fun consumeCallTarget(target: CallTarget? = _pendingCallTarget.value) {
+        if (target != null && _pendingCallTarget.value == target) {
+            _pendingCallTarget.value = null
+        }
     }
 
     fun consumeNotificationTarget(target: NotificationTarget? = _pendingNotificationTarget.value) {
