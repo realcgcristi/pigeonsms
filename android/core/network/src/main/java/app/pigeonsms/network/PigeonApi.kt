@@ -66,6 +66,10 @@ class PigeonApi(
     suspend fun callConfig(channelId: String) =
         client.get("$baseUrl/calls/$channelId/config") { auth() }.unwrap<CallConfigResponse>()
 
+    suspend fun declineCall(channelId: String) {
+        client.post("$baseUrl/calls/$channelId/decline") { auth() }.unwrap<OkResponse>()
+    }
+
     suspend fun signup(invite: String, username: String, email: String, password: String, deviceName: String) =
         client.post("$baseUrl/auth/signup") {
             contentType(ContentType.Application.Json)

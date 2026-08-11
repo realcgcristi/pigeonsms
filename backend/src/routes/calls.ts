@@ -120,4 +120,10 @@ calls.get('/:channelId/participants', async (c) => {
   return room(c, channelId).fetch(c.req.raw);
 });
 
+calls.post('/:channelId/decline', async (c) => {
+  const channelId = c.req.param('channelId');
+  await assertChannelAccess(c.env, c.get('user')!.id, channelId);
+  return room(c, channelId).fetch(c.req.raw);
+});
+
 export default calls;

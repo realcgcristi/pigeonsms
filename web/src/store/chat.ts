@@ -46,10 +46,19 @@ const EMPTY: ChannelState = {
   superPin: null,
 };
 
+export interface IncomingCallState {
+  channelId: string;
+  mode: 'voice' | 'video';
+  callerId: string;
+  callerUsername: string;
+}
+
 export interface ChatState {
   channels: Record<string, ChannelState>;
   emoji: SpaceEmojiDto[];
   emojiLoaded: boolean;
+  incomingCall: IncomingCallState | null;
+  clearIncomingCall: () => void;
   channel: (id: string) => ChannelState;
   load: (channelId: string, force?: boolean, afterSeq?: number) => Promise<void>;
   loadMore: (channelId: string) => Promise<void>;
@@ -71,6 +80,7 @@ export interface ChatState {
   markRead: (channelId: string) => void;
   loadEmoji: (force?: boolean) => Promise<void>;
   subscribe: () => () => void;
+  subscribeCalls: () => () => void;
   syncOutbox: () => Promise<void>;
   receiveNearby: (message: NearbyMessage) => void;
 }
@@ -150,8 +160,11 @@ export const useChat = create<ChatState>((set, get) => ({
   channels: {},
   emoji: [],
   emojiLoaded: false,
+  incomingCall: null,
 
   channel: (id) => get().channels[id] ?? EMPTY,
+
+  clearIncomingCall: () => set({ incomingCall: null }),
 
   load: async (channelId, force, afterSeq) => {
     const current = get().channels[channelId];
@@ -702,6 +715,25 @@ export const useChat = create<ChatState>((set, get) => ({
       offSuperPinSet();
       offSuperPinRemove();
       offResume();
+    };
+  },
+
+  subscribeCalls: () => {
+    const offCallIncoming = gateway.on('call.incoming', (d) => {
+      set({ incomingCall: { channelId: d.channelId, mode: d.mode, callerId: d.from.userId, callerUsername: d.from.username } });
+      window.dispatchEvent(new CustomEvent('pigeon:desktop-call', {
+        detail: {
+          title: `@${d.from.username}`,
+          body: d.mode === 'video' ? 'incoming video call' : 'incoming voice call',
+        },
+      }));
+    });
+    const offCallMissed = gateway.on('call.missed', (d) => {
+      set((s) => (s.incomingCall?.channelId === d.channelId ? { incomingCall: null } : {}));
+    });
+    return () => {
+      offCallIncoming();
+      offCallMissed();
     };
   },
 }));

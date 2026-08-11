@@ -29,6 +29,7 @@ const val NOTIF_CHANNEL_INCOMING_CALLS = "incoming_calls"
  */
 const val PUSH_TYPE_APP_UPDATE = "app_update"
 const val PUSH_KIND_CALL_INCOMING = "call_incoming"
+const val PUSH_KIND_CALL_MISSED = "call_missed"
 
 /**
  * Deep-link + extras for the app-update notification. The About screen owns the
@@ -123,6 +124,10 @@ class PushService : FirebaseMessagingService() {
         }
         if (data["kind"] == PUSH_KIND_CALL_INCOMING) {
             showIncomingCall(data)
+            return
+        }
+        if (data["kind"] == PUSH_KIND_CALL_MISSED) {
+            showMissedCall(data)
             return
         }
 
@@ -294,6 +299,12 @@ class PushService : FirebaseMessagingService() {
             .putCallTarget(target)
         val answer = PendingIntent.getActivity(this, notificationId, answerIntent, pendingIntentFlags(mutable = false))
 
+        val declineIntent = Intent(this, NotificationActionReceiver::class.java)
+            .setAction(NOTIFICATION_ACTION_DECLINE_CALL)
+            .putExtra(EXTRA_CALL_CHANNEL_ID, channelId)
+            .putExtra(EXTRA_NOTIFICATION_ID, notificationId)
+        val decline = PendingIntent.getBroadcast(this, notificationId + 1, declineIntent, pendingIntentFlags(mutable = false))
+
         val notif = NotificationCompat.Builder(this, NOTIF_CHANNEL_INCOMING_CALLS)
             .setSmallIcon(R.drawable.ic_stat_notify)
             .setContentTitle(title)
@@ -303,7 +314,43 @@ class PushService : FirebaseMessagingService() {
             .setAutoCancel(true)
             .setContentIntent(answer)
             .addAction(android.R.drawable.ic_menu_call, "Answer", answer)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Decline", decline)
             .setTimeoutAfter(45_000)
+            .build()
+
+        getSystemService(NotificationManager::class.java)?.notify(notificationId, notif)
+    }
+
+    private fun showMissedCall(data: Map<String, String>) {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) return
+        val channelId = data["channel_id"].orNullIfBlank() ?: return
+        val mode = data["mode"].orNullIfBlank() ?: "voice"
+        val title = data["title"].orNullIfBlank() ?: "PigeonSMS"
+        val body = data["body"].orNullIfBlank() ?: "missed $mode call"
+
+        ensureNotificationChannel(this)
+        val notificationId = nextNotificationId()
+        val open = PendingIntent.getActivity(
+            this,
+            notificationId,
+            Intent(this, MainActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                .putNotificationTarget(NotificationTarget(channelId = channelId, channelName = title, title = title)),
+            pendingIntentFlags(mutable = false),
+        )
+
+        val notif = NotificationCompat.Builder(this, NOTIF_CHANNEL_MESSAGES)
+            .setSmallIcon(R.drawable.ic_stat_notify)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setCategory(NotificationCompat.CATEGORY_CALL)
+            .setAutoCancel(true)
+            .setContentIntent(open)
+            .setWhen(System.currentTimeMillis())
+            .setShowWhen(true)
             .build()
 
         getSystemService(NotificationManager::class.java)?.notify(notificationId, notif)

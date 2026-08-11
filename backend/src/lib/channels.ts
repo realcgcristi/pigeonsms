@@ -38,7 +38,7 @@ export async function assertChannelAccess(
   return channel;
 }
 
-export async function channelRecipients(env: Env, channel: ChannelRow): Promise<string[]> {
+export async function channelRecipients(env: Env, channel: Pick<ChannelRow, 'id' | 'space_id'>): Promise<string[]> {
   const { results } = channel.space_id
     ? await env.DB.prepare('SELECT user_id FROM space_members WHERE space_id = ?')
         .bind(channel.space_id)

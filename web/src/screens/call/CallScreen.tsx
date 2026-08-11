@@ -216,6 +216,16 @@ export default function CallScreen() {
         setRemote((list) => list.filter((entry) => entry.id !== event.participant.userId))
         return
       }
+      if (event.type === 'declined') {
+        setStatus('declined')
+        window.setTimeout(() => navigate(-1), 1200)
+        return
+      }
+      if (event.type === 'missed') {
+        setStatus('no answer')
+        window.setTimeout(() => navigate(-1), 1200)
+        return
+      }
       if (event.type !== 'offer' && event.type !== 'answer' && event.type !== 'ice') return
 
       const participant: CallParticipant = participantsRef.current.get(event.from) ?? {

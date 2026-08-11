@@ -40,6 +40,7 @@ class NotificationActionReceiver : BroadcastReceiver() {
                         if (reply != null) handleQuickReply(app.container, intent, reply)
                     }
                     NOTIFICATION_ACTION_MARK_READ -> handleMarkRead(app.container, intent)
+                    NOTIFICATION_ACTION_DECLINE_CALL -> handleDeclineCall(app.container, intent)
                 }
             } catch (_: Throwable) {
                 // Notification actions are best-effort. A signed-out account,
@@ -73,6 +74,11 @@ class NotificationActionReceiver : BroadcastReceiver() {
             selfName = session.username,
         )
         container.chatRepository.flushOutbox(channelId)
+    }
+
+    private suspend fun handleDeclineCall(container: AppContainer, intent: Intent) {
+        val channelId = intent.getStringExtra(EXTRA_CALL_CHANNEL_ID)?.trim()?.takeIf { it.isNotEmpty() } ?: return
+        container.api.declineCall(channelId)
     }
 
     private suspend fun handleMarkRead(container: AppContainer, intent: Intent) {

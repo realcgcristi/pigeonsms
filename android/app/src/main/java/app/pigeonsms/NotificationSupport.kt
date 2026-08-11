@@ -7,6 +7,7 @@ import java.util.concurrent.atomic.AtomicInteger
 /** Actions handled by [NotificationActionReceiver]. */
 const val NOTIFICATION_ACTION_QUICK_REPLY = "app.pigeonsms.action.QUICK_REPLY"
 const val NOTIFICATION_ACTION_MARK_READ = "app.pigeonsms.action.MARK_READ"
+const val NOTIFICATION_ACTION_DECLINE_CALL = "app.pigeonsms.action.DECLINE_CALL"
 const val ACTION_QUICK_REPLY = NOTIFICATION_ACTION_QUICK_REPLY
 const val ACTION_MARK_READ = NOTIFICATION_ACTION_MARK_READ
 

@@ -25,6 +25,11 @@ interface DesktopMessageDetail {
   body?: string;
 }
 
+interface DesktopCallDetail {
+  title?: string;
+  body?: string;
+}
+
 export async function checkDesktopUpdate(): Promise<DesktopUpdateInfo | null> {
   if (!isDesktopApp()) return null;
   const { check } = await import('@tauri-apps/plugin-updater');
@@ -182,6 +187,21 @@ export async function initializeDesktopRuntime(): Promise<void> {
         const body = String(detail?.body || '').replace(/\s+/g, ' ').trim().slice(0, 240);
         sendNotification({ title, ...(body ? { body } : {}) });
         await appWindow.requestUserAttention(UserAttentionType.Informational);
+      })
+      .catch(() => undefined);
+  });
+
+  window.addEventListener('pigeon:desktop-call', (event) => {
+    const detail = (event as CustomEvent<DesktopCallDetail>).detail;
+    void Promise.all([desktopNotificationsEnabled(), appWindow.isFocused()])
+      .then(async ([enabled, focused]) => {
+        const title = String(detail?.title || 'incoming call').slice(0, 80);
+        const body = String(detail?.body || '').replace(/\s+/g, ' ').trim().slice(0, 240);
+        if (enabled && !focused) {
+          const { sendNotification } = await import('@tauri-apps/plugin-notification');
+          sendNotification({ title, ...(body ? { body } : {}) });
+        }
+        await appWindow.requestUserAttention(UserAttentionType.Critical);
       })
       .catch(() => undefined);
   });

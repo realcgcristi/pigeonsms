@@ -80,6 +80,12 @@ export interface DeviceKeyRegisteredEventDto {
   pub_key: string;
 }
 
+export interface CallRingEventDto {
+  channelId: string;
+  mode: 'voice' | 'video';
+  from: { userId: string; username: string };
+}
+
 export type GatewayEvent =
   | { t: 'message.new'; d: MessageDto }
   | { t: 'message.edit'; d: MessageDto }
@@ -105,6 +111,8 @@ export type GatewayEvent =
   | { t: 'channel.delete'; d: ChannelDeleteEventDto }
   | { t: 'space.update'; d: SpaceUpdateEventDto }
   | { t: 'device.key_registered'; d: DeviceKeyRegisteredEventDto }
+  | { t: 'call.incoming'; d: CallRingEventDto }
+  | { t: 'call.missed'; d: CallRingEventDto }
   | { t: 'gateway.resume'; d: GatewayResumeEventDto };
 
 export type GatewayEventName = GatewayEvent['t'];
@@ -141,6 +149,8 @@ const KNOWN_EVENTS: ReadonlySet<string> = new Set<GatewayEventName>([
   'channel.delete',
   'space.update',
   'device.key_registered',
+  'call.incoming',
+  'call.missed',
   'gateway.resume',
 ]);
 
@@ -433,6 +443,8 @@ export type CallEvent =
       target?: string;
       data?: unknown;
     }
+  | { type: 'declined'; participant: { userId: string; username: string } }
+  | { type: 'missed' }
   | { type: 'error'; code: string; target?: string };
 
 export interface CallSocket {

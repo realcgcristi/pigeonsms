@@ -262,6 +262,8 @@ class WebRtcCallClient(
             "offer" -> acceptOffer(message)
             "answer" -> acceptAnswer(message)
             "ice" -> acceptIce(message)
+            "declined" -> onEvent(WebRtcEvent.Declined)
+            "missed" -> onEvent(WebRtcEvent.Missed)
         }
     }
 
@@ -564,4 +566,6 @@ sealed interface WebRtcEvent {
     data class Status(val status: CallStatus) : WebRtcEvent
     data class Error(val message: String) : WebRtcEvent
     data object MediaReady : WebRtcEvent
+    data object Declined : WebRtcEvent
+    data object Missed : WebRtcEvent
 }

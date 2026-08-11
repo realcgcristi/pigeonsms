@@ -1229,6 +1229,10 @@ class PigeonApi {
     return request<CallConfigResponse>(`/calls/${seg(channelId)}/config`, { signal });
   }
 
+  declineCall(channelId: string) {
+    return requestVoid(`/calls/${seg(channelId)}/decline`, { method: 'POST' });
+  }
+
   bots() {
     return request<BotsResponse>('/bots').then((r) => r.bots);
   }

@@ -52,7 +52,7 @@ export interface CallNotificationPlan {
 
 export async function callNotificationPlan(
   env: Env,
-  channel: ChannelRow,
+  channel: Pick<ChannelRow, 'id' | 'space_id' | 'name'>,
   actor: { id: string; username: string },
   mode: 'voice' | 'video',
 ): Promise<CallNotificationPlan> {
@@ -72,6 +72,37 @@ export async function callNotificationPlan(
       body,
       data: {
         kind: 'call_incoming',
+        channel_id: channel.id,
+        space_id: channel.space_id ?? '',
+        mode,
+        caller_id: actor.id,
+        caller_username: actor.username,
+      },
+    },
+  };
+}
+
+export async function callMissedNotificationPlan(
+  env: Env,
+  channel: Pick<ChannelRow, 'id' | 'space_id' | 'name'>,
+  actor: { id: string; username: string },
+  mode: 'voice' | 'video',
+): Promise<CallNotificationPlan> {
+  let title = `@${actor.username}`;
+  if (channel.space_id) {
+    const space = await env.DB.prepare('SELECT name FROM spaces WHERE id = ? AND deleted_at IS NULL')
+      .bind(channel.space_id)
+      .first<{ name: string }>();
+    title = `${space?.name ?? 'Space'} • #${channel.name ?? 'channel'} • @${actor.username}`;
+  }
+  return {
+    title,
+    body: 'missed call',
+    push: {
+      title,
+      body: `missed ${mode} call`,
+      data: {
+        kind: 'call_missed',
         channel_id: channel.id,
         space_id: channel.space_id ?? '',
         mode,

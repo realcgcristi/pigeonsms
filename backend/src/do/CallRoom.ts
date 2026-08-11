@@ -1,12 +1,14 @@
 import { assertChannelAccess, channelRecipients, fanout } from '../lib/channels';
 import type { ChannelRow } from '../lib/channels';
 import { sha256Hex } from '../lib/crypto';
-import { callNotificationPlan } from '../lib/notifications';
+import { callMissedNotificationPlan, callNotificationPlan } from '../lib/notifications';
 import { ApiError } from '../middleware/errors';
 import { sessionTokenFromCookie } from '../middleware/auth';
 import type { Env } from '../types';
 
 export const MAX_SIGNAL_BYTES = 64 * 1024;
+export const RING_TIMEOUT_MS = 45_000;
+const RING_STORAGE_KEY = 'ring';
 
 export type CallMode = 'voice' | 'video';
 export type SignalType = 'offer' | 'answer' | 'ice' | 'mute' | 'camera';
@@ -14,6 +16,15 @@ export type SignalType = 'offer' | 'answer' | 'ice' | 'mute' | 'camera';
 export interface CallParticipant {
   userId: string;
   username: string;
+  mode: CallMode;
+}
+
+interface RingState {
+  channelId: string;
+  spaceId: string | null;
+  channelName: string | null;
+  callerId: string;
+  callerUsername: string;
   mode: CallMode;
 }
 
@@ -70,10 +81,10 @@ function errorResponse(status: number, code: string, message: string): Response 
   );
 }
 
-function callPath(pathname: string): { channelId: string; endpoint: 'ws' | 'participants' } | null {
+function callPath(pathname: string): { channelId: string; endpoint: 'ws' | 'participants' | 'decline' } | null {
   const parts = pathname.split('/').filter(Boolean);
   if (parts.length !== 3 || parts[0] !== 'calls') return null;
-  if (parts[2] !== 'ws' && parts[2] !== 'participants') return null;
+  if (parts[2] !== 'ws' && parts[2] !== 'participants' && parts[2] !== 'decline') return null;
 
   try {
     const channelId = decodeURIComponent(parts[1] ?? '');
@@ -129,11 +140,19 @@ export class CallRoom {
 
   async fetch(req: Request): Promise<Response> {
     try {
-      if (req.method !== 'GET') return errorResponse(405, 'method_not_allowed', 'GET required');
-
       const url = new URL(req.url);
       const path = callPath(url.pathname);
       if (!path) return errorResponse(404, 'not_found', 'call endpoint not found');
+
+      if (path.endpoint === 'decline') {
+        if (req.method !== 'POST') return errorResponse(405, 'method_not_allowed', 'POST required');
+        const identity = await this.resolveIdentity(req, url);
+        if (!identity) return errorResponse(401, 'unauthorized', 'invalid or expired session');
+        await assertChannelAccess(this.env, identity.userId, path.channelId);
+        return this.decline(identity);
+      }
+
+      if (req.method !== 'GET') return errorResponse(405, 'method_not_allowed', 'GET required');
 
       const identity = await this.resolveIdentity(req, url);
       if (!identity) return errorResponse(401, 'unauthorized', 'invalid or expired session');
@@ -248,33 +267,84 @@ export class CallRoom {
     });
     if (!alreadyPresent) this.broadcast({ type: 'join', participant }, server);
 
-    // Nobody else was in the room — this is a fresh call, not someone joining
-    // one already in progress. Ring the rest of the channel.
     if (existingSockets.length === 0) {
-      this.state.waitUntil(this.notifyIncomingCall(channel, identity, mode));
+      // Nobody else was in the room — this is a fresh call, not someone joining
+      // one already in progress. Ring the rest of the channel and start the
+      // missed-call timeout.
+      const ring: RingState = {
+        channelId: channel.id,
+        spaceId: channel.space_id,
+        channelName: channel.name,
+        callerId: identity.userId,
+        callerUsername: identity.username,
+        mode,
+      };
+      this.state.waitUntil(this.startRinging(ring));
+    } else if (!alreadyPresent) {
+      // A new participant joined a call that was still ringing — it's answered.
+      this.state.waitUntil(this.cancelRing());
     }
 
     return new Response(null, { status: 101, webSocket: client });
   }
 
-  private async notifyIncomingCall(
-    channel: ChannelRow,
-    caller: { userId: string; username: string },
-    mode: CallMode,
-  ): Promise<void> {
+  private async startRinging(ring: RingState): Promise<void> {
+    await this.state.storage.put<RingState>(RING_STORAGE_KEY, ring);
+    await this.state.storage.setAlarm(Date.now() + RING_TIMEOUT_MS);
+    await this.notifyIncomingCall(ring);
+  }
+
+  private async cancelRing(): Promise<void> {
+    await this.state.storage.deleteAlarm();
+    await this.state.storage.delete(RING_STORAGE_KEY);
+  }
+
+  private async notifyIncomingCall(ring: RingState): Promise<void> {
     try {
+      const channel = { id: ring.channelId, space_id: ring.spaceId, name: ring.channelName };
       const recipients = await channelRecipients(this.env, channel);
-      const plan = await callNotificationPlan(this.env, channel, { id: caller.userId, username: caller.username }, mode);
+      const plan = await callNotificationPlan(this.env, channel, { id: ring.callerId, username: ring.callerUsername }, ring.mode);
       fanout(
         this.env,
         this.state,
         recipients,
-        { t: 'call.incoming', d: { channelId: channel.id, mode, from: { userId: caller.userId, username: caller.username } } },
-        { exclude: caller.userId, push: plan.push },
+        { t: 'call.incoming', d: { channelId: ring.channelId, mode: ring.mode, from: { userId: ring.callerId, username: ring.callerUsername } } },
+        { exclude: ring.callerId, push: plan.push },
       );
     } catch (err) {
       console.error('CallRoom notifyIncomingCall failed', err);
     }
+  }
+
+  /** Nobody joined within the ring window — tell the caller and push the rest of the channel a "missed call" notice. */
+  async alarm(): Promise<void> {
+    const ring = await this.state.storage.get<RingState>(RING_STORAGE_KEY);
+    await this.state.storage.delete(RING_STORAGE_KEY);
+    if (!ring) return;
+    if (this.participants().some((p) => p.userId !== ring.callerId)) return;
+
+    this.broadcast({ type: 'missed' });
+
+    try {
+      const channel = { id: ring.channelId, space_id: ring.spaceId, name: ring.channelName };
+      const recipients = await channelRecipients(this.env, channel);
+      const plan = await callMissedNotificationPlan(this.env, channel, { id: ring.callerId, username: ring.callerUsername }, ring.mode);
+      fanout(
+        this.env,
+        this.state,
+        recipients,
+        { t: 'call.missed', d: { channelId: ring.channelId, mode: ring.mode, from: { userId: ring.callerId, username: ring.callerUsername } } },
+        { exclude: ring.callerId, push: plan.push },
+      );
+    } catch (err) {
+      console.error('CallRoom alarm notifyMissedCall failed', err);
+    }
+  }
+
+  private decline(identity: { userId: string; username: string }): Response {
+    this.state.waitUntil(this.cancelRing());
+    this.broadcast({ type: 'declined', participant: identity });
+    return Response.json({ ok: true }, { headers: { 'cache-control': 'no-store' } });
   }
 
   private participants(sockets: WebSocket[] = this.state.getWebSockets()): CallParticipant[] {

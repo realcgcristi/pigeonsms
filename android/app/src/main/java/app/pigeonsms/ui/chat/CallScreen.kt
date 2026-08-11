@@ -101,6 +101,7 @@ fun CallScreenDialog(
         while (diagLog.size > 8) diagLog.removeAt(0)
     }
 
+    var callEnding by remember { mutableStateOf(false) }
     var muted by remember { mutableStateOf(false) }
     var cameraOff by remember { mutableStateOf(false) }
     var speakerOn by remember { mutableStateOf(video) } // video → speaker, voice → earpiece
@@ -145,6 +146,18 @@ fun CallScreenDialog(
                             logLine("• media ok")
                             mediaReady = true
                         }
+                        WebRtcEvent.Declined -> {
+                            errorMessage = "declined"
+                            logLine("• declined")
+                            controlsVisible = true
+                            callEnding = true
+                        }
+                        WebRtcEvent.Missed -> {
+                            errorMessage = "no answer"
+                            logLine("• no answer")
+                            controlsVisible = true
+                            callEnding = true
+                        }
                     }
                 }
             },
@@ -160,6 +173,13 @@ fun CallScreenDialog(
     val endCall = {
         client.release()
         onDismiss()
+    }
+
+    LaunchedEffect(callEnding) {
+        if (callEnding) {
+            delay(1_200)
+            endCall()
+        }
     }
 
     LaunchedEffect(Unit) {

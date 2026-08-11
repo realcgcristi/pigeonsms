@@ -2,6 +2,7 @@ import { Suspense, lazy, useEffect } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import NavBar from '@/components/NavBar';
 import { ConnectionStatus } from '@/components/ConnectionStatus';
+import { IncomingCallBanner } from '@/components/call/IncomingCallBanner';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { LoadingState } from '@/components/ui/Spinner';
 import { ToastProvider } from '@/components/ui/Toast';
@@ -61,6 +62,7 @@ export default function App() {
   const auth = useSession((s) => s.auth);
   const user = useSession((s) => s.user);
   const syncOutbox = useChat((s) => s.syncOutbox);
+  const subscribeCalls = useChat((s) => s.subscribeCalls);
 
   useEffect(() => {
     void restore();
@@ -86,11 +88,17 @@ export default function App() {
     };
   }, [auth, user]);
 
+  useEffect(() => {
+    if (!auth) return;
+    return subscribeCalls();
+  }, [auth, subscribeCalls]);
+
   if (!restored) return <LoadingState label="opening pigeonsms" />;
 
   return (
     <ToastProvider>
       <ConnectionStatus active={!!auth} />
+      {auth ? <IncomingCallBanner /> : null}
       <div className="app-backdrop" aria-hidden="true" />
       <div className={auth ? 'app-frame app-frame--authed' : 'app-frame app-frame--guest'}>
         {auth ? <NavBar /> : null}
