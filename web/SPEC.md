@@ -1,14 +1,14 @@
 # PigeonSMS Web Client — Build Contract (v3.0.0)
 
-Every agent MUST follow this file exactly. It is the single source of truth for stack, file layout, naming, and design tokens.
+Everyone MUST follow this file exactly. It is the single source of truth for stack, file layout, naming, and design tokens.
 
-## Prime directive
+## Prime directive of this
 
 Port the Android app (`/home/user/pigeonsms/android`) to the web **1:1**. Same screens, same layout, same spacing, same copy (lowercase labels where the app uses lowercase), same interactions, same order of elements. When in doubt, open the Kotlin file and mirror it literally.
 
-## Hard rules
+## Hard rules, for everyone, including myself and others
 
-1. **NO CODE COMMENTS.** Not one. No JSDoc, no `//`, no `/* */`, no docblocks. The user explicitly forbade them.
+1. **NO CODE COMMENTS.** Not one. No JSDoc, no `//`, no `/* */`, no docblocks. I explicitly forbade them. They just make the code more useless.
 2. TypeScript strict. No `any` unless unavoidable (prefer `unknown` + narrowing).
 3. React 19 function components + hooks. No class components.
 4. Styling: plain CSS files imported per component (`Foo.css` next to `Foo.tsx`), using the CSS variables in `src/styles/tokens.css`. No Tailwind, no CSS-in-JS, no UI libraries.
@@ -16,8 +16,8 @@ Port the Android app (`/home/user/pigeonsms/android`) to the web **1:1**. Same s
 6. Use the shared primitives in `src/components/ui/` and icons from `src/components/icons.tsx`. Do not invent a second Button/Avatar/Sheet.
 7. All API access goes through `src/api/client.ts` (`api.*`). All realtime through `src/api/gateway.ts`. Never `fetch()` directly in a screen.
 8. Import with the `@/` alias (`@/components/ui/Button`).
-9. Do not edit files owned by another agent. Create only the files assigned to you.
-10. If a Write/Edit is blocked by a "Fact-Forcing Gate" hook, print the 4 requested facts (importers, no duplicate exists, data schema, and the verbatim user instruction `"MAKE IT LOOK EXACTLY LIKE THE MOBILE APP IDC THE COST. DONT SPEAK, DONT DO CODE COMMENTS. JUST DO IT"`) then retry the same write.
+9. Do not edit files owned by / in edit by someone who claimed it. Create only the files assigned to you.
+10. If a Write/Edit is blocked by a "Fact-Forcing Gate" hook, print the 4 requested facts (importers, no duplicate exists, data schema.
 
 ## Stack
 
@@ -106,4 +106,4 @@ Themes: `data-theme="dark" | "oled" | "light"` on `<html>`. Wallpapers from `Wal
 
 ## Verification
 
-`cd /home/user/pigeonsms/web && npm run typecheck` must pass with zero errors before an agent reports done. Run it yourself; fix your own errors.
+`cd *your home*/pigeonsms/web && npm run typecheck` must pass with zero errors before anyone reports done. Run it yourself; fix your own errors.
