@@ -751,8 +751,11 @@ class ChatRepository(
         if (channelId !in establishedSessions) {
             runCatching { ensureE2eeSession(channelId, manager) }
         }
-        return runCatching { manager.decrypt(channelId, content, authorId) }.getOrNull()
-            ?: ProtectedMessage(lockedPlaceholder)
+        return runCatching { manager.decrypt(channelId, content, authorId) }
+            .onFailure { android.util.Log.w("E2ee", "decrypt failed for $channelId from $authorId", it) }
+            .getOrElse { error ->
+                ProtectedMessage("$lockedPlaceholder (${error.message ?: error.javaClass.simpleName})")
+            }
     }
 
     private suspend fun mergeEvent(dto: MessageDto) {

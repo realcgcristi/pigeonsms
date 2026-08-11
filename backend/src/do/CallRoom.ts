@@ -309,7 +309,7 @@ export class CallRoom {
         this.state,
         recipients,
         { t: 'call.incoming', d: { channelId: ring.channelId, mode: ring.mode, from: { userId: ring.callerId, username: ring.callerUsername } } },
-        { exclude: ring.callerId, push: plan.push },
+        { exclude: ring.callerId, push: plan.push, forcePush: true },
       );
     } catch (err) {
       console.error('CallRoom notifyIncomingCall failed', err);
@@ -334,7 +334,7 @@ export class CallRoom {
         this.state,
         recipients,
         { t: 'call.missed', d: { channelId: ring.channelId, mode: ring.mode, from: { userId: ring.callerId, username: ring.callerUsername } } },
-        { exclude: ring.callerId, push: plan.push },
+        { exclude: ring.callerId, push: plan.push, forcePush: true },
       );
     } catch (err) {
       console.error('CallRoom alarm notifyMissedCall failed', err);
@@ -399,6 +399,7 @@ export class CallRoom {
         {
           exclude: ring.callerId,
           push: { title: '', body: '', data: { kind: 'call_cancelled', channel_id: ring.channelId, mode: ring.mode } },
+          forcePush: true,
         },
       );
     } catch (err) {

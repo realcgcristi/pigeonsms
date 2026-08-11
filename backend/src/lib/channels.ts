@@ -99,6 +99,11 @@ interface FanoutOpts {
   exclude?: string;
   suppressPushFor?: string[];
   push?: PushPayload;
+  // Gateway delivery just means the socket is open — for a time-critical alert
+  // like a ringing call that's not the same as the user actually seeing it
+  // (backgrounded apps keep sockets open for a while with no visible UI).
+  // Send the push unconditionally instead of only when delivered === 0.
+  forcePush?: boolean;
   mentionOnly?: boolean;
   // E2EE: the stored content is ciphertext, so the plaintext preview would leak
   // (or be garbage). Replace the push body with a generic notice — the gateway
@@ -196,7 +201,7 @@ export function fanout(
           const stub = env.USER_GATEWAY.get(env.USER_GATEWAY.idFromName(uid));
           const res = await stub.fetch('https://gateway/notify', { method: 'POST', body: payload });
           const { delivered } = await res.json<{ delivered: number }>();
-          if (delivered === 0 && push && !opts.suppressPushFor?.includes(uid)) {
+          if ((delivered === 0 || opts.forcePush) && push && !opts.suppressPushFor?.includes(uid)) {
             const preference = prefsByUser.get(uid);
         // A mentions-only scope suppresses ordinary messages but still allows
         // notifications explicitly marked as mention fanout.  Mute always wins.

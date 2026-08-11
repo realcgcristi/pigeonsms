@@ -277,7 +277,7 @@
 @keyframes skeleton { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 
 .ui-backdrop {
-  position: absolute;
+  position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.55);
   z-index: 60;
@@ -285,7 +285,7 @@
 }
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 .ui-sheet {
-  position: absolute;
+  position: fixed;
   left: 0;
   right: 0;
   bottom: 0;
@@ -304,7 +304,7 @@
 .ui-sheet__body { overflow-y: auto; padding: 0 0 var(--sp-m); }
 
 .ui-dialog {
-  position: absolute;
+  position: fixed;
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
@@ -321,7 +321,7 @@
 .ui-dialog__actions { display: flex; justify-content: flex-end; gap: var(--sp-s); margin-top: var(--sp-xl); }
 
 .ui-menu {
-  position: absolute;
+  position: fixed;
   min-width: 190px;
   padding: var(--sp-xs);
   background: var(--surface-highest);
