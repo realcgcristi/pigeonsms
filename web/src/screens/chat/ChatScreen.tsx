@@ -32,7 +32,7 @@ import { Dialog, Sheet } from '@/components/ui/Overlay'
 import { Screen, TopBar } from '@/components/ui/Layout'
 import { useToast } from '@/components/ui/Toast'
 import { daySeparator, duration as formatDuration, relativeTime, sameDay } from '@/lib/format'
-import { emojiQueryAt } from '@/lib/markdown'
+import { emojiQueryAt, mentionQueryAt } from '@/lib/markdown'
 import { protectAttachment } from '@/lib/e2ee/manager'
 import type { ChatMessage } from '@/store/chat'
 import { useChat } from '@/store/chat'
@@ -239,6 +239,24 @@ const Composer = memo(function Composer({
     [emoji, query, slash],
   )
 
+  const mentionQuery = !slash ? mentionQueryAt(text, text.length) : null
+  const [mentionResults, setMentionResults] = useState<{ id: string; username: string }[]>([])
+  useEffect(() => {
+    if (mentionQuery === null) {
+      setMentionResults([])
+      return
+    }
+    let cancelled = false
+    api.mentionCandidates(channelId, mentionQuery).then((users) => {
+      if (!cancelled) setMentionResults(users)
+    }).catch(() => {
+      if (!cancelled) setMentionResults([])
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [channelId, mentionQuery])
+
   const groups = useMemo(
     () =>
       Object.entries(
@@ -354,6 +372,24 @@ const Composer = memo(function Composer({
             >
               <img src={api.mediaUrl(item.media_key ?? '')} alt={item.name} />
               :{item.name}:
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {mentionResults.length > 0 ? (
+        <div className="autocomplete">
+          {mentionResults.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className="autocomplete__item"
+              onClick={() => {
+                setText(text.replace(/@[a-z0-9_.]{0,32}$/i, `@${item.username} `))
+                inputRef.current?.focus()
+              }}
+            >
+              @{item.username}
             </button>
           ))}
         </div>

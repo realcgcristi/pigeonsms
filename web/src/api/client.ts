@@ -1313,6 +1313,12 @@ class PigeonApi {
     );
   }
 
+  mentionCandidates(channelId: string, q: string) {
+    return request<{ users: { id: string; username: string }[] }>(
+      `/channels/${seg(channelId)}/mentions?q=${encodeURIComponent(q)}`,
+    ).then((r) => r.users);
+  }
+
   sendInteraction(
     channelId: string,
     body: { command: string; bot_id?: string; options?: JsonObject; nonce?: string },

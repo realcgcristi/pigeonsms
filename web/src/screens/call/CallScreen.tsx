@@ -131,6 +131,10 @@ export default function CallScreen() {
       connection.ontrack = (event) => {
         for (const track of event.streams[0]?.getTracks() ?? [event.track]) {
           if (!stream.getTrackById(track.id)) stream.addTrack(track)
+          track.onended = () => {
+            stream.removeTrack(track)
+            setRemote((list) => list.map((entry) => (entry.id === participant.userId ? { ...entry } : entry)))
+          }
         }
         publish(participant.userId, participant, stream)
       }
@@ -414,7 +418,13 @@ export default function CallScreen() {
     const cameraTrack = localStream.current?.getVideoTracks()[0] ?? null
     for (const peer of peers.current.values()) {
       const sender = peer.connection.getSenders().find((item) => item.track?.kind === 'video')
-      if (sender) await sender.replaceTrack(cameraTrack)
+      if (!sender) continue
+      if (cameraTrack) {
+        await sender.replaceTrack(cameraTrack)
+      } else {
+        peer.connection.removeTrack(sender)
+      }
+      if (socketRef.current) await offerPeer(peer, socketRef.current)
     }
     setSharing(false)
   }

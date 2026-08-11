@@ -171,3 +171,9 @@ export function emojiQueryAt(text: string, caret: number): string | null {
   const match = upto.match(/:([a-z0-9_]{1,32})$/i)
   return match ? (match[1] ?? null) : null
 }
+
+export function mentionQueryAt(text: string, caret: number): string | null {
+  const upto = text.slice(0, caret)
+  const match = upto.match(/(?:^|\s)@([a-z0-9_.]{0,32})$/i)
+  return match ? (match[1] ?? '') : null
+}

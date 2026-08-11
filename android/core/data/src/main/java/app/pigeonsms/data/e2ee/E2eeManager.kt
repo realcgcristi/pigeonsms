@@ -22,6 +22,7 @@ import javax.crypto.spec.SecretKeySpec
 
 interface E2eeManager {
     suspend fun deviceKeyPair(): Sodium.KeyPairBytes
+    suspend fun deviceId(): String?
     suspend fun publishDevice(name: String? = null): String
     suspend fun hasSession(channelId: String): Boolean
     suspend fun wrapDmKeyFor(channelId: String, devicePubKeys: List<DevicePub>): List<KeyEnvelopeDto>
@@ -95,6 +96,10 @@ class DefaultE2eeManager internal constructor(
 
     override suspend fun deviceKeyPair(): Sodium.KeyPairBytes = withContext(Dispatchers.IO) {
         identity.getOrCreate()
+    }
+
+    override suspend fun deviceId(): String? = withContext(Dispatchers.IO) {
+        identity.deviceId()
     }
 
     override suspend fun publishDevice(name: String?): String = withContext(Dispatchers.IO) {

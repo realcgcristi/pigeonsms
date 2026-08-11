@@ -710,9 +710,13 @@ class ChatRepository(
             if (channelId in establishedSessions) return@withLock true
             val ok = runCatching {
                 if (manager.hasSession(channelId)) return@runCatching true
-                // 1. Receive path: is there already a key wrapped to us?
+                // 1. Receive path: is there already a key wrapped to us specifically?
+                // getKeyEnvelopes returns every recipient device's envelope for this
+                // channel, not just ours — picking the first non-empty one regardless
+                // of to_device would unwrap ciphertext meant for someone else's key.
+                val ownDeviceId = manager.deviceId()
                 val envelopes = runCatching { api.getKeyEnvelopes(channelId) }.getOrDefault(emptyList())
-                val mine = envelopes.firstOrNull { it.wrapped_key.isNotEmpty() }
+                val mine = envelopes.firstOrNull { it.wrapped_key.isNotEmpty() && it.to_device == ownDeviceId }
                 if (mine != null) {
                     manager.unwrapDmKey(channelId, mine.wrapped_key)
                 }

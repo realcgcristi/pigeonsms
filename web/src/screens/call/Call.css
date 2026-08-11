@@ -1,6 +1,6 @@
 .call { position: relative; display: flex; min-width: 0; min-height: 0; flex: 1 1 auto; flex-direction: column; background: radial-gradient(120% 60% at 50% 0%, color-mix(in srgb, var(--accent) 14%, transparent), var(--ink)); }
 .call__stage { flex: 1 1 auto; display: grid; place-items: center; gap: var(--sp-m); }
-.call__video { width: min(90%, 320px); border-radius: var(--r-card); background: var(--surface); aspect-ratio: 3 / 4; object-fit: cover; }
+.call__video { width: min(94%, 640px); border-radius: var(--r-card); background: var(--surface); aspect-ratio: 16 / 9; object-fit: contain; }
 .call__hint { color: var(--text-tertiary); font-size: 13px; }
 .call__controls { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--sp-l); padding: var(--sp-xl) var(--sp-l) calc(var(--sp-xxl) + env(safe-area-inset-bottom)); }
 .call__waiting { display: grid; place-items: center; gap: var(--sp-m); }
@@ -19,6 +19,7 @@
   bottom: 120px;
   width: 96px;
   aspect-ratio: 3 / 4;
+  object-fit: cover;
   border-radius: var(--r-chip);
   border: 1px solid var(--outline);
 }

@@ -258,10 +258,10 @@ fun AppShell(session: LocalSession) {
                     app,
                     onOpenNest = { spaceId -> nav.navigate("nest/$spaceId") },
                     onOpenChannel = { ch, name, kind ->
-                        if (kind == "forum") {
-                            nav.navigate("forum/$ch/${enc(name)}")
-                        } else {
-                            nav.navigate("chat/$ch/${enc(name)}?space=true")
+                        when (kind) {
+                            "forum" -> nav.navigate("forum/$ch/${enc(name)}")
+                            "voice" -> nav.navigate("chat/$ch/${enc(name)}?space=true&call=voice")
+                            else -> nav.navigate("chat/$ch/${enc(name)}?space=true")
                         }
                     },
                 )
@@ -277,10 +277,10 @@ fun AppShell(session: LocalSession) {
                         onOpenMembers = { nav.navigate("nestmembers/$spaceId") },
                         onBack = { nav.popBackStack() },
                         onOpenChannel = { ch, name, kind ->
-                            if (kind == "forum") {
-                                nav.navigate("forum/$ch/${enc(name)}")
-                            } else {
-                                nav.navigate("chat/$ch/${enc(name)}?space=true")
+                            when (kind) {
+                                "forum" -> nav.navigate("forum/$ch/${enc(name)}")
+                                "voice" -> nav.navigate("chat/$ch/${enc(name)}?space=true&call=voice")
+                                else -> nav.navigate("chat/$ch/${enc(name)}?space=true")
                             }
                         },
                     )

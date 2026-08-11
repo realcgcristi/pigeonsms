@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import type { ReactNode } from 'react'
 import { Button } from '@/components/ui/Button'
 import './ui.css'
@@ -68,7 +69,7 @@ export function Sheet({
   const titleId = useId()
   const ref = useModalFocus(open, onClose)
   if (!open) return null
-  return (
+  return createPortal(
     <>
       <Backdrop onClose={onClose} />
       <div
@@ -83,7 +84,8 @@ export function Sheet({
         {title ? <div className="ui-sheet__title" id={titleId}>{title}</div> : null}
         <div className="ui-sheet__body">{children}</div>
       </div>
-    </>
+    </>,
+    document.body,
   )
 }
 
@@ -103,7 +105,7 @@ export function Dialog({
   const titleId = useId()
   const ref = useModalFocus(open, onClose)
   if (!open) return null
-  return (
+  return createPortal(
     <>
       <Backdrop onClose={onClose} />
       <div
@@ -118,7 +120,8 @@ export function Dialog({
         <div className="ui-dialog__body">{children}</div>
         {actions ? <div className="ui-dialog__actions">{actions}</div> : null}
       </div>
-    </>
+    </>,
+    document.body,
   )
 }
 
@@ -197,7 +200,7 @@ export function ContextMenu({
   }, [onClose, open])
   if (!open) return null
   const top = Math.min(y, window.innerHeight - items.length * 44 - 40)
-  return (
+  return createPortal(
     <>
       <Backdrop onClose={onClose} />
       <div className="ui-menu" role="menu" style={{ left: Math.max(8, Math.min(x, 260)), top: Math.max(8, top) }}>
@@ -217,6 +220,7 @@ export function ContextMenu({
           </button>
         ))}
       </div>
-    </>
+    </>,
+    document.body,
   )
 }
