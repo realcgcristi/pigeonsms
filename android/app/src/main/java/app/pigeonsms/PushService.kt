@@ -30,6 +30,9 @@ const val NOTIF_CHANNEL_INCOMING_CALLS = "incoming_calls"
 const val PUSH_TYPE_APP_UPDATE = "app_update"
 const val PUSH_KIND_CALL_INCOMING = "call_incoming"
 const val PUSH_KIND_CALL_MISSED = "call_missed"
+const val PUSH_KIND_CALL_CANCELLED = "call_cancelled"
+
+fun ringNotificationId(channelId: String): Int = "ring:$channelId".hashCode()
 
 /**
  * Deep-link + extras for the app-update notification. The About screen owns the
@@ -128,6 +131,12 @@ class PushService : FirebaseMessagingService() {
         }
         if (data["kind"] == PUSH_KIND_CALL_MISSED) {
             showMissedCall(data)
+            return
+        }
+        if (data["kind"] == PUSH_KIND_CALL_CANCELLED) {
+            data["channel_id"]?.takeIf { it.isNotBlank() }?.let { channelId ->
+                getSystemService(NotificationManager::class.java)?.cancel(ringNotificationId(channelId))
+            }
             return
         }
 
@@ -292,7 +301,7 @@ class PushService : FirebaseMessagingService() {
         val body = data["body"].orNullIfBlank() ?: if (mode == "video") "incoming video call" else "incoming voice call"
 
         ensureNotificationChannel(this)
-        val notificationId = nextNotificationId()
+        val notificationId = ringNotificationId(channelId)
         val target = CallTarget(channelId = channelId, mode = mode, title = title, isSpace = isSpace)
         val answerIntent = Intent(this, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)

@@ -128,14 +128,8 @@
   font-weight: 600;
 }
 .chat__call-summary {
-  align-self: center;
-  margin: var(--sp-xs) 0;
-  padding: 4px 14px;
-  border-radius: 999px;
-  background: var(--surface);
   color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 500;
+  font-style: italic;
 }
 .msg { display: flex; gap: var(--sp-s); padding: 1px var(--sp-s); max-width: 100%; }
 .chat__message-anchor {

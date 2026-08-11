@@ -79,6 +79,7 @@ export default function CallScreen() {
   const [started] = useState(() => Date.now())
   const [elapsed, setElapsed] = useState(0)
   const everConnected = useRef(false)
+  const caller = useRef<{ id: string; username: string } | null>(null)
   const addCallSummary = useChat((s) => s.addCallSummary)
 
   const publish = useCallback((id: string, participant: CallParticipant, stream: MediaStream) => {
@@ -189,6 +190,12 @@ export default function CallScreen() {
 
     const handle = async (event: CallEvent, socket: CallSocket) => {
       if (event.type === 'ready') {
+        if (caller.current === null) {
+          const other = event.participants.find((participant) => participant.userId !== me?.id)
+          caller.current = other
+            ? { id: other.userId, username: other.username }
+            : { id: me?.id ?? '', username: me?.username ?? 'you' }
+        }
         const active = new Set(event.participants.map((participant) => participant.userId))
         for (const [userId, peer] of peers.current) {
           if (active.has(userId)) continue
@@ -316,6 +323,8 @@ export default function CallScreen() {
           at: Date.now(),
           mode,
           durationSeconds: Math.floor((Date.now() - started) / 1000),
+          callerId: caller.current?.id ?? me?.id ?? '',
+          callerUsername: caller.current?.username ?? me?.username ?? 'you',
         })
       }
       window.clearInterval(timer)

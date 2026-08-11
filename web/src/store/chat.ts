@@ -59,6 +59,8 @@ export interface CallSummaryEntry {
   at: number;
   mode: 'voice' | 'video';
   durationSeconds: number;
+  callerId: string;
+  callerUsername: string;
 }
 
 export interface ChatState {
@@ -749,9 +751,13 @@ export const useChat = create<ChatState>((set, get) => ({
     const offCallMissed = gateway.on('call.missed', (d) => {
       set((s) => (s.incomingCall?.channelId === d.channelId ? { incomingCall: null } : {}));
     });
+    const offCallCancelled = gateway.on('call.cancelled', (d) => {
+      set((s) => (s.incomingCall?.channelId === d.channelId ? { incomingCall: null } : {}));
+    });
     return () => {
       offCallIncoming();
       offCallMissed();
+      offCallCancelled();
     };
   },
 }));

@@ -562,12 +562,17 @@ const MessageItem = memo(function MessageItem({
   const showAuthor = !previous || previous.author?.id !== message.author?.id || showDay
 
   if (message.metadata?.call_summary) {
+    const mine = message.author?.id === meId
     const callMode = message.metadata.call_mode === 'video' ? 'video call' : 'call'
     const seconds = typeof message.metadata.call_duration === 'number' ? message.metadata.call_duration : 0
     return (
       <div id={`message-${message.id}`} className="chat__message-anchor">
         {showDay ? <div className="chat__day">{daySeparator(message.created_at ?? 0)}</div> : null}
-        <div className="chat__call-summary">{callMode} ended · {formatDuration(seconds * 1000)}</div>
+        <div className={mine ? 'msg msg--mine' : 'msg'}>
+          <div className="msg__bubble msg__bubble--plain chat__call-summary">
+            {mine ? `${callMode} ended` : `${message.author?.username ?? 'they'} called`} · {formatDuration(seconds * 1000)}
+          </div>
+        </div>
       </div>
     )
   }
@@ -690,7 +695,7 @@ export default function ChatScreen() {
     const synthetic: ChatMessage[] = summaries.map((entry) => ({
       id: entry.id,
       channel_id: entry.channelId,
-      author: { id: 'system', username: 'system' },
+      author: { id: entry.callerId, username: entry.callerUsername },
       content: '',
       created_at: entry.at,
       state: 'sent',

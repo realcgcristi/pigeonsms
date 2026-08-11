@@ -163,7 +163,7 @@ class AppViewModel(
                             _incomingCall.value = IncomingCall(channelId, "@$callerUsername", mode, isSpaceChannel)
                         }
                     }
-                    "call.missed" -> {
+                    "call.missed", "call.cancelled" -> {
                         val channelId = ev.d.jsonObject["channelId"]?.jsonPrimitive?.content
                         if (channelId != null && _incomingCall.value?.channelId == channelId) {
                             _incomingCall.value = null

@@ -4,6 +4,8 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Handler
 import android.os.Looper
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -81,12 +83,14 @@ fun CallScreenDialog(
     video: Boolean,
     title: String,
     onDismiss: () -> Unit,
-    onCallEnded: (durationSeconds: Long, video: Boolean) -> Unit = { _, _ -> },
+    onCallEnded: (durationSeconds: Long, video: Boolean, callerId: String, callerUsername: String) -> Unit = { _, _, _, _ -> },
 ) {
     val context = LocalContext.current
     val api = remember(context) { (context.applicationContext as PigeonApp).container.api }
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
     var everConnected by remember { mutableStateOf(false) }
+    var callerId by remember { mutableStateOf("") }
+    var callerUsername by remember { mutableStateOf("") }
 
     // Shared EGL context for all renderers + the encoder/decoder factories.
     // Created once; released in onDispose after all renderers are released.
@@ -167,6 +171,10 @@ fun CallScreenDialog(
                             controlsVisible = true
                             callEnding = true
                         }
+                        is WebRtcEvent.CallerInfo -> {
+                            callerId = event.userId
+                            callerUsername = event.username
+                        }
                     }
                 }
             },
@@ -182,6 +190,15 @@ fun CallScreenDialog(
     val endCall = {
         client.release()
         onDismiss()
+    }
+
+    fun startVideo() {
+        client.enableVideo()
+        videoActive = true
+        app.pigeonsms.ui.call.CallForegroundService.start(context.applicationContext, true, title)
+    }
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) startVideo()
     }
 
     LaunchedEffect(callEnding) {
@@ -209,7 +226,7 @@ fun CallScreenDialog(
 
     DisposableEffect(Unit) {
         onDispose {
-            if (everConnected) onCallEnded(durationSeconds, videoActive)
+            if (everConnected) onCallEnded(durationSeconds, videoActive, callerId, callerUsername)
             audio.stop()
             client.release()
             app.pigeonsms.ui.call.ActiveCall.unregister()
@@ -248,7 +265,7 @@ fun CallScreenDialog(
                     ),
                 ),
         ) {
-            if (videoActive) {
+            if (videoActive || remoteTiles.isNotEmpty()) {
                 // Remote video tiles fill the surface; local preview floats.
                 val tiles = remoteTiles.values.toList()
                 if (tiles.isEmpty()) {
@@ -317,7 +334,7 @@ fun CallScreenDialog(
             }
 
             // Tap layer for video calls — toggles the controls.
-            if (videoActive) {
+            if (videoActive || remoteTiles.isNotEmpty()) {
                 Box(
                     Modifier
                         .fillMaxSize()
@@ -368,9 +385,11 @@ fun CallScreenDialog(
                     controlsShownAt = System.currentTimeMillis()
                 },
                 onEnableVideo = {
-                    client.enableVideo()
-                    videoActive = true
-                    app.pigeonsms.ui.call.CallForegroundService.start(context.applicationContext, true, title)
+                    if (androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                        startVideo()
+                    } else {
+                        cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                    }
                     controlsShownAt = System.currentTimeMillis()
                 },
                 onEndCall = endCall,

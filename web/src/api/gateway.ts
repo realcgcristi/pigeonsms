@@ -113,6 +113,7 @@ export type GatewayEvent =
   | { t: 'device.key_registered'; d: DeviceKeyRegisteredEventDto }
   | { t: 'call.incoming'; d: CallRingEventDto }
   | { t: 'call.missed'; d: CallRingEventDto }
+  | { t: 'call.cancelled'; d: CallRingEventDto }
   | { t: 'gateway.resume'; d: GatewayResumeEventDto };
 
 export type GatewayEventName = GatewayEvent['t'];
@@ -151,6 +152,7 @@ const KNOWN_EVENTS: ReadonlySet<string> = new Set<GatewayEventName>([
   'device.key_registered',
   'call.incoming',
   'call.missed',
+  'call.cancelled',
   'gateway.resume',
 ]);
 

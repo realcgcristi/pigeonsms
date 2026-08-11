@@ -415,8 +415,10 @@ class ChatRepository(
         // E2EE. We NEVER encrypt space/forum messages (isDm gates that).
         val mgr = e2ee
         val cipher = if (e2eeEnabled && isDm && mgr != null) {
-            check(ensureE2eeSession(channelId, mgr)) { "encrypted messaging is not ready on the other device" }
-            mgr.encrypt(channelId, content, attachmentSecret)
+            runCatching {
+                if (!ensureE2eeSession(channelId, mgr)) return@runCatching null
+                mgr.encrypt(channelId, content, attachmentSecret)
+            }.getOrNull()
         } else {
             null
         }

@@ -83,6 +83,7 @@ class WebRtcCallClient(
     private var frontFacing = true
     private var selfId = ""
     private var signalingGeneration = 0
+    private var callerInfoEmitted = false
     private var configJob: Job? = null
 
     @Volatile var localVideoTrack: VideoTrack? = null
@@ -153,14 +154,18 @@ class WebRtcCallClient(
 
     fun enableVideo() {
         scope.launch {
-            if (videoTrack != null) return@launch
-            val track = acquireCamera() ?: return@launch
-            val peerIds = synchronized(lock) {
-                peers.forEach { (_, state) -> runCatching { state.connection.addTrack(track, listOf("pigeon-stream")) } }
-                peers.keys.toList()
+            try {
+                if (videoTrack != null) return@launch
+                val track = acquireCamera() ?: return@launch
+                val peerIds = synchronized(lock) {
+                    peers.forEach { (_, state) -> runCatching { state.connection.addTrack(track, listOf("pigeon-stream")) } }
+                    peers.keys.toList()
+                }
+                peerIds.forEach { createOffer(it, false) }
+                signal(JSONObject().put("type", "camera").put("data", JSONObject().put("on", true)).toString())
+            } catch (error: Throwable) {
+                onEvent(WebRtcEvent.Phase("camera unavailable: ${error.message ?: error.javaClass.simpleName}"))
             }
-            peerIds.forEach { createOffer(it, false) }
-            signal(JSONObject().put("type", "camera").put("data", JSONObject().put("on", true)).toString())
         }
     }
 
@@ -252,18 +257,28 @@ class WebRtcCallClient(
         val message = runCatching { JSONObject(raw) }.getOrNull() ?: return
         when (message.optString("type")) {
             "ready" -> {
-                selfId = message.optJSONObject("participant")?.optString("userId").orEmpty()
+                val selfParticipant = message.optJSONObject("participant")
+                selfId = selfParticipant?.optString("userId").orEmpty()
+                val selfUsername = selfParticipant?.optString("username").orEmpty()
                 val participants = message.optJSONArray("participants")
                 var count = 0
+                var otherId: String? = null
+                var otherUsername: String? = null
                 if (participants != null) {
                     for (index in 0 until participants.length()) {
                         val participant = participants.optJSONObject(index) ?: continue
                         val peerId = participant.optString("userId")
                         if (peerId.isEmpty() || peerId == selfId) continue
                         count += 1
+                        otherId = peerId
+                        otherUsername = participant.optString("username")
                         createPeer(peerId)
                         if (signalingGeneration > 1 || selfId < peerId) createOffer(peerId, signalingGeneration > 1)
                     }
+                }
+                if (!callerInfoEmitted) {
+                    callerInfoEmitted = true
+                    onEvent(WebRtcEvent.CallerInfo(otherId ?: selfId, otherUsername ?: selfUsername))
                 }
                 onEvent(WebRtcEvent.Phase("ready with $count peer(s)"))
             }
@@ -590,4 +605,5 @@ sealed interface WebRtcEvent {
     data object Declined : WebRtcEvent
     data object Missed : WebRtcEvent
     data object AllPeersLeft : WebRtcEvent
+    data class CallerInfo(val userId: String, val username: String) : WebRtcEvent
 }

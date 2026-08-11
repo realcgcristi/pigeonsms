@@ -261,7 +261,13 @@ private val reportCategories = listOf(
 )
 private val reactionChoices = listOf("👍", "❤️", "😂", "🎉", "🐦", "🔥")
 
-private data class CallSummaryEntry(val id: String, val video: Boolean, val durationSeconds: Long)
+private data class CallSummaryEntry(
+    val id: String,
+    val video: Boolean,
+    val durationSeconds: Long,
+    val mine: Boolean,
+    val callerUsername: String,
+)
 
 @OptIn(ExperimentalLayoutApi::class, androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -480,14 +486,14 @@ fun ChatScreen(
         Box(Modifier.weight(1f).fillMaxWidth()) {
             Box(Modifier.fillMaxSize().hazeSource(chatHaze)) {
             when {
-                messages.isEmpty() && ui.initialLoading -> {
+                messages.isEmpty() && callSummaries.isEmpty() && ui.initialLoading -> {
                     if (novaChrome) {
                         NovaChatSkeleton(Modifier.fillMaxSize().padding(top = barInset + Spacing.s))
                     } else {
                         LoadingIndicator(modifier = Modifier.size(48.dp).align(Alignment.Center))
                     }
                 }
-                messages.isEmpty() -> EmptyChatState(Modifier.align(Alignment.Center))
+                messages.isEmpty() && callSummaries.isEmpty() -> EmptyChatState(Modifier.align(Alignment.Center))
                 else -> LazyColumn(
                     state = listState,
                     modifier = Modifier.fillMaxSize(),
@@ -600,12 +606,31 @@ fun ChatScreen(
                         }
                     }
                     items(callSummaries, key = { it.id }) { entry ->
-                        Box(Modifier.fillMaxWidth().padding(vertical = Spacing.s), contentAlignment = Alignment.Center) {
-                            Text(
-                                "${if (entry.video) "video call" else "call"} ended · ${app.pigeonsms.ui.call.formatCallDuration(entry.durationSeconds)}",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                        Box(
+                            Modifier.fillMaxWidth().padding(vertical = Spacing.xxs),
+                            contentAlignment = if (entry.mine) Alignment.CenterEnd else Alignment.CenterStart,
+                        ) {
+                            val label = if (entry.mine) {
+                                "${if (entry.video) "video call" else "call"} ended"
+                            } else {
+                                "${entry.callerUsername} called"
+                            }
+                            Box(
+                                Modifier
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(
+                                        if (entry.mine) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.surfaceVariant,
+                                    )
+                                    .padding(horizontal = Spacing.m, vertical = Spacing.s),
+                            ) {
+                                Text(
+                                    "$label · ${app.pigeonsms.ui.call.formatCallDuration(entry.durationSeconds)}",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = if (entry.mine) MaterialTheme.colorScheme.onPrimary
+                                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
                         }
                     }
                 }
@@ -894,8 +919,16 @@ fun ChatScreen(
                 video = video,
                 title = title,
                 onDismiss = { callVideo = null },
-                onCallEnded = { durationSeconds, videoCall ->
-                    callSummaries.add(CallSummaryEntry("call-${System.currentTimeMillis()}", videoCall, durationSeconds))
+                onCallEnded = { durationSeconds, videoCall, callerId, callerUsername ->
+                    callSummaries.add(
+                        CallSummaryEntry(
+                            id = "call-${System.currentTimeMillis()}",
+                            video = videoCall,
+                            durationSeconds = durationSeconds,
+                            mine = callerId == selfId,
+                            callerUsername = callerUsername,
+                        ),
+                    )
                 },
             )
         }

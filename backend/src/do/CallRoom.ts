@@ -379,5 +379,30 @@ export class CallRoom {
       .getWebSockets()
       .some((candidate) => candidate !== ws && attachmentOf(candidate)?.userId === participant.userId);
     if (!stillPresent) this.broadcast({ type: 'leave', participant }, ws);
+    this.state.waitUntil(this.cancelIfCallerLeftDuringRing(participant.userId));
+  }
+
+  private async cancelIfCallerLeftDuringRing(userId: string): Promise<void> {
+    const ring = await this.state.storage.get<RingState>(RING_STORAGE_KEY);
+    if (!ring || ring.callerId !== userId) return;
+    if (this.participants().some((p) => p.userId !== ring.callerId)) return;
+    await this.cancelRing();
+
+    try {
+      const channel = { id: ring.channelId, space_id: ring.spaceId, name: ring.channelName };
+      const recipients = await channelRecipients(this.env, channel);
+      fanout(
+        this.env,
+        this.state,
+        recipients,
+        { t: 'call.cancelled', d: { channelId: ring.channelId, mode: ring.mode, from: { userId: ring.callerId, username: ring.callerUsername } } },
+        {
+          exclude: ring.callerId,
+          push: { title: '', body: '', data: { kind: 'call_cancelled', channel_id: ring.channelId, mode: ring.mode } },
+        },
+      );
+    } catch (err) {
+      console.error('CallRoom cancelIfCallerLeftDuringRing failed', err);
+    }
   }
 }
