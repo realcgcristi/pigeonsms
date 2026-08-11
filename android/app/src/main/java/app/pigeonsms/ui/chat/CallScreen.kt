@@ -81,10 +81,12 @@ fun CallScreenDialog(
     video: Boolean,
     title: String,
     onDismiss: () -> Unit,
+    onCallEnded: (durationSeconds: Long, video: Boolean) -> Unit = { _, _ -> },
 ) {
     val context = LocalContext.current
     val api = remember(context) { (context.applicationContext as PigeonApp).container.api }
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
+    var everConnected by remember { mutableStateOf(false) }
 
     // Shared EGL context for all renderers + the encoder/decoder factories.
     // Created once; released in onDispose after all renderers are released.
@@ -102,6 +104,7 @@ fun CallScreenDialog(
     }
 
     var callEnding by remember { mutableStateOf(false) }
+    var videoActive by remember { mutableStateOf(video) }
     var muted by remember { mutableStateOf(false) }
     var cameraOff by remember { mutableStateOf(false) }
     var speakerOn by remember { mutableStateOf(video) } // video → speaker, voice → earpiece
@@ -132,7 +135,7 @@ fun CallScreenDialog(
                             status = event.status
                             when (event.status) {
                                 CallStatus.Connecting -> logLine("• connecting")
-                                CallStatus.Connected -> { errorMessage = null; logLine("• connected (peer up)") }
+                                CallStatus.Connected -> { errorMessage = null; everConnected = true; logLine("• connected (peer up)") }
                                 CallStatus.Reconnecting -> logLine("• reconnecting")
                                 CallStatus.Ended -> logLine("• ended")
                             }
@@ -155,6 +158,12 @@ fun CallScreenDialog(
                         WebRtcEvent.Missed -> {
                             errorMessage = "no answer"
                             logLine("• no answer")
+                            controlsVisible = true
+                            callEnding = true
+                        }
+                        WebRtcEvent.AllPeersLeft -> {
+                            errorMessage = "call ended"
+                            logLine("• everyone left")
                             controlsVisible = true
                             callEnding = true
                         }
@@ -200,8 +209,11 @@ fun CallScreenDialog(
 
     DisposableEffect(Unit) {
         onDispose {
+            if (everConnected) onCallEnded(durationSeconds, videoActive)
             audio.stop()
             client.release()
+            app.pigeonsms.ui.call.ActiveCall.unregister()
+            app.pigeonsms.ui.call.CallForegroundService.stop(context.applicationContext)
             // Renderers release themselves (see AndroidView onRelease); the shared
             // EGL context is released last, after all renderers are gone.
             eglBase.release()
@@ -216,8 +228,8 @@ fun CallScreenDialog(
     }
 
     // Auto-hide controls on video calls after 4s; tap re-shows them.
-    LaunchedEffect(controlsShownAt, video) {
-        if (video && controlsVisible) {
+    LaunchedEffect(controlsShownAt, videoActive) {
+        if (videoActive && controlsVisible) {
             delay(4_000)
             controlsVisible = false
         }
@@ -236,7 +248,7 @@ fun CallScreenDialog(
                     ),
                 ),
         ) {
-            if (video) {
+            if (videoActive) {
                 // Remote video tiles fill the surface; local preview floats.
                 val tiles = remoteTiles.values.toList()
                 if (tiles.isEmpty()) {
@@ -305,7 +317,7 @@ fun CallScreenDialog(
             }
 
             // Tap layer for video calls — toggles the controls.
-            if (video) {
+            if (videoActive) {
                 Box(
                     Modifier
                         .fillMaxSize()
@@ -331,8 +343,8 @@ fun CallScreenDialog(
             )
 
             CallControlBar(
-                visible = controlsVisible || !video,
-                video = video,
+                visible = controlsVisible || !videoActive,
+                video = videoActive,
                 muted = muted,
                 speakerOn = speakerOn,
                 cameraOff = cameraOff,
@@ -353,6 +365,12 @@ fun CallScreenDialog(
                 },
                 onSwitchCamera = {
                     client.switchCamera()
+                    controlsShownAt = System.currentTimeMillis()
+                },
+                onEnableVideo = {
+                    client.enableVideo()
+                    videoActive = true
+                    app.pigeonsms.ui.call.CallForegroundService.start(context.applicationContext, true, title)
                     controlsShownAt = System.currentTimeMillis()
                 },
                 onEndCall = endCall,

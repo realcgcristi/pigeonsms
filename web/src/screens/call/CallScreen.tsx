@@ -11,6 +11,7 @@ import { Screen, TopBar } from '@/components/ui/Layout'
 import { useToast } from '@/components/ui/Toast'
 import { duration } from '@/lib/format'
 import { useSession } from '@/store/session'
+import { useChat } from '@/store/chat'
 import './Call.css'
 
 const FALLBACK_ICE_SERVERS: RTCIceServer[] = [
@@ -77,6 +78,8 @@ export default function CallScreen() {
   const [remote, setRemote] = useState<{ id: string; name: string; stream: MediaStream }[]>([])
   const [started] = useState(() => Date.now())
   const [elapsed, setElapsed] = useState(0)
+  const everConnected = useRef(false)
+  const addCallSummary = useChat((s) => s.addCallSummary)
 
   const publish = useCallback((id: string, participant: CallParticipant, stream: MediaStream) => {
     setRemote((list) => {
@@ -198,22 +201,29 @@ export default function CallScreen() {
         for (const participant of event.participants) {
           participantsRef.current.set(participant.userId, participant)
           if (participant.userId === me?.id) continue
+          everConnected.current = true
           await offerPeer(peerFor(participant, socket), socket)
         }
         return
       }
       if (event.type === 'join') {
         participantsRef.current.set(event.participant.userId, event.participant)
+        everConnected.current = true
         setStatus('connecting...')
         return
       }
       if (event.type === 'leave') {
+        const hadPeers = peers.current.size > 0
         const peer = peers.current.get(event.participant.userId)
         if (peer?.recoveryTimer) window.clearTimeout(peer.recoveryTimer)
         peer?.connection.close()
         peers.current.delete(event.participant.userId)
         participantsRef.current.delete(event.participant.userId)
         setRemote((list) => list.filter((entry) => entry.id !== event.participant.userId))
+        if (hadPeers && peers.current.size === 0) {
+          setStatus('call ended')
+          window.setTimeout(() => navigate(-1), 1200)
+        }
         return
       }
       if (event.type === 'declined') {
@@ -299,6 +309,15 @@ export default function CallScreen() {
 
     return () => {
       cancelled = true
+      if (everConnected.current) {
+        addCallSummary({
+          id: `call-${Date.now()}`,
+          channelId,
+          at: Date.now(),
+          mode,
+          durationSeconds: Math.floor((Date.now() - started) / 1000),
+        })
+      }
       window.clearInterval(timer)
       if (configTimer) window.clearTimeout(configTimer)
       configController?.abort()
@@ -318,7 +337,7 @@ export default function CallScreen() {
       sharedTrack.current = null
       localStream.current = null
     }
-  }, [auth, channelId, mode, me?.id, peerFor, started, toast])
+  }, [auth, channelId, mode, me?.id, peerFor, started, toast, addCallSummary])
 
   const toggleMic = () => {
     const track = localStream.current?.getAudioTracks()[0]

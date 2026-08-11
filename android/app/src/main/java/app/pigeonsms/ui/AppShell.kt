@@ -35,17 +35,24 @@ import androidx.compose.material.icons.rounded.Forum
 import androidx.compose.material.icons.rounded.Groups
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Mood
+import androidx.compose.material.icons.outlined.Call
+import androidx.compose.material.icons.outlined.CallEnd
+import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.Badge
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
@@ -75,6 +82,7 @@ import app.pigeonsms.PigeonApp
 import app.pigeonsms.data.ChatAppearanceStore
 import app.pigeonsms.data.LocalSession
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import app.pigeonsms.design.theme.PigeonMotion
 import app.pigeonsms.design.theme.Spacing
 import app.pigeonsms.ui.chat.ChatScreen
@@ -493,9 +501,53 @@ fun AppShell(session: LocalSession) {
             nav.navigate("chat/${call.channelId}/${enc(call.title)}?space=${call.isSpace}&call=${call.mode}")
             pigeonApp.consumeCallTarget(call)
         }
-        LaunchedEffect(app) {
-            app.incomingCalls.collect { call ->
-                nav.navigate("chat/${call.channelId}/${enc(call.title)}?space=${call.isSpace}&call=${call.mode}")
+        val incomingCall by app.incomingCall.collectAsState()
+        val callScope = rememberCoroutineScope()
+        androidx.compose.animation.AnimatedVisibility(
+            visible = incomingCall != null,
+            enter = fadeIn(PigeonMotion.snappy()) +
+                androidx.compose.animation.slideInVertically(PigeonMotion.snappy()) { -it },
+            exit = fadeOut(tween(140)) + androidx.compose.animation.slideOutVertically(tween(180)) { -it },
+            modifier = Modifier.align(Alignment.TopCenter),
+        ) {
+            val current = incomingCall
+            if (current != null) {
+                Surface(
+                    modifier = Modifier
+                        .statusBarsPadding()
+                        .padding(top = 8.dp, start = 16.dp, end = 16.dp),
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    tonalElevation = 6.dp,
+                    shadowElevation = 8.dp,
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Icon(if (current.mode == "video") Icons.Outlined.Videocam else Icons.Outlined.Call, contentDescription = null)
+                        Text(
+                            "${current.title} is calling",
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.weight(1f),
+                        )
+                        IconButton(onClick = {
+                            callScope.launch {
+                                runCatching { pigeonApp.container.api.declineCall(current.channelId) }
+                            }
+                            app.clearIncomingCall(current)
+                        }) {
+                            Icon(Icons.Outlined.CallEnd, contentDescription = "decline", tint = Color(0xFFE5484D))
+                        }
+                        IconButton(onClick = {
+                            nav.navigate("chat/${current.channelId}/${enc(current.title)}?space=${current.isSpace}&call=${current.mode}")
+                            app.clearIncomingCall(current)
+                        }) {
+                            Icon(Icons.Outlined.Call, contentDescription = "answer", tint = Color(0xFF2FAE5F))
+                        }
+                    }
+                }
             }
         }
         LaunchedEffect(app) {

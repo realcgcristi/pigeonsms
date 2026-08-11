@@ -53,12 +53,22 @@ export interface IncomingCallState {
   callerUsername: string;
 }
 
+export interface CallSummaryEntry {
+  id: string;
+  channelId: string;
+  at: number;
+  mode: 'voice' | 'video';
+  durationSeconds: number;
+}
+
 export interface ChatState {
   channels: Record<string, ChannelState>;
   emoji: SpaceEmojiDto[];
   emojiLoaded: boolean;
   incomingCall: IncomingCallState | null;
   clearIncomingCall: () => void;
+  callSummaries: Record<string, CallSummaryEntry[]>;
+  addCallSummary: (entry: CallSummaryEntry) => void;
   channel: (id: string) => ChannelState;
   load: (channelId: string, force?: boolean, afterSeq?: number) => Promise<void>;
   loadMore: (channelId: string) => Promise<void>;
@@ -161,10 +171,18 @@ export const useChat = create<ChatState>((set, get) => ({
   emoji: [],
   emojiLoaded: false,
   incomingCall: null,
+  callSummaries: {},
 
   channel: (id) => get().channels[id] ?? EMPTY,
 
   clearIncomingCall: () => set({ incomingCall: null }),
+
+  addCallSummary: (entry) => set((s) => ({
+    callSummaries: {
+      ...s.callSummaries,
+      [entry.channelId]: [...(s.callSummaries[entry.channelId] ?? []), entry].slice(-20),
+    },
+  })),
 
   load: async (channelId, force, afterSeq) => {
     const current = get().channels[channelId];

@@ -31,7 +31,7 @@ import { TextField } from '@/components/ui/TextField'
 import { Dialog, Sheet } from '@/components/ui/Overlay'
 import { Screen, TopBar } from '@/components/ui/Layout'
 import { useToast } from '@/components/ui/Toast'
-import { daySeparator, relativeTime, sameDay } from '@/lib/format'
+import { daySeparator, duration as formatDuration, relativeTime, sameDay } from '@/lib/format'
 import { emojiQueryAt } from '@/lib/markdown'
 import { protectAttachment } from '@/lib/e2ee/manager'
 import type { ChatMessage } from '@/store/chat'
@@ -560,6 +560,18 @@ const MessageItem = memo(function MessageItem({
 }) {
   const showDay = !previous || !sameDay(previous.created_at ?? 0, message.created_at ?? 0)
   const showAuthor = !previous || previous.author?.id !== message.author?.id || showDay
+
+  if (message.metadata?.call_summary) {
+    const callMode = message.metadata.call_mode === 'video' ? 'video call' : 'call'
+    const seconds = typeof message.metadata.call_duration === 'number' ? message.metadata.call_duration : 0
+    return (
+      <div id={`message-${message.id}`} className="chat__message-anchor">
+        {showDay ? <div className="chat__day">{daySeparator(message.created_at ?? 0)}</div> : null}
+        <div className="chat__call-summary">{callMode} ended · {formatDuration(seconds * 1000)}</div>
+      </div>
+    )
+  }
+
   return (
     <div id={`message-${message.id}`} className="chat__message-anchor">
       {showDay ? <div className="chat__day">{daySeparator(message.created_at ?? 0)}</div> : null}
@@ -609,6 +621,7 @@ export default function ChatScreen() {
   const clearUnread = useSocial((s) => s.clearUnread)
 
   const messages = useChat((s) => s.channels[channelId]?.messages)
+  const callSummaries = useChat((s) => s.callSummaries[channelId])
   const typing = useChat((s) => s.channels[channelId]?.typing)
   const read = useChat((s) => s.channels[channelId]?.read)
   const error = useChat((s) => s.channels[channelId]?.error)
@@ -670,7 +683,21 @@ export default function ChatScreen() {
     dm?.peer.display_name ??
     dm?.peer.username ??
     'chat'
-  const list = messages ?? []
+  const list = useMemo(() => {
+    const base = messages ?? []
+    const summaries = callSummaries ?? []
+    if (!summaries.length) return base
+    const synthetic: ChatMessage[] = summaries.map((entry) => ({
+      id: entry.id,
+      channel_id: entry.channelId,
+      author: { id: 'system', username: 'system' },
+      content: '',
+      created_at: entry.at,
+      state: 'sent',
+      metadata: { call_summary: true, call_mode: entry.mode, call_duration: entry.durationSeconds },
+    }))
+    return [...base, ...synthetic].sort((a, b) => (a.created_at ?? 0) - (b.created_at ?? 0))
+  }, [messages, callSummaries])
   const targetMessageId = params.get('message')
 
   useEffect(() => {

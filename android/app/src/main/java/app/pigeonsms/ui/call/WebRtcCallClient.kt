@@ -126,13 +126,15 @@ class WebRtcCallClient(
         audioSource = factory.createAudioSource(MediaConstraints())
         audioTrack = factory.createAudioTrack("pigeon-audio", audioSource).apply { setEnabled(true) }
         onEvent(WebRtcEvent.Phase("microphone ready"))
-        if (!video) return
+        if (video) acquireCamera()
+    }
 
+    private fun acquireCamera(): VideoTrack? {
         val enumerator = Camera2Enumerator(appContext)
         val deviceName = pickCamera(enumerator, true) ?: enumerator.deviceNames.firstOrNull()
         if (deviceName == null) {
-            onEvent(WebRtcEvent.Phase("audio only"))
-            return
+            onEvent(WebRtcEvent.Phase("no camera available"))
+            return null
         }
         frontFacing = enumerator.isFrontFacing(deviceName)
         val nextCapturer = enumerator.createCapturer(deviceName, null)
@@ -146,6 +148,20 @@ class WebRtcCallClient(
         videoTrack = track
         localVideoTrack = track
         onEvent(WebRtcEvent.Phase("camera ready"))
+        return track
+    }
+
+    fun enableVideo() {
+        scope.launch {
+            if (videoTrack != null) return@launch
+            val track = acquireCamera() ?: return@launch
+            val peerIds = synchronized(lock) {
+                peers.forEach { (_, state) -> runCatching { state.connection.addTrack(track, listOf("pigeon-stream")) } }
+                peers.keys.toList()
+            }
+            peerIds.forEach { createOffer(it, false) }
+            signal(JSONObject().put("type", "camera").put("data", JSONObject().put("on", true)).toString())
+        }
     }
 
     private fun pickCamera(enumerator: Camera2Enumerator, front: Boolean): String? =
@@ -258,7 +274,12 @@ class WebRtcCallClient(
                 createPeer(peerId)
                 if (selfId < peerId) createOffer(peerId, false)
             }
-            "leave" -> dropPeer(message.optJSONObject("participant")?.optString("userId").orEmpty())
+            "leave" -> {
+                val hadPeers = synchronized(lock) { peers.isNotEmpty() }
+                dropPeer(message.optJSONObject("participant")?.optString("userId").orEmpty())
+                val remaining = synchronized(lock) { peers.size }
+                if (hadPeers && remaining == 0) onEvent(WebRtcEvent.AllPeersLeft)
+            }
             "offer" -> acceptOffer(message)
             "answer" -> acceptAnswer(message)
             "ice" -> acceptIce(message)
@@ -568,4 +589,5 @@ sealed interface WebRtcEvent {
     data object MediaReady : WebRtcEvent
     data object Declined : WebRtcEvent
     data object Missed : WebRtcEvent
+    data object AllPeersLeft : WebRtcEvent
 }

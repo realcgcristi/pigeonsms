@@ -155,6 +155,7 @@ fun CallControlBar(
     onToggleSpeaker: () -> Unit,
     onToggleCamera: () -> Unit,
     onSwitchCamera: () -> Unit,
+    onEnableVideo: () -> Unit,
     onEndCall: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -195,6 +196,13 @@ fun CallControlBar(
                     description = "flip camera",
                     active = false,
                     onClick = onSwitchCamera,
+                )
+            } else {
+                CallControlButton(
+                    icon = Icons.Outlined.Videocam,
+                    description = "turn on camera",
+                    active = false,
+                    onClick = onEnableVideo,
                 )
             }
             // end call — red, always last

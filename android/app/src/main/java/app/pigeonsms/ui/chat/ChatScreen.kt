@@ -261,6 +261,8 @@ private val reportCategories = listOf(
 )
 private val reactionChoices = listOf("👍", "❤️", "😂", "🎉", "🐦", "🔥")
 
+private data class CallSummaryEntry(val id: String, val video: Boolean, val durationSeconds: Long)
+
 @OptIn(ExperimentalLayoutApi::class, androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun ChatScreen(
@@ -293,6 +295,7 @@ fun ChatScreen(
     }
     val messages by vm.messages.collectAsState()
     val ui by vm.ui.collectAsState()
+    val callSummaries = remember { androidx.compose.runtime.mutableStateListOf<CallSummaryEntry>() }
     // This nest's custom emoji (2.9.5) — needed both to offer them in the picker
     // and to render `custom:<id>` reactions other people have already left.
     val customEmoji by vm.customEmoji.collectAsState()
@@ -596,6 +599,15 @@ fun ChatScreen(
                         )
                         }
                     }
+                    items(callSummaries, key = { it.id }) { entry ->
+                        Box(Modifier.fillMaxWidth().padding(vertical = Spacing.s), contentAlignment = Alignment.Center) {
+                            Text(
+                                "${if (entry.video) "video call" else "call"} ended · ${app.pigeonsms.ui.call.formatCallDuration(entry.durationSeconds)}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
                 }
             }
             }
@@ -882,6 +894,9 @@ fun ChatScreen(
                 video = video,
                 title = title,
                 onDismiss = { callVideo = null },
+                onCallEnded = { durationSeconds, videoCall ->
+                    callSummaries.add(CallSummaryEntry("call-${System.currentTimeMillis()}", videoCall, durationSeconds))
+                },
             )
         }
     }

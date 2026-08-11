@@ -65,8 +65,12 @@ class AppViewModel(
     val pings: SharedFlow<IncomingPing> = _pings
 
     data class IncomingCall(val channelId: String, val title: String, val mode: String, val isSpace: Boolean)
-    private val _incomingCalls = MutableSharedFlow<IncomingCall>(extraBufferCapacity = 4)
-    val incomingCalls: SharedFlow<IncomingCall> = _incomingCalls
+    private val _incomingCall = MutableStateFlow<IncomingCall?>(null)
+    val incomingCall: StateFlow<IncomingCall?> = _incomingCall
+
+    fun clearIncomingCall(call: IncomingCall? = _incomingCall.value) {
+        if (call != null && _incomingCall.value == call) _incomingCall.value = null
+    }
     private var dmsJob: Job? = null
     private var friendsJob: Job? = null
     private var spacesJob: Job? = null
@@ -156,7 +160,13 @@ class AppViewModel(
                         val callerUsername = d["from"]?.jsonObject?.get("username")?.jsonPrimitive?.content ?: "someone"
                         if (channelId != null) {
                             val isSpaceChannel = _home.value.spaces.any { space -> space.channels.any { it.id == channelId } }
-                            _incomingCalls.tryEmit(IncomingCall(channelId, "@$callerUsername", mode, isSpaceChannel))
+                            _incomingCall.value = IncomingCall(channelId, "@$callerUsername", mode, isSpaceChannel)
+                        }
+                    }
+                    "call.missed" -> {
+                        val channelId = ev.d.jsonObject["channelId"]?.jsonPrimitive?.content
+                        if (channelId != null && _incomingCall.value?.channelId == channelId) {
+                            _incomingCall.value = null
                         }
                     }
                     "poll.update" -> {
