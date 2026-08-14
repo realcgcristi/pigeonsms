@@ -1,5 +1,10 @@
 # changelog
 
+## v3.0.1
+
+- adds 22 app-wide "PigeonSMS" emoji — `:cold:`, `:angel:`, `:sweaty:`, `:shock:`, `:programmer:`, `:hot:`, `:cry:`, `:inlove:`, `:happy:`, `:dead:`, `:content:`, `:confused:`, `:reallyhappy:`, `:angry:`, `:angrier:`, `:unamused:`, `:thinking:`, `:surprised:`, `:sob:`, `:sad:`, `:rollingeyes:`, `:larpingthelogo:` — usable by everyone, everywhere, no nest required
+- fixes a privacy bug: a chat backgrounded (app minimized on android, tab hidden/unfocused on web) could still mark new messages as read/seen the instant they arrived over the socket, even though nobody was actually looking. read receipts now only fire while the chat is genuinely in the foreground.
+
 ## v3.0.0
 
 - calls: fixed. the incoming-call notification stuck around (and could re-ring) after you'd already answered — it's cancelled the moment the call opens now
