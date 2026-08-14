@@ -74,11 +74,14 @@ jobs:
         working-directory: android
         run: ./gradlew :app:testReleaseUnitTest :app:assembleRelease --no-daemon --stacktrace
       - name: prepare apk
-        run: cp android/app/build/outputs/apk/release/app-release.apk PigeonSMS_3.0.0_android.apk
+        run: |
+          version=$(grep -oP 'versionName\s*=\s*"\K[^"]+' android/app/build.gradle.kts)
+          echo "version=$version" >> "$GITHUB_ENV"
+          cp android/app/build/outputs/apk/release/app-release.apk "PigeonSMS_${version}_android.apk"
       - uses: actions/upload-artifact@v4
         with:
-          name: pigeonsms-v3.0.0-android
-          path: PigeonSMS_3.0.0_android.apk
+          name: pigeonsms-${{ env.version }}-android
+          path: PigeonSMS_${{ env.version }}_android.apk
           if-no-files-found: error
 
   windows:
@@ -112,6 +115,7 @@ jobs:
           $signaturePath = "$($installer.FullName).sig"
           if (-not (Test-Path -LiteralPath $signaturePath)) { throw 'updater signature was not produced' }
           $version = (Get-Content desktop/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          Add-Content -Path $env:GITHUB_ENV -Value "version=$version"
           $assetName = "PigeonSMS_${version}_x64-setup.exe"
           Copy-Item -LiteralPath $installer.FullName -Destination $assetName
           Copy-Item -LiteralPath $signaturePath -Destination "$assetName.sig"
@@ -129,7 +133,7 @@ jobs:
           $manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath latest.json -Encoding utf8
       - uses: actions/upload-artifact@v4
         with:
-          name: pigeonsms-v3.0.0-windows
+          name: pigeonsms-${{ env.version }}-windows
           path: |
             PigeonSMS_*.exe
             PigeonSMS_*.exe.sig
@@ -150,11 +154,11 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          name: PigeonSMS v3.0.0
+          name: PigeonSMS ${{ github.ref_name }}
           prerelease: false
           generate_release_notes: true
           body: |
-            v3.0.0 is the official v3 release: ratcheted end-to-end encrypted messaging, nest shield moderation, nest time machine, key transparency, networkless nearby messaging, a native Windows client, and the public Open Pigeon protocol + sdks — plus calls are fixed and reliable, background and network changes included.
+            See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for what's in this release.
 
             included:
             - Android release APK
