@@ -182,6 +182,40 @@ export async function serializeMessages(
       });
     }
   }
+  // App-wide "PigeonSMS" emoji (v3.0.1) — usable and visible everywhere, no nest
+  // scoping needed. Only look up whatever the space_emojis pass above didn't
+  // already resolve.
+  {
+    const remainingIds = [...emojiIds].filter((id) => !customEmoji.has(id));
+    const resolvedNames = new Set([...customEmoji.values()].map((e) => e.name));
+    const remainingNames = [...shortcodes].filter((name) => !resolvedNames.has(name));
+    if (remainingIds.length || remainingNames.length) {
+      const clauses: string[] = [];
+      const binds: unknown[] = [];
+      if (remainingIds.length) {
+        clauses.push(`id IN (${ph(remainingIds.length)})`);
+        binds.push(...remainingIds);
+      }
+      if (remainingNames.length) {
+        clauses.push(`name IN (${ph(remainingNames.length)})`);
+        binds.push(...remainingNames);
+      }
+      const { results } = await env.DB.prepare(
+        `SELECT id, name, kind, media_key, animated FROM global_emojis WHERE ${clauses.join(' OR ')} LIMIT 300`,
+      )
+        .bind(...binds)
+        .all<{ id: string; name: string; kind: string; media_key: string; animated: number }>();
+      for (const row of results) {
+        customEmoji.set(row.id, {
+          id: row.id,
+          name: row.name,
+          kind: row.kind,
+          media_key: row.media_key,
+          animated: Number(row.animated) === 1,
+        });
+      }
+    }
+  }
   const customEmojiList = [...customEmoji.values()];
 
   const revisions = new Map<string, { content: string; edited_at: number }[]>();
@@ -440,14 +474,19 @@ async function mutateReaction(c: Context<AppEnv>, action: 'add' | 'remove'): Pro
     // left the room they live in, which is not how people expect them to work.
     // Membership is still required, so this can't be used to probe or hotlink
     // emoji from a nest you don't belong to.
+    const emojiId = emoji.slice('custom:'.length);
     const known = await c.env.DB.prepare(
       `SELECT 1 FROM space_emojis se
        JOIN space_members sm ON sm.space_id = se.space_id AND sm.user_id = ?
        WHERE se.id = ?`,
     )
-      .bind(user.id, emoji.slice('custom:'.length))
+      .bind(user.id, emojiId)
       .first();
-    if (!known) throw new ApiError(400, 'bad_emoji', 'that emoji is not one of yours');
+    // App-wide emoji need no membership check — anyone can react with one.
+    const knownGlobal = known
+      ? null
+      : await c.env.DB.prepare('SELECT 1 FROM global_emojis WHERE id = ?').bind(emojiId).first();
+    if (!known && !knownGlobal) throw new ApiError(400, 'bad_emoji', 'that emoji is not one of yours');
   }
 
   const result = action === 'add'
@@ -620,12 +659,27 @@ messages.post('/channels/:id/messages', async (c) => {
       )
         .bind(user.id, ...names)
         .all<{ id: string; name: string; kind: string; media_key: string }>();
-      if (results.length) {
+      let resolved = results;
+      // App-wide emoji need no membership check — only look up shortcodes the
+      // sender's own nests didn't already claim, so a nest can still shadow a
+      // global name with its own emoji of the same name.
+      const stillUnresolved = names.filter((n) => !resolved.some((r) => r.name === n));
+      if (stillUnresolved.length) {
+        const { results: globalResults } = await c.env.DB.prepare(
+          `SELECT id, name, kind, media_key FROM global_emojis
+           WHERE name IN (${stillUnresolved.map(() => '?').join(', ')})
+           LIMIT 100`,
+        )
+          .bind(...stillUnresolved)
+          .all<{ id: string; name: string; kind: string; media_key: string }>();
+        resolved = [...resolved, ...globalResults];
+      }
+      if (resolved.length) {
         metadata = {
           ...(metadata ?? {}),
           // First match wins if two of your nests share a shortcode — arbitrary,
           // but stable, and the alternative is refusing to render either.
-          emoji: results.filter((row, i) => results.findIndex((r) => r.name === row.name) === i),
+          emoji: resolved.filter((row, i) => resolved.findIndex((r) => r.name === row.name) === i),
         };
       }
     }

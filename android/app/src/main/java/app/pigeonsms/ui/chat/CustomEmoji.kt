@@ -268,7 +268,8 @@ fun EmojiStickerPicker(
             // 2.9.6: grouped by nest. One flat wall of images is unusable once you
             // belong to more than a couple of nests.
             val grouped = remember(shown) {
-                shown.groupBy { it.space_name ?: "other" }.toSortedMap()
+                shown.groupBy { it.space_name ?: "other" }
+                    .toSortedMap(compareBy({ it != "PigeonSMS" }, { it }))
             }
             if (shown.isEmpty()) {
                 Text(

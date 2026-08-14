@@ -638,7 +638,13 @@ spaces.get('/emojis/mine', async (c) => {
      FROM space_emojis se
      JOIN space_members sm ON sm.space_id = se.space_id AND sm.user_id = ?
      JOIN spaces s ON s.id = se.space_id AND s.deleted_at IS NULL
-     ORDER BY s.name, se.kind, se.name, se.created_at
+     UNION ALL
+     -- v3.0.1: app-wide emoji, same shape, no membership required — sorted
+     -- ahead of every nest group below.
+     SELECT ge.id, NULL AS space_id, ge.name, ge.kind, ge.media_key, ge.content_type,
+            ge.animated, ge.created_by, ge.created_at, 'PigeonSMS' AS space_name
+     FROM global_emojis ge
+     ORDER BY (CASE WHEN space_name = 'PigeonSMS' THEN 0 ELSE 1 END), space_name, kind, name, created_at
      LIMIT 1000`,
   )
     .bind(user.id)
@@ -647,7 +653,10 @@ spaces.get('/emojis/mine', async (c) => {
   return c.json({
     emojis: results.map((row) => ({
       id: row['id'],
-      space_id: row['space_id'],
+      // Omit rather than send an explicit null — global rows have no owning
+      // nest, and an omitted key lets both clients' non-nullable-with-default
+      // DTO field fall back cleanly instead of failing to parse a null string.
+      space_id: row['space_id'] ?? undefined,
       name: row['name'],
       kind: row['kind'],
       media_key: row['media_key'],
