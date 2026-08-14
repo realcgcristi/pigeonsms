@@ -1,6 +1,7 @@
 package app.pigeonsms
 
 import android.app.Application
+import android.app.NotificationManager
 import android.content.Intent
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -35,7 +36,13 @@ class PigeonApp : Application(), ImageLoaderFactory {
 
     fun publishIntent(intent: Intent?) {
         intent?.notificationTargetOrNull()?.let { _pendingNotificationTarget.value = it }
-        intent?.callTargetOrNull()?.let { _pendingCallTarget.value = it }
+        intent?.callTargetOrNull()?.let { target ->
+            _pendingCallTarget.value = target
+            // Answering via the incoming-call notification (content or full-screen intent)
+            // launches this activity directly, so setOngoing(true) leaves the ringing
+            // notification on screen until timeout unless we cancel it here ourselves.
+            getSystemService(NotificationManager::class.java)?.cancel(ringNotificationId(target.channelId))
+        }
         intent?.dataString
             ?.takeIf { app.pigeonsms.pairing.PairingLinks.parse(it) != null }
             ?.let { _pendingPairingLink.value = it }
