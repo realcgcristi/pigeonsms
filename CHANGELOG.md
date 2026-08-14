@@ -1,5 +1,10 @@
 # changelog
 
+## v3.0.0
+
+- calls: fixed. the incoming-call notification stuck around (and could re-ring) after you'd already answered — it's cancelled the moment the call opens now
+- official v3 release: ratcheted e2ee, nest shield, nest time machine, key transparency, networkless messaging, the native windows client, and the public Open Pigeon protocol + sdks, all shipped
+
 ## v3-rc3
 
 - completes ratcheted end-to-end encrypted messaging and recovery across web and android

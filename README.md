@@ -27,8 +27,6 @@
 
 so this is pigeonsms, a chat app i've been chipping away at for the past couple weeks. android app plus a backend that lives entirely on cloudflare. dms, group servers (i call them "nests"), the whole thing
 
-**small, small pause, out of ideas mostly and also out of things to add/change, calls i just can't properly get working, it is a headache**
-
 it's a passion project, built with privacy in mind — a way for friend groups to chat on a platform they actually control. you can self-host the whole thing (it's all here, gpl'd), or just use the instance i already run at pigeonsms.aldi.best. no ads, no tracking, no data mining, no premium tier gating features behind a paywall. it's yours.
 
 
@@ -93,11 +91,9 @@ it started as a "i bet i can build a messenger in a weekend" kind of idea and uh
 - open pigeon discovery, schemas, fixtures, compatibility checks, and official TypeScript, Kotlin, and Rust sdks live in `protocol/` and `packages/`
 - bots are real accounts with their own rest surface: slash commands (global or per-nest, typed options), webhook or long-poll delivery, signed callbacks, and official sdks in all three languages. [`BOTS.md`](BOTS.md) is the full author guide, [`examples/echo-bot/`](examples/echo-bot/) runs in about five minutes
 
-## the one thing that doesn't work: calls
+## calls
 
-voice/video calls are **broken** and i'm putting that right up top so nobody's surprised. it's webrtc — media capture on android has been a genuine nightmare. it went: webview + getUserMedia (died with NotReadableError on real devices) → native webrtc via org.webrtc (better, still fails to open the mic on some hardware). the signaling (durable-object call rooms) and the whole UI are done and wired; it's specifically the media/mic layer that won't cooperate, and there's no TURN server so anything cross-NAT won't connect anyway.
-
-**i'm very open to pull requests here.** if you know android webrtc / audio internals and want to make calls actually work, please, i'm begging. it's a terror to fix and i've burned a lot of hours on it. everything else around it is ready for you.
+calls are fixed. it was a long road — webview + getUserMedia died with NotReadableError on real devices, then native webrtc via org.webrtc still wouldn't open the mic on some hardware — but native webrtc, runtime turn credentials, ice restarts and reconnecting signaling got it to a place where it just works now, background and network changes included.
 
 ## how it's built
 
@@ -194,7 +190,6 @@ being honest since someone's gonna read the code anyway
 
 - `messages.ts` is like 1100 lines. it started clean i promise. it is no longer clean
 - coverage is still lighter than a big production chat app, but backend, web, protocol fixtures, sdk, bridge, and compatibility checks run in ci
-- calls (see the section above) — the big one. help wanted
 - error handling is inconsistent, some paths retry nicely and some just swallow the error and move on. sorry
 - the liquid glass eats a bit of gpu on cheap phones, there's a fallback but it's not perfect
 - migrations are numbered sql files tracked by wrangler; keep them additive and apply them before deploying a new worker
@@ -208,14 +203,13 @@ the short version (full thing in [ROADMAP.md](ROADMAP.md)):
 
 - **v3 beta foundation** — jump-to-unread, channel categories, public protocol discovery, compatibility fixtures, and official TypeScript, Kotlin, and Rust sdks are shipped.
 - **v3 release candidate** — encrypted local-first messaging, networkless nearby delivery, nest time machine, key transparency, expiring branches, pigeon packs, whole-nest migration, scoped bridges, encrypted bot runtimes, and the public compatibility lab are shipped behind Open Pigeon contracts.
-- **next gates** — reliable calls with TURN, signed desktop releases, offline conflict tests, moderation workflows, and production sdk publishing.
+- **v3.0.0** — calls fixed and reliable, signed desktop releases. shipped.
+- **next gates** — offline conflict tests, moderation workflows, and production sdk publishing.
 - **someday** — federation between self-hosted instances.
-
-calls are the #1 priority and the thing i most want help with (see [CONTRIBUTING.md](CONTRIBUTING.md)).
 
 ## contributing & security
 
-PRs welcome — especially on calls. see [CONTRIBUTING.md](CONTRIBUTING.md). found a security issue? see [SECURITY.md](SECURITY.md) (report privately, don't open an issue).
+PRs welcome. see [CONTRIBUTING.md](CONTRIBUTING.md). found a security issue? see [SECURITY.md](SECURITY.md) (report privately, don't open an issue).
 
 ## license
 

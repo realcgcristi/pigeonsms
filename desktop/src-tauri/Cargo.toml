@@ -1,6 +1,6 @@
 [package]
 name = "pigeonsms-desktop"
-version = "3.0.0-rc.3"
+version = "3.0.0"
 description = "Native Windows client for PigeonSMS"
 authors = ["realcgcristi"]
 edition = "2021"
