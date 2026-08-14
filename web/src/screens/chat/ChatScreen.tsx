@@ -754,7 +754,10 @@ export default function ChatScreen() {
 
   useEffect(() => {
     if (!list.length) return
-    markRead(channelId)
+    // Don't tell the server (and thus the other side) a message was seen
+    // just because the tab is open in the background — only a visible,
+    // focused tab counts as actually looking at it.
+    if (document.visibilityState === 'visible' && document.hasFocus()) markRead(channelId)
     clearUnread(channelId)
     const key = `${channelId}:${targetMessageId ?? ''}`
     if (positionedRef.current === key) return
@@ -791,6 +794,21 @@ export default function ChatScreen() {
       window.clearTimeout(highlight)
     }
   }, [channelId, clearUnread, list, markRead, targetMessageId, unreadStart])
+
+  // Catch up on the read receipt once the tab is actually looked at again —
+  // messages that arrived while it was backgrounded shouldn't count as seen
+  // until this fires.
+  useEffect(() => {
+    const markIfVisible = () => {
+      if (document.visibilityState === 'visible' && document.hasFocus()) markRead(channelId)
+    }
+    document.addEventListener('visibilitychange', markIfVisible)
+    window.addEventListener('focus', markIfVisible)
+    return () => {
+      document.removeEventListener('visibilitychange', markIfVisible)
+      window.removeEventListener('focus', markIfVisible)
+    }
+  }, [channelId, markRead])
 
   const jumpToUnread = useCallback(() => {
     if (unreadStart === undefined) return

@@ -212,6 +212,9 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.material.icons.outlined.GraphicEq
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
@@ -396,23 +399,30 @@ fun ChatScreen(
             .collect { unseenWhileUp = 0 }
     }
 
-    LaunchedEffect(listState, positioned, messages) {
+    val lifecycleOwner = LocalLifecycleOwner.current
+    LaunchedEffect(listState, positioned, messages, lifecycleOwner) {
         val latestReadable = messages.lastOrNull {
             it.seq > 0 && it.seq < Long.MAX_VALUE / 4
         } ?: return@LaunchedEffect
         if (!positioned) return@LaunchedEffect
 
-        snapshotFlow {
-            listState.layoutInfo.visibleItemsInfo.any { it.key == latestReadable.id }
-        }
-            .distinctUntilChanged()
-            .filter { it }
-            .collect {
-                if (latestReadable.seq > lastReadSeq && themePrefs.readReceipts) {
-                    lastReadSeq = latestReadable.seq
-                    vm.markRead(latestReadable.seq)
-                }
+        // Only send a read receipt while the screen is actually on-screen and
+        // resumed — backgrounding the app (home button, screen lock, switching
+        // apps) must not mark messages as seen just because they're still laid
+        // out as "visible" in the LazyColumn underneath.
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            snapshotFlow {
+                listState.layoutInfo.visibleItemsInfo.any { it.key == latestReadable.id }
             }
+                .distinctUntilChanged()
+                .filter { it }
+                .collect {
+                    if (latestReadable.seq > lastReadSeq && themePrefs.readReceipts) {
+                        lastReadSeq = latestReadable.seq
+                        vm.markRead(latestReadable.seq)
+                    }
+                }
+        }
     }
 
     LaunchedEffect(listState) {
