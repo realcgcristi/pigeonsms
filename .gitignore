@@ -23,3 +23,6 @@ packages/sdk-rust/target/
 packages/sdk-typescript/dist/
 packages/sdk-kotlin/build/
 protocol/lab/site/
+
+# local-only notes, never published
+CODE_AUDIT.md
