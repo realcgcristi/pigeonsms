@@ -634,17 +634,20 @@ spaces.get('/emojis/mine', async (c) => {
   const user = c.get('user') as AuthedUser;
   const { results } = await c.env.DB.prepare(
     `SELECT se.id, se.space_id, se.name, se.kind, se.media_key, se.content_type,
-            se.animated, se.created_by, se.created_at, s.name AS space_name
+            se.animated, se.created_by, se.created_at, s.name AS space_name, 1 AS sort_group
      FROM space_emojis se
      JOIN space_members sm ON sm.space_id = se.space_id AND sm.user_id = ?
      JOIN spaces s ON s.id = se.space_id AND s.deleted_at IS NULL
      UNION ALL
-     -- v3.0.1: app-wide emoji, same shape, no membership required — sorted
-     -- ahead of every nest group below.
+     -- v3.0.1: app-wide emoji, same shape, no membership required — sort_group
+     -- 0 sorts these ahead of every nest group below. (A CASE expression in
+     -- ORDER BY referencing a compound-query column alias isn't valid SQLite
+     -- syntax -- "1st ORDER BY term does not match any column in the result
+     -- set" -- hence baking the sort key into the SELECT list instead.)
      SELECT ge.id, NULL AS space_id, ge.name, ge.kind, ge.media_key, ge.content_type,
-            ge.animated, ge.created_by, ge.created_at, 'PigeonSMS' AS space_name
+            ge.animated, ge.created_by, ge.created_at, 'PigeonSMS' AS space_name, 0 AS sort_group
      FROM global_emojis ge
-     ORDER BY (CASE WHEN space_name = 'PigeonSMS' THEN 0 ELSE 1 END), space_name, kind, name, created_at
+     ORDER BY sort_group, space_name, kind, name, created_at
      LIMIT 1000`,
   )
     .bind(user.id)
